@@ -13,6 +13,7 @@ type ScanReport struct {
 
 type ScanResult struct {
 	Target          string          `json:"Target"`
+	Type            string          `json:"Type"`
 	Vulnerabilities []Vulnerability `json:"Vulnerabilities"`
 }
 
@@ -42,6 +43,7 @@ type CVSSInfo struct {
 type Report struct {
 	SBOM            any
 	Vulnerabilities []Vulnerability
+	Results         []ScanResult
 }
 
 type Vulnerability struct {
@@ -58,4 +60,8 @@ type Vulnerability struct {
 	Layer            *Layer              `json:"Layer"`
 	CVSS             map[string]CVSSInfo `json:"CVSS"`
 	CweIDs           []string            `json:"CweIDs"`
+
+	// optional extra information
+	Target string `json:"-"`
+	Type   string `json:"-"`
 }

@@ -134,18 +134,48 @@ func (w *wrapper) parseReport(format Format, reportFile io.Reader) (Report, erro
 
 func (w *wrapper) parseJSONReport(reportFile io.Reader) (Report, error) {
 	var scanReport ScanReport
+
 	if err := json.NewDecoder(reportFile).Decode(&scanReport); err != nil {
 		return Report{}, xerrors.Errorf("report json decode error: %w", err)
 	}
 
 	if scanReport.SchemaVersion != SchemaVersion {
-		return Report{}, xerrors.Errorf("unsupported schema %d, expected %d", scanReport.SchemaVersion, SchemaVersion)
+		return Report{}, xerrors.Errorf(
+			"unsupported schema %d, expected %d",
+			scanReport.SchemaVersion,
+			SchemaVersion,
+		)
+	}
+
+	// DEBUG: dump full trivy report
+	data, err := json.MarshalIndent(scanReport, "", "  ")
+	if err == nil {
+		slog.Info("FULL TRIVY REPORT",
+			slog.String("report", string(data)),
+		)
 	}
 
 	var vulnerabilities []Vulnerability
+
 	for _, scanResult := range scanReport.Results {
-		slog.Debug("Parsing vulnerabilities", slog.String("target", scanResult.Target))
-		vulnerabilities = append(vulnerabilities, scanResult.Vulnerabilities...)
+		slog.Info("Trivy result detected",
+			slog.String("target", scanResult.Target),
+			slog.String("type", scanResult.Type),
+		)
+
+		for _, vuln := range scanResult.Vulnerabilities {
+			vuln.Target = scanResult.Target
+			vuln.Type = scanResult.Type
+
+			slog.Info("Trivy vulnerability",
+				slog.String("id", vuln.VulnerabilityID),
+				slog.String("package", vuln.PkgName),
+				slog.String("target", vuln.Target),
+				slog.String("type", vuln.Type),
+			)
+
+			vulnerabilities = append(vulnerabilities, vuln)
+		}
 	}
 
 	return Report{

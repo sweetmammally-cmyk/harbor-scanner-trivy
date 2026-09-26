@@ -1,7 +1,26 @@
 # That's the only place where you're supposed to specify version of Trivy.
 ARG TRIVY_VERSION=0.74.0
+ARG SKAFFOLD_GO_GCFLAGS
+
+FROM golang:1.26 AS builder
+
+ENV GOPROXY=https://package-mirror.liara.ir/repository/go/
+ENV GOSUMDB=off
+
+WORKDIR /go/src/github.com/aquasecurity/harbor-scanner-trivy
+
+# Download Go dependencies first
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the entire project and build it.
+COPY cmd/ ./cmd
+COPY pkg/ ./pkg
+RUN CGO_ENABLED=0 go build -gcflags="${SKAFFOLD_GO_GCFLAGS}" -o scanner-trivy cmd/scanner-trivy/main.go
 
 FROM aquasec/trivy:${TRIVY_VERSION}
+
+ENV GOTRACEBACK=all
 
 # An ARG declared before a FROM is outside of a build stage, so it can't be used in any
 # instruction after a FROM. To use the default value of an ARG declared before the first
@@ -10,7 +29,7 @@ ARG TRIVY_VERSION
 
 RUN adduser -u 10000 -D -g '' scanner scanner
 
-COPY scanner-trivy /home/scanner/bin/scanner-trivy
+COPY --from=builder /go/src/github.com/aquasecurity/harbor-scanner-trivy/scanner-trivy /home/scanner/bin/scanner-trivy
 
 ENV TRIVY_VERSION=${TRIVY_VERSION}
 

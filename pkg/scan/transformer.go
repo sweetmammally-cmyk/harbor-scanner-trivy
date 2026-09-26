@@ -77,7 +77,7 @@ func (t *transformer) transformVulnerabilities(source []trivy.Vulnerability) []h
 			Links:            t.toLinks(v.PrimaryURL, v.References),
 			Layer:            t.toHarborLayer(v.Layer),
 			CweIDs:           v.CweIDs,
-			VendorAttributes: t.toVendorAttributes(v.CVSS),
+			VendorAttributes: t.toVendorAttributes(v),
 		}
 	})
 }
@@ -121,11 +121,18 @@ func (t *transformer) toHarborSeverity(severity string) harbor.Severity {
 	return harborSev
 }
 
-func (t *transformer) toVendorAttributes(info map[string]trivy.CVSSInfo) map[string]interface{} {
+func (t *transformer) toVendorAttributes(v trivy.Vulnerability) map[string]interface{} {
 	attributes := make(map[string]interface{})
-	if len(info) > 0 {
-		attributes["CVSS"] = info
+
+	if len(v.CVSS) > 0 {
+		attributes["CVSS"] = v.CVSS
 	}
+
+	attributes["Trivy"] = map[string]string{
+		"Target": v.Target,
+		"Type":   v.Type,
+	}
+
 	return attributes
 }
 
