@@ -16,4 +16,5 @@ Vagrant.configure("2") do |config|
   config.vm.provision "install-harbor", type: "shell", path: "vagrant/install-harbor.sh"
 
   config.vm.network :forwarded_port, guest: 80, host: 8181
-end
+end   
+     
