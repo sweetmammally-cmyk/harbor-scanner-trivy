@@ -2,8 +2,15 @@ package dbmgr
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"strings"
 	"time"
+
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 )
 
 // StageResult is the outcome of one pre-check stage (DEMAND section 7.3).
@@ -58,4 +65,158 @@ func runStage(ctx context.Context, result *CheckResult, stage string, timeout ti
 
 	result.Stages = append(result.Stages, stageResult)
 	return stageResult.OK
+}
+
+// Precheck checks one DB source before any upstream check or download
+// (DEMAND section 7.3). Stages run in order and stop at the first failure:
+// dns, connect, tls, http (GET /v2/) and manifest. Each stage has its own
+// timeout and the whole check is bounded by cfg.PrecheckTimeoutTotal.
+func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (result CheckResult) {
+	result = CheckResult{Source: source.String(), StartedAt: time.Now()}
+	// result is a named return value, so this also sets the duration on every early return.
+	defer func() {
+		result.Duration = time.Since(result.StartedAt)
+	}()
+
+	ctx, cancel := context.WithTimeout(ctx, cfg.PrecheckTimeoutTotal)
+	defer cancel()
+
+	ref, err := parseRepository(source.Repository)
+	if err != nil {
+		result.Stages = append(result.Stages, StageResult{Stage: "config", Detail: err.Error()})
+		return result
+	}
+
+	// For a direct route we resolve the registry host and connect to the first address.
+	// For a proxy route the proxy resolves the name, so the dns stage is skipped.
+	dialAddr := ref.Addr
+	if source.Proxy != nil {
+		result.Stages = append(result.Stages, StageResult{
+			Stage:   "dns",
+			OK:      true,
+			Skipped: true,
+			Detail:  "proxy route: the proxy resolves " + ref.Host,
+		})
+	} else {
+		ok := runStage(ctx, &result, "dns", cfg.PrecheckTimeoutDNS, func(ctx context.Context) (string, error) {
+			host, port, err := net.SplitHostPort(ref.Addr)
+			if err != nil {
+				return "", err
+			}
+			addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+			if err != nil {
+				return "", err
+			}
+			dialAddr = net.JoinHostPort(addrs[0], port)
+			return host + " -> " + strings.Join(addrs, ", "), nil
+		})
+		if !ok {
+			return result
+		}
+	}
+
+	var conn net.Conn
+	ok := runStage(ctx, &result, "connect", cfg.PrecheckTimeoutConnect, func(ctx context.Context) (string, error) {
+		conn, err = Dial(ctx, source, dialAddr)
+		if err != nil {
+			return "", err
+		}
+		if source.Proxy != nil {
+			return "connected to " + ref.Addr + " via " + source.Proxy.Scheme + " proxy " + source.Proxy.Host, nil
+		}
+		return "connected to " + dialAddr, nil
+	})
+	if !ok {
+		return result
+	}
+
+	var tlsConn *tls.Conn
+	ok = runStage(ctx, &result, "tls", cfg.PrecheckTimeoutTLS, func(ctx context.Context) (string, error) {
+		host, _, err := net.SplitHostPort(ref.Addr)
+		if err != nil {
+			return "", err
+		}
+		tlsConn = tls.Client(conn, newTLSConfig(host))
+		if err = tlsConn.HandshakeContext(ctx); err != nil {
+			return "", err
+		}
+		state := tlsConn.ConnectionState()
+		alpn := state.NegotiatedProtocol
+		if alpn == "" {
+			alpn = "none"
+		}
+		return fmt.Sprintf("version=%s cipher=%s alpn=%s",
+			tls.VersionName(state.Version), tls.CipherSuiteName(state.CipherSuite), alpn), nil
+	})
+	if !ok {
+		_ = conn.Close()
+		return result
+	}
+
+	// The http and manifest stages reuse the connection checked above, so they
+	// measure the same path. Other hosts (a token realm) get a new connection
+	// through the same route.
+	transport := &http.Transport{
+		ForceAttemptHTTP2: true,
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if tlsConn != nil && addr == ref.Addr {
+				checked := tlsConn
+				tlsConn = nil
+				return checked, nil
+			}
+			return dialTLS(ctx, source, addr)
+		},
+	}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport}
+
+	protocol := tlsConn.ConnectionState().NegotiatedProtocol
+	ok = runStage(ctx, &result, "http", cfg.PrecheckTimeoutHTTP, func(ctx context.Context) (string, error) {
+		if protocol != "h2" && !source.AllowHTTP1 {
+			_ = tlsConn.Close()
+			return "", fmt.Errorf("server did not negotiate HTTP/2 (alpn=%q); add the %s option to this source to accept HTTP/1.1",
+				protocol, config.OptionAllowHTTP1)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+ref.Host+"/v2/", nil)
+		if err != nil {
+			return "", err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		_ = resp.Body.Close()
+
+		// 401 is normal here: the registry asks for a token, which proves it is a registry.
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
+			return "", fmt.Errorf("GET /v2/ returned status %d (protocol=%s)", resp.StatusCode, resp.Proto)
+		}
+		return fmt.Sprintf("protocol=%s status=%d", resp.Proto, resp.StatusCode), nil
+	})
+	if !ok {
+		return result
+	}
+
+	ok = runStage(ctx, &result, "manifest", cfg.PrecheckTimeoutManifest, func(ctx context.Context) (string, error) {
+		resp, err := getManifest(ctx, client, ref)
+		if err != nil {
+			return "", err
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		_ = resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("GET manifest %s:%s returned status %d (protocol=%s)", ref.Path, ref.Tag, resp.StatusCode, resp.Proto)
+		}
+		return fmt.Sprintf("protocol=%s status=%d digest=%s", resp.Proto, resp.StatusCode,
+			resp.Header.Get("Docker-Content-Digest")), nil
+	})
+	if !ok {
+		return result
+	}
+
+	result.OK = true
+	return result
 }

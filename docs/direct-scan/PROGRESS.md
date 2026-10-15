@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 2 (DB pre-check module)
-- Last completed task: P2-2
+- Last completed task: P2-3
 - In progress: none
-- Next task: P2-3
+- Next task: P2-4 (httptrace first-byte timing for the http and manifest stages)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -100,6 +100,23 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P2-3  Pre-check stages
+- Status: done
+- What changed: `dbmgr.Precheck(ctx, source, cfg)` runs dns, connect, tls, http (`GET /v2/`) and manifest in order, stops at the first failure, and is bounded by `PrecheckTimeoutTotal`.
+  - dns: direct route resolves the registry host and connects to the first address; proxy route records dns as skipped (owner decision).
+  - tls: records version, cipher and ALPN.
+  - http: fails when ALPN is not `h2` unless the source has `allow-http1`. Accepts 200 or 401 from `/v2/`, since 401 means the registry wants a token, which still proves it is a registry. Records protocol and status.
+  - manifest: `GET /v2/<path>/manifests/<tag>`, with the anonymous Bearer token flow when the registry asks for it (ghcr.io, Docker Hub). Records protocol, status and `Docker-Content-Digest`.
+  - The http and manifest stages reuse the exact TLS connection the earlier stages checked, handed to an `http.Transport` once. Other hosts (the token realm) get a new connection through the same route.
+- Files: `pkg/v2/dbmgr/precheck.go`, `pkg/v2/dbmgr/registry.go` (repository parsing, TLS config, `dialTLS`, `getManifest`, `getToken`), `pkg/v2/dbmgr/precheck_stages_test.go`
+- Tests run: `go test -short -race -count=10 ./pkg/v2/dbmgr/` -> ok; `make test` -> ok; `go vet` -> ok; `go.mod` unchanged. Fake TLS registry (HTTP/2 or HTTP/1.1, with or without token): direct HTTP/2, token flow, HTTP/1.1 rejected by default, HTTP/1.1 with `allow-http1`, manifest 404, untrusted certificate, blackholed registry stops at the TLS timeout, via HTTP proxy, via SOCKS5 with credentials. Neither the token nor the proxy password appears in the marshalled result.
+- Decisions / surprises:
+  - `docker.io` is mapped to `registry-1.docker.io` (the Docker Hub API host).
+  - Registry TLS uses the system CA pool; tests swap the package variable `rootCAs`. Internal mirror CAs must be in the system pool for now (`SSL_CERT_FILE` / `SSL_CERT_DIR` work); a per-source CA option can be added if needed.
+  - The token flow belongs to P3-1 but the manifest stage needs it now; P3-1 will reuse `getManifest` and `getToken`.
+  - The tests caught a bug before commit: `Duration` was set in a defer on a non-named return value; fixed with a named return.
+- Next: P2-4
 
 ### 2026-10-15  P2-2  Stage runner and result types
 - Status: done
