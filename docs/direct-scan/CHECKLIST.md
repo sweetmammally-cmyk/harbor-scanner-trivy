@@ -9,12 +9,13 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P0-3 Confirm or adjust the package layout (`pkg/v2/...`); record decision
 - [x] P0-4 Decide Mongo test strategy and libraries (Mongo driver, SOCKS5); record decision
 - [x] P0-5 Fill the Commands section of `CLAUDE.md`
+- [ ] P0-6 Make the baseline green (failing tests from commit `0c87038`, per the owner's `vendor_attributes.Trivy` decision); own commit, before P1-2
 
 ## Phase 1: Config and skeleton
 - [x] P1-1 Feature flag `SCANNER_V2_API_ENABLED`; v2 wiring off by default
 - [ ] P1-2 Config struct and env parsing for all variables in DEMAND section 11
 - [ ] P1-3 Duration parser with `d` support; unset or invalid check interval falls back to 3h with a WARN log
-- [ ] P1-4 `SCANNER_DB_SOURCES` parser (ordered; route direct, HTTP proxy or SOCKS5), validation, redacted printing
+- [ ] P1-4 `SCANNER_DB_SOURCES` and `SCANNER_JAVA_DB_SOURCES` parser (ordered; route direct, HTTP proxy or SOCKS5), validation, redacted printing
 - [ ] P1-5 Unit tests for config
 
 ## Phase 2: DB pre-check module
@@ -29,7 +30,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 ## Phase 3: DB download module
 - [ ] P3-1 OCI client over our transport (token auth if needed, manifest, blob); record raw-HTTP vs library decision
 - [ ] P3-2 Upstream check: compare remote manifest digest with the stored one
-- [ ] P3-3 Download DB layer with timeout, verify digest, extract `trivy.db` and `metadata.json` to a temp dir
+- [ ] P3-3 Download DB layer only after the pre-check passed, with stall timeout and overall cap, verify digest, extract `trivy.db` and `metadata.json` to a temp dir
 - [ ] P3-4 Atomic swap; in-flight scans keep the old copy (record mechanism)
 - [ ] P3-5 Seed DB support; service not ready until a DB exists
 - [ ] P3-6 Source fallback loop; all failed means degraded mode, ERROR log, old DB kept
@@ -90,6 +91,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P10-2 Readiness and liveness: Mongo reachable, DB present
 - [ ] P10-3 Verify all required log lines from DEMAND section 12
 - [ ] P10-4 Prometheus metrics
+- [ ] P10-5 Remove the FULL TRIVY REPORT debug log (`pkg/trivy/wrapper.go`) once v2 logging exists
 
 ## Phase 11: Hardening and acceptance
 - [ ] P11-1 End-to-end run in docker compose (scanner, Mongo, mirror or fake mirror)

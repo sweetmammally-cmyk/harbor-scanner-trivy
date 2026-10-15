@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.4 (result-type storage fixed, digest store deferred)
+Status: DRAFT v0.5 (settings and DB download limits decided 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -192,7 +192,16 @@ For each configured source, in order:
 4. HTTP/2 request to the registry `/v2/` endpoint, then the DB manifest. Record DNS, connect, TLS, first-byte and total timings, status and negotiated protocol.
 5. Every stage has its own timeout and the whole check has a deadline.
 
-If all stages pass: download (also bounded by a timeout; the process is killed on expiry).
+The sources form a pool: an ordered list that can mix public registries (for example Docker Hub, ghcr.io) and our own mirrors, each with its own route.
+
+Every download is gated by the pre-check: a source that fails its pre-check is never downloaded from; the next source is tried. The pre-check is the main safety, not a fixed total timeout.
+
+If all stages pass, download with two limits:
+
+- Stall timeout (`SCANNER_DB_DOWNLOAD_STALL_TIMEOUT`, default 30s): abort if no bytes arrive for that long.
+- Overall cap per source (`SCANNER_DB_DOWNLOAD_TIMEOUT`, default 15m): a safety net only, because the pre-check has already proven the path works.
+
+On either limit the download is aborted and the next source is tried.
 
 If a stage fails: log the failure with the stage and timings, store it, move to the next configured fallback source. Authorization headers and tokens never appear in logs.
 
@@ -202,7 +211,7 @@ If a stage fails: log the failure with the stage and timings, store it, move to 
 - `db.freshness` in responses: `ok` if the DB was verified against upstream within `max_db_age` (measured from `last_upstream_check_at`, not from `UpdatedAt`, because upstream may simply not have published a newer DB). Otherwise `stale`.
 - If the request's `max_db_age` is exceeded, the service attempts one refresh (single-flight, bounded by the pre-check and download timeouts). On failure the scan proceeds with the old DB and the response says `stale`.
 
-Java DB follows the same flow when needed.
+Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format) and follows the same pre-check and fallback flow.
 
 ### 7.5 Own DB download module
 
@@ -263,17 +272,20 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 |---|---|
 | `SCANNER_V2_API_ENABLED` | Feature flag for the new API |
 | `SCANNER_V2_AUTH_TOKEN` | Service token for the new API |
-| `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB |
+| `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error. |
 | `SCANNER_REGISTRY_URL` | Harbor URL used to resolve digests and pull images |
 | `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret) |
 | `SCANNER_DB_CHECK_INTERVAL` | `1h`, `3h`, `1d`... fallback `3h` |
-| `SCANNER_DB_SOURCES` | Ordered list of mirrors/sources, each with its route (direct, HTTP proxy or SOCKS5) |
-| `SCANNER_PRECHECK_TIMEOUT_*` | Per-stage and overall pre-check timeouts |
-| `SCANNER_DB_DOWNLOAD_TIMEOUT` | Hard limit for a download |
-| `SCANNER_DB_MAX_AGE_DEFAULT` | Default for `max_db_age` |
-| `SCANNER_QUEUE_WORKERS`, `SCANNER_QUEUE_MAX_LENGTH`, `SCANNER_SCAN_TIMEOUT` | Queue settings |
+| `SCANNER_DB_SOURCES` | Ordered pool of sources: `repo\|route,repo\|route`, route is `direct`, `http://host:port` or `socks5://host:port`. Example: `mirror.local/aquasec/trivy-db:2\|direct,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
+| `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB |
+| `SCANNER_PRECHECK_TIMEOUT_DNS`, `_CONNECT`, `_TLS`, `_HTTP`, `_MANIFEST`, `_TOTAL` | Pre-check timeouts per stage and overall. Defaults 5s, 5s, 5s, 10s, 10s, 30s |
+| `SCANNER_DB_DOWNLOAD_STALL_TIMEOUT` | Abort a download when no bytes arrive for this long. Default 30s |
+| `SCANNER_DB_DOWNLOAD_TIMEOUT` | Overall cap per source per download (safety net). Default 15m |
+| `SCANNER_DB_MAX_AGE_DEFAULT` | Default for `max_db_age`. Default 6h |
+| `SCANNER_QUEUE_WORKERS`, `SCANNER_QUEUE_MAX_LENGTH` | Queue settings. Defaults 1 and 100 |
+| `SCANNER_SCAN_TIMEOUT` | Per-scan timeout. Default 10m |
 
-Existing Trivy variables keep their current behavior.
+All defaults can be overridden by env. Existing Trivy variables keep their current behavior.
 
 ## 12. Logging and observability
 
