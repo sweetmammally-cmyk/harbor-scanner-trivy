@@ -52,8 +52,8 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P5-2 Models and collections: `scans`, `platforms`, `db_state`, `db_checks`
 - [x] P5-3 Ensure schema on every Mongo up transition (retried; readiness needs schema ready): indexes via createIndexes only (scans.request_id unique partial; image.digest+state+finished_at; customer_ids+finished_at; state+queued_at; TTL on `db_checks.at` from `SCANNER_DB_CHECKS_RETENTION` 30d, collMod on change); conflicting index = ERROR + not ready, never dropped; `schema_version` via upsert + $setOnInsert, newer stored = not ready, older = migrate then set
 - [x] P5-4 Repositories behind interfaces, with fakes for unit tests
-- [x] P5-5 GridFS for reports above the size threshold
-- [ ] P5-6 Persist DB state and checks in Mongo (replace the in-memory implementation); the DB updater keeps running while Mongo is down, state stays in memory and is written when Mongo is back; not ready while Mongo is down
+- [x] P5-5 (follow-up: upload first, delete the file when the scan save fails, delete the previous file on retry, metadata `scan_id` and `uploaded_at`) GridFS for reports above the size threshold
+- [ ] P5-6 Persist DB state and checks in Mongo: `db_state` per instance and kind (`<instance_id>:<kind>`, `SCANNER_INSTANCE_ID` default hostname), `db_checks` with `instance_id`; memory first, updater keeps running while Mongo is down; flush on every Mongo up transition; load at startup but ignore stored confirmation when the stored digest differs from disk; bounded `db_checks` buffer drops oldest and logs the count
 - [ ] P5-7 Integration tests against real Mongo
 
 ## Phase 6: Registry client
@@ -80,16 +80,16 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 
 ## Phase 9: REST API v2
 - [ ] P9-1 Router and service-token auth middleware; wire `main.go`; log the fallback-interval WARN only when v2 is enabled; run the component tests (first `main.go` touch)
-- [ ] P9-2 `POST /api/v2/scans`: validation and `request_id` idempotency
+- [ ] P9-2 `POST /api/v2/scans`: validation (400 for `customer_data` > 64 KiB or > 100 `customer_ids`) and `request_id` idempotency
 - [ ] P9-3 Cache decision (all conditions in DEMAND section 6) and cached response with `cached` and `db_unchanged`
 - [ ] P9-4 `GET /api/v2/scans/{id}` with `not_found` (404), `queued`, `scanning`, `done`, `failed`
-- [ ] P9-5 `GET /api/v2/scans` filters and paging
+- [ ] P9-5 `GET /api/v2/scans` filters and paging (project out the report)
 - [ ] P9-6 `GET /api/v2/db` (includes `db_age`)
 - [ ] P9-7 `db` block in responses (updated_at, last_upstream_check_at, freshness)
 - [ ] P9-8 API tests covering every row of the DEMAND response tables
 
 ## Phase 10: Health, logging, metrics
-- [ ] P10-1 `GET /api/v2/health` computed from stored data (includes `db_age`)
+- [ ] P10-1 `GET /api/v2/health` computed from stored data (includes `db_age`; DB information for every instance)
 - [ ] P10-2 Readiness and liveness: Mongo reachable (from the background ping flag, never a direct Mongo call), DB present
 - [ ] P10-3 Verify all required log lines from DEMAND section 12
 - [ ] P10-4 Prometheus metrics (including a `mongo_up` gauge from the ping flag)

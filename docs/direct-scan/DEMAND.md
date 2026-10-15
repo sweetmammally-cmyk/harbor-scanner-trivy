@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.12 (schema setup and indexes, 2026-10-15)
+Status: DRAFT v0.13 (report limits, GridFS cleanup, per-instance DB state, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -77,6 +77,7 @@ Fields:
 - `max_db_age`: how fresh the DB must be for the response to report `freshness: ok` (see section 7.4). Optional, falls back to a server default.
 - `force`: always scan, ignore the cache.
 - More filters will be added later (reserved).
+- Limits: `customer_data` larger than 64 KiB (JSON-encoded) or more than 100 `customer_ids` is rejected with 400.
 
 Responses:
 
@@ -128,11 +129,11 @@ Filters: `customer_id`, `digest`, `repository`, `state`, `severity`, `platform`,
 
 ### 5.4 DB status: `GET /api/v2/db`
 
-Current DB version, `updated_at`, `downloaded_at`, `db_age`, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, active source (mirror), mode (`normal` | `degraded`), and the last DB check results.
+Current DB version, `updated_at`, `downloaded_at`, `db_age`, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, active source (mirror), mode (`normal` | `degraded`), and the last DB check results. Each scanner instance has its own DB copy, so these are shown per instance (`instance_id`) and per DB kind (`db`, `java-db`).
 
 ### 5.5 Health
 
-- `GET /api/v2/health`: detailed health derived from stored data: Mongo connectivity, DB present, DB age and freshness, last upstream check, queue depth, recent scan durations and failure rate, last pre-check result per source.
+- `GET /api/v2/health`: detailed health derived from stored data: Mongo connectivity, DB present, DB age and freshness, last upstream check, queue depth, recent scan durations and failure rate, last pre-check result per source. DB information is shown for every instance.
 - Liveness/readiness probes (existing Harbor-style probes kept). Readiness is false while Mongo is unreachable or no DB exists yet.
 
 ## 6. Scan flow and cache rules
@@ -282,9 +283,9 @@ Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format
 
 `platforms`: `{ _id, first_seen_at, last_seen_at, seen_count, example_digest }`
 
-`db_state` (single document): version, `updated_at`, `downloaded_at`, manifest digest, `last_upstream_check_at`, active source, mode.
+`db_state`: one document per scanner instance and DB kind, `_id` `"<instance_id>:<kind>"` (kind `db` or `java-db`), with `instance_id`, `db`, mode, active source, manifest digest, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, `installed_at`, metadata (version, `updated_at`, `next_update`, `downloaded_at`) and the last per-source results. The instance id is `SCANNER_INSTANCE_ID` (default: the hostname). Behaviour: the state is kept in memory first; while MongoDB is down the updater keeps running and the state is written when MongoDB is back (also without a new update run); at startup the instance loads its stored state, but if the stored digest differs from the digest installed on disk, the stored confirmation (`last_confirmed_current_at`, `newer_available`) is ignored: the disk is the source of truth.
 
-`db_checks`: history of pre-checks and downloads (source, route, per-stage timings, result, at). TTL index to expire old rows.
+`db_checks`: history of pre-checks and downloads (`instance_id`, db, source, route, per-stage timings, result, at). TTL index to expire old rows. Best effort: while MongoDB is down they are buffered in memory with a bound; when the buffer is full the oldest are dropped and the number dropped is logged.
 
 Schema setup ("ensure schema"):
 
@@ -299,7 +300,7 @@ Indexes:
 - `db_checks.at`: TTL index (`at` is a BSON date), `expireAfterSeconds` from `SCANNER_DB_CHECKS_RETENTION`. When the retention changes, the index is updated with `collMod`, never dropped.
 - The queue-claim index is added with the queue (P8).
 
-Large reports: summary plus report inline; move the full report to GridFS above a size threshold (16 MB BSON limit).
+Large reports: summary plus report inline; the full report moves to GridFS when its BSON-encoded size is above 8 MiB (a code constant; the BSON document limit is 16 MiB). The GridFS file is uploaded first (metadata `scan_id`, `uploaded_at`), then the scan document is saved; if that save fails, the file is deleted at once (best effort). A retry for the same `scan_id` deletes the previous file first. List queries (`GET /api/v2/scans`) never return the report (projection). Cleanup of old files is part of retention (section 14).
 
 ## 11. Configuration (draft)
 
@@ -308,6 +309,7 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 | `SCANNER_V2_API_ENABLED` | Feature flag for the new API |
 | `SCANNER_V2_AUTH_TOKEN` | Service token for the new API |
 | `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error (config error). If MongoDB is only unreachable, the service does not exit: it keeps running with readiness false and the v2 API returning 503, the DB updater keeps running, and the driver reconnects automatically (no custom backoff loop). Write and read concern come from the connection string (no separate settings). The connection string is never logged or included in errors. No multi-document transactions are used. |
+| `SCANNER_INSTANCE_ID` | Id of this scanner instance for `db_state` and `db_checks`. Default: the hostname |
 | `SCANNER_MONGO_CONNECT_TIMEOUT` | Connect timeout. Default 5s |
 | `SCANNER_DB_CHECKS_RETENTION` | How long `db_checks` documents are kept (TTL index). Default 30d (the `d` suffix is supported) |
 | `SCANNER_MONGO_SERVER_SELECTION_TIMEOUT` | Server selection timeout. Default 5s |

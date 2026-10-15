@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 5 (MongoDB data plane)
 - Last completed task: P5-5
 - In progress: none
-- Next task: P5-6 (DB state and checks in Mongo; the updater keeps running while Mongo is down, state in memory until Mongo is back)
+- Next task: P5-5 follow-up (GridFS upload/cleanup rules), then P5-6, P5-7
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,11 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, eleventh round): DEMAND v0.13 (5.1, 5.4, 5.5, 10, 11).
+  - The inline report limit stays a code constant of 8 MiB, measured on the BSON-encoded report. P9-2 rejects (400) `customer_data` > 64 KiB and > 100 `customer_ids`; P9-5 list queries project out the report.
+  - GridFS: upload first, then save the scan document; if the save fails, delete the file at once (best effort). File metadata `scan_id` and `uploaded_at`. A retry for the same `scan_id` deletes the previous file first. Retention stays deferred.
+  - `db_state` is one document per instance and DB kind (`_id` "<instance_id>:<kind>"), `SCANNER_INSTANCE_ID` (default hostname); `db_checks` rows carry `instance_id`; health shows every instance.
+  - P5-6 behaviour: the updater keeps running while Mongo is down with state in memory; on every Mongo up transition the latest state is flushed even without a new run; at startup the instance's stored state is loaded, but when its digest differs from the disk's, `last_confirmed_current_at` and `newer_available` are ignored (disk is the source of truth); `db_checks` are best effort with a bounded buffer that drops the oldest and logs how many.
 - 2026-10-15 (owner, tenth round): DEMAND v0.12, sections 10 and 11.
   - Reconnection: rely on the driver's own reconnection, no custom backoff loop. DEMAND section 11 now says "the driver reconnects automatically".
   - Ensure schema (P5-3): run at startup if Mongo is up and on every up transition, retried until it succeeds; readiness needs "schema ready" too. `createIndexes` is the only index mechanism. `schema_version` uses an upsert with `$setOnInsert`; stored newer than code means not ready with an ERROR; stored older means migrations (none yet), then set the version. `request_id` unique index is partial (`{request_id: {$type: "string"}}`). TTL on `db_checks.at` from `SCANNER_DB_CHECKS_RETENTION` (30d), updated with `collMod`. An existing index with the same name but other options: ERROR naming it, not ready, never dropped. The queue-claim index belongs to P8.
