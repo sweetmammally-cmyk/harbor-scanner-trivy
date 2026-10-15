@@ -33,7 +33,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P3-3 Download DB layer only after the pre-check passed, with stall timeout and overall cap, verify digest, extract `trivy.db` and `metadata.json` to a temp dir
 - [ ] P3-4 Atomic swap; in-flight scans keep the old copy (record mechanism)
 - [ ] P3-5 Seed DB support; service not ready until a DB exists
-- [ ] P3-6 Source fallback loop; all failed means degraded mode, ERROR log, old DB kept
+- [ ] P3-6 (startup check for empty `SCANNER_DB_SOURCES` already done) Source fallback loop; all failed means degraded mode, ERROR log, old DB kept
 - [ ] P3-7 Java DB through the same flow
 - [ ] P3-8 Parse `metadata.json` (UpdatedAt, NextUpdate, Version, DownloadedAt)
 - [ ] P3-9 Tests with a fake registry: success, wrong digest, truncated, hang mid-download, fallback to second source, all sources fail

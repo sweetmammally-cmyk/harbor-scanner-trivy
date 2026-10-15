@@ -88,6 +88,9 @@ func GetConfig() (Config, error) {
 		if cfg.MongoDB == "" {
 			return cfg, errors.New("SCANNER_MONGO_DB is required when SCANNER_V2_API_ENABLED is true")
 		}
+		if len(cfg.DBSources) == 0 {
+			return cfg, errors.New("SCANNER_DB_SOURCES is required when SCANNER_V2_API_ENABLED is true")
+		}
 	}
 
 	return cfg, nil

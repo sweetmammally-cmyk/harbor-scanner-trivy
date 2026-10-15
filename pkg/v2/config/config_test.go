@@ -72,6 +72,25 @@ func TestGetConfig(t *testing.T) {
 			expectedError: "SCANNER_MONGO_DB is required when SCANNER_V2_API_ENABLED is true",
 		},
 		{
+			name: "Should return error when v2 API is enabled without SCANNER_DB_SOURCES",
+			envs: Envs{
+				"SCANNER_V2_API_ENABLED": "true",
+				"SCANNER_MONGO_URI":      "mongodb://mongo:27017",
+				"SCANNER_MONGO_DB":       "scanner",
+			},
+			expectedError: "SCANNER_DB_SOURCES is required when SCANNER_V2_API_ENABLED is true",
+		},
+		{
+			name: "Should return error when v2 API is enabled with blank SCANNER_DB_SOURCES",
+			envs: Envs{
+				"SCANNER_V2_API_ENABLED": "true",
+				"SCANNER_MONGO_URI":      "mongodb://mongo:27017",
+				"SCANNER_MONGO_DB":       "scanner",
+				"SCANNER_DB_SOURCES":     "  ",
+			},
+			expectedError: "SCANNER_DB_SOURCES is required when SCANNER_V2_API_ENABLED is true",
+		},
+		{
 			name: "Should return error when a duration is invalid",
 			envs: Envs{
 				"SCANNER_SCAN_TIMEOUT": "ten minutes",

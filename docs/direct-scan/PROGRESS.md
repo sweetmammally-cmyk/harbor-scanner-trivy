@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 2 (DB pre-check module)
 - Last completed task: P1-5
 - In progress: none
-- Next task: P3-6 startup check (`SCANNER_DB_SOURCES` required when v2 is enabled), then P2-1
+- Next task: P2-1
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -99,6 +99,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-6  Partial: SCANNER_DB_SOURCES required when v2 is enabled
+- Status: partial (only the startup check; the fallback loop and degraded mode are still to do in Phase 3)
+- What changed: `GetConfig` returns "SCANNER_DB_SOURCES is required when SCANNER_V2_API_ENABLED is true" when v2 is enabled and the list is empty or blank (owner decision).
+- Files: `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`, `docs/direct-scan/CHECKLIST.md`
+- Tests run: `go test -short -race -cover ./pkg/v2/...` -> ok, 100.0%; `go vet` -> ok
+- Decisions / surprises: `SCANNER_JAVA_DB_SOURCES` stays optional.
+- Next: P2-1
 
 ### 2026-10-15  P1-4  Follow-up: allow-http1 source option
 - Status: done
