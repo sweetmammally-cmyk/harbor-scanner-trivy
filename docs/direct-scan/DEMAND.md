@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.9 (disk space check dropped, full-disk behaviour, 2026-10-15)
+Status: DRAFT v0.10 (on-demand refresh rules, DB updater without Mongo, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -37,7 +37,7 @@ Problems today:
 |---|---|
 | Caller | Our backend only (maybe Temporal). Service-to-service auth. |
 | Registry credentials | One system-level, pull-only robot account configured on the scanner. The scanner runs in the same Docker network as Harbor. Never sent in requests. |
-| MongoDB | Hard dependency. If it is down, the service is not ready and the API returns 503. |
+| MongoDB | Hard dependency. If it is down, the service is not ready and the API returns 503. The DB updater keeps running while MongoDB is down: its state stays in memory and is written to MongoDB when it is reachable again. |
 | Cache key | Image digest (not tag). Layers are often shared across images. |
 | Skip rule | Skip only if last scan's DB `UpdatedAt` >= current DB `UpdatedAt`. |
 | Cached response | Return the stored result with a flag saying the DB did not change for this image. |
@@ -228,7 +228,12 @@ If a stage fails: log the failure with the stage and timings, store it, move to 
 - A newer DB was offered but none could be installed: set mode `degraded` and `newer_available`, log ONE ERROR "newer DB available but could not be installed" with each source's failure class, keep scanning with the existing DB. Responses say `stale`.
 - `db.freshness` in responses: `stale` while `newer_available` is set, regardless of `max_db_age`. Otherwise `ok` if the DB was confirmed current within `max_db_age`, measured from `last_confirmed_current_at` (not from `UpdatedAt`, because upstream may simply not have published a newer DB). "Upstream" here means the first source that answered. Otherwise `stale`.
 - DB age (now minus the installed DB's `metadata.json` `UpdatedAt`) is reported separately as `db_age` in `GET /api/v2/db` and in the health output. After each check, when the age is above `SCANNER_DB_AGE_WARN`, a WARN log gives the age and the active source. This is for visibility only and never blocks an install.
-- If the request's `max_db_age` is exceeded, the service attempts one refresh (single-flight, bounded by the pre-check and download timeouts). On failure the scan proceeds with the old DB and the response says `stale`.
+- On-demand refresh, when a request's `max_db_age` is exceeded (freshness `stale` for that request):
+  - It runs in the scan worker before the scan, not in the HTTP handler.
+  - It joins or starts one update run (single-flight) and waits at most `SCANNER_ONDEMAND_REFRESH_WAIT` (default 60s). On timeout or failure the scan proceeds with the old DB and the response says `stale`; the update run continues in the background.
+  - If an update run finished within `SCANNER_ONDEMAND_REFRESH_MIN_GAP` (default 60s), its result is reused and no new run is started.
+  - If the mode is `degraded`, no on-demand refresh is started; the retry interval governs and freshness stays `stale`.
+- The installed DB's manifest digest is stored on disk with the DB (a `manifest-digest` file in its version directory), so the upstream check after a restart does not depend on stored state.
 
 Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format) and follows the same pre-check and fallback flow. Without Java sources there is no Java DB at all, not even the seed.
 
@@ -305,6 +310,8 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 | `SCANNER_DB_RETRY_INTERVAL` | Check interval while the mode is `degraded`. Default 15m |
 | `SCANNER_DB_AGE_WARN` | Log a WARN after a check when the installed DB's `UpdatedAt` is older than this. Visibility only. Default `7d` (the `d` suffix is supported) |
 | `SCANNER_DB_MAX_AGE_DEFAULT` | Default for `max_db_age`. Default 6h |
+| `SCANNER_ONDEMAND_REFRESH_WAIT` | How long a scan waits for an on-demand DB refresh before it proceeds with the old DB. Default 60s |
+| `SCANNER_ONDEMAND_REFRESH_MIN_GAP` | An update run that finished within this gap is reused instead of starting an on-demand refresh. Default 60s |
 | `SCANNER_QUEUE_WORKERS`, `SCANNER_QUEUE_MAX_LENGTH` | Queue settings. Defaults 1 and 100 |
 | `SCANNER_SCAN_TIMEOUT` | Per-scan timeout. Default 10m |
 

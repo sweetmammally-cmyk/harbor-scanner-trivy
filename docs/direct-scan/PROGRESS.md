@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 4 (updater and freshness)
 - Last completed task: P4-2
 - In progress: none
-- Next task: P4-3 (freshness from the stored state: `Freshness(state.NewerAvailable, state.LastConfirmedCurrentAt, maxAge, now)`, plus `db_age`)
+- Next task: P4-2 follow-up (injected write failure, digest-on-disk test), then P4-3, P4-4, P4-5
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,12 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, eighth round): DEMAND v0.10, 7.4 and 11.
+  - Write-failure tests use an injected writer (they must work as root); same assertions.
+  - The installed digest must be readable from disk; it already is (`manifest-digest` file per version directory, read by `installedDigest`); a test proves a new updater with empty state does not download when the digest is equal.
+  - P4-3 connects freshness to the stored state.
+  - On-demand refresh (P4-4): runs in the scan worker before the scan; waits at most `SCANNER_ONDEMAND_REFRESH_WAIT` (60s), then the scan proceeds with the old DB as `stale` while the refresh continues; reuses a run that finished within `SCANNER_ONDEMAND_REFRESH_MIN_GAP` (60s); no on-demand refresh while degraded (the retry interval governs, freshness stays `stale`).
+  - Phase 5 (implement in P5-6): the DB updater keeps running while MongoDB is down; state stays in memory and is written to MongoDB when it is back; the service is still not ready while MongoDB is down.
 - 2026-10-15 (owner, seventh round): the free disk space check (P3-10) is dropped. It was removed with a revert commit (`9f42746`) because P4-1 was already built on top; the Java DB download cap from the same commit was kept. DEMAND v0.9, 7.3, 7.4 and 11 updated.
   - A full disk during install fails as `install_error`, leaves no partial directory, keeps the old DB, and results in `degraded` + `newer_available`. Implementation: file errors (`*fs.PathError`) while extracting are marked `errLocalDisk` in `downloadDB`, and `update` reports them as `install_error`; network and layer read errors stay `download_error`.
   - No `SCANNER_JAVA_DB_SOURCES` means no Java DB at all, seed included (DEMAND section 11).

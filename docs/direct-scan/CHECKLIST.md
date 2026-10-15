@@ -44,7 +44,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P4-1 Interval loop, first run at startup, single-flight; skip the Java DB when `SCANNER_JAVA_DB_SOURCES` is empty; `SCANNER_DB_RETRY_INTERVAL` (15m) while degraded, back to the check interval after a success
 - [x] P4-2 State behind an interface: last_upstream_check_at, last_confirmed_current_at, newer_available (kept when no source answered), mode, active source (in-memory first)
 - [ ] P4-3 (pure `Freshness` function already done in the P3-6 follow-up; wire it to the state) Freshness `ok|stale` from `last_confirmed_current_at` versus `max_db_age`; always `stale` while `newer_available`
-- [ ] P4-4 On-demand bounded refresh when a request's `max_db_age` is exceeded
+- [ ] P4-4 On-demand refresh for the scan worker when a request's `max_db_age` is exceeded: wait at most `SCANNER_ONDEMAND_REFRESH_WAIT` (60s), reuse a run that finished within `SCANNER_ONDEMAND_REFRESH_MIN_GAP` (60s), never while degraded
 - [ ] P4-5 Fake-clock tests (including the 3h fallback)
 
 ## Phase 5: MongoDB data plane
@@ -53,7 +53,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P5-3 Indexes (scans.request_id unique; image.digest+state+finished_at; customer_ids+finished_at; state+queued_at) and TTL on `db_checks`
 - [ ] P5-4 Repositories behind interfaces, with fakes for unit tests
 - [ ] P5-5 GridFS for reports above the size threshold
-- [ ] P5-6 Persist DB state and checks in Mongo (replace the in-memory implementation)
+- [ ] P5-6 Persist DB state and checks in Mongo (replace the in-memory implementation); the DB updater keeps running while Mongo is down, state stays in memory and is written when Mongo is back; not ready while Mongo is down
 - [ ] P5-7 Integration tests against real Mongo
 
 ## Phase 6: Registry client
@@ -72,7 +72,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 
 ## Phase 8: Queue
 - [ ] P8-1 Enqueue into `scans` (state queued); dedupe on digest plus options
-- [ ] P8-2 Worker pool with atomic claim, lease and heartbeat
+- [ ] P8-2 Worker pool with atomic claim, lease and heartbeat; call the on-demand refresh (P4-4) before each scan
 - [ ] P8-3 Recovery of expired leases
 - [ ] P8-4 Max queue length (429), per-scan timeout, graceful shutdown
 - [ ] P8-5 Reserve the optional `priority` field (unused)
