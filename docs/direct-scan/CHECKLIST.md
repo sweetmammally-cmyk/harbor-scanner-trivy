@@ -68,7 +68,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P7-4 Platform discovery from all result types; `platforms_requested`/`found`/`not_found`; upsert `platforms`; set `has_more_platforms`
 - [x] P7-5 Stored finding shape (DEMAND 6.2), `SCANNER_SCAN_MAX_FINDINGS` with `truncated`; store inline or in GridFS
 - [x] P7-6 Log "triggering scan" and "scan done" (no findings); store timings, Trivy version, DB version; `trivy --version` at startup, readiness false without the binary
-- [ ] P7-7 Tests: canned Trivy JSON fixtures; fake trivy executable (env allowlist without SCANNER_* secrets, timeout kill including children, huge output, exit codes, stderr redaction); DB swap during a scan; two concurrent Trivy processes; one manual real-image run (`manual` tag)
+- [x] P7-7 Tests: canned Trivy JSON fixtures; fake trivy executable (env allowlist without SCANNER_* secrets, timeout kill including children, huge output, exit codes, stderr redaction); DB swap during a scan; two concurrent Trivy processes; one manual real-image run (`manual` tag)
 
 ## Phase 8: Queue
 - [ ] P8-1 Enqueue into `scans` (state queued); dedupe on digest plus options

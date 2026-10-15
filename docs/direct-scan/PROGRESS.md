@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 7 (scan runner)
-- Last completed task: P7-6
+- Phase: 7 done; Phase 8 (queue) next
+- Last completed task: P7-7
 - In progress: none
-- Next task: P7-7 (one manual real-image run under the `manual` tag; check the test list)
-- Blockers / questions for the user: none
+- Next task: P8-1 (enqueue into `scans`, dedupe on digest plus options)
+- Blockers / questions for the user: Trivy version: the Dockerfile pins 0.74.0, the owner's message and the local binary say 0.71.2; which one is the target?
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -174,6 +174,17 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P7-7  Scan runner tests and a real-image run
+- Status: done (Phase 7 complete)
+- What changed: `pkg/v2/runner/manual_test.go` (build tag `manual`): `TestManualScan` resolves `MANUAL_IMAGE` with the real registry client (default Docker Hub) and scans the `@digest` reference with the real Trivy, using a DB installed in our layout by `TestManualUpdate`. The command is in `CLAUDE.md` section 4. The automated part of P7-7 (fixtures from real output, fake trivy for the env allowlist, the timeout kill with children, huge output, exit codes, stderr redaction, the DB swap during a scan, two concurrent Trivy processes) was written with P7-1 to P7-6.
+- Files: `pkg/v2/runner/manual_test.go`, `CLAUDE.md`
+- Tests run: `go test -short -race -count=2 ./pkg/v2/...` -> ok; `make test` -> ok; `go test -tags=integration ./test/integration/...` -> ok. Manual, on this machine (2026-10-15):
+  - DB installed by `TestManualUpdate` in 19.6s.
+  - `library/node:22-alpine3.20` resolved to `registry-1.docker.io/library/node@sha256:2289fb1f...` (an OCI image index). Scanned in 9.8s (trivy 9.784s, parse 3ms): image platforms `[alpine node-pkg]`, requested `jar` reported in `platforms_not_found`, summary critical 5, high 53, medium 31, low 22, 58 findings stored, not truncated. Log lines as specified, no findings in them.
+  - `library/eclipse-temurin:21-jre-alpine` (contains jars), no Java DB installed: failed as `java_db_missing` after 11.9s with Trivy's "Unable to initialize the Java DB: ... '--skip-java-db-update' cannot be specified on the first run" in the redacted stderr tail.
+- Decisions / surprises: when the tag points to an image index (both images above), the stored digest is the index digest and Trivy picks the platform matching the host (linux/amd64 here). This is the deferred multi-architecture question (DEMAND section 14), now visible. The scratch DB (1.6 GB) was deleted after the run.
+- Next: P8-1
 
 ### 2026-10-15  P7-4, P7-5, P7-6  Scan orchestration
 - Status: done
