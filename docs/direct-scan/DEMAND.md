@@ -189,7 +189,7 @@ For each configured source, in order:
 1. Log the effective source: repository/mirror URL, route (direct, HTTP proxy or SOCKS5), TLS flags. Credentials redacted.
 2. Connect through the configured route: **direct to our own mirror, HTTP proxy, or SOCKS5**. If a proxy is configured, every step goes through it.
 3. TLS handshake check: record version, cipher and ALPN result.
-4. HTTP/2 request to the registry `/v2/` endpoint, then the DB manifest. Record DNS, connect, TLS, first-byte and total timings, status and negotiated protocol.
+4. HTTP/2 request to the registry `/v2/` endpoint, then the DB manifest. Record DNS, connect, TLS, first-byte and total timings, status and negotiated protocol. HTTP/2 is required by default: a source that negotiates HTTP/1.1 fails its pre-check, unless that source has the `allow-http1` option. The negotiated protocol is always recorded.
 5. Every stage has its own timeout and the whole check has a deadline.
 
 The sources form a pool: an ordered list that can mix public registries (for example Docker Hub, ghcr.io) and our own mirrors, each with its own route.
@@ -276,7 +276,7 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 | `SCANNER_REGISTRY_URL` | Harbor URL used to resolve digests and pull images |
 | `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret) |
 | `SCANNER_DB_CHECK_INTERVAL` | `1h`, `3h`, `1d`... fallback `3h` |
-| `SCANNER_DB_SOURCES` | Ordered pool of sources: `repo\|route,repo\|route`, route is `direct`, `http://host:port` or `socks5://host:port`. Example: `mirror.local/aquasec/trivy-db:2\|direct,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
+| `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Example: `mirror.local/aquasec/trivy-db:2\|direct\|allow-http1,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
 | `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB |
 | `SCANNER_PRECHECK_TIMEOUT_DNS`, `_CONNECT`, `_TLS`, `_HTTP`, `_MANIFEST`, `_TOTAL` | Pre-check timeouts per stage and overall. Defaults 5s, 5s, 5s, 10s, 10s, 30s |
 | `SCANNER_DB_DOWNLOAD_STALL_TIMEOUT` | Abort a download when no bytes arrive for this long. Default 30s |

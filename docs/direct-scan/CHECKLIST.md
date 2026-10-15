@@ -21,7 +21,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 ## Phase 2: DB pre-check module
 - [ ] P2-1 Route-aware dialer: direct, HTTP proxy (CONNECT), SOCKS5
 - [ ] P2-2 Stage runner with per-stage timeouts and an overall deadline; result struct (stage, ok, timing, detail)
-- [ ] P2-3 Stages in order: DNS, connect, TLS handshake (version, cipher, ALPN), HTTP/2 GET `/v2/`, DB manifest request
+- [ ] P2-3 Stages in order: DNS, connect, TLS handshake (version, cipher, ALPN), HTTP/2 GET `/v2/`, DB manifest request. HTTP/2 required unless the source has `allow-http1`; always record the negotiated protocol
 - [ ] P2-4 `httptrace` timings: DNS, connect, TLS, first byte, total
 - [ ] P2-5 Log effective source, route and each stage result; redact credentials and Authorization
 - [ ] P2-6 Tests: ok server, blackhole (timeout), TLS failure, no HTTP/2, HTTP proxy, SOCKS5, redaction
@@ -77,7 +77,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P8-6 Tests: concurrency, crash recovery, dedupe
 
 ## Phase 9: REST API v2
-- [ ] P9-1 Router and service-token auth middleware
+- [ ] P9-1 Router and service-token auth middleware; wire `main.go`; log the fallback-interval WARN only when v2 is enabled; run the component tests (first `main.go` touch)
 - [ ] P9-2 `POST /api/v2/scans`: validation and `request_id` idempotency
 - [ ] P9-3 Cache decision (all conditions in DEMAND section 6) and cached response with `cached` and `db_unchanged`
 - [ ] P9-4 `GET /api/v2/scans/{id}` with `not_found` (404), `queued`, `scanning`, `done`, `failed`
@@ -99,7 +99,8 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P11-3 Harbor adapter regression: existing tests pass and one manual Harbor scan works
 - [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2
 - [ ] P11-5 Secrets review: no tokens or passwords in logs, argv or MongoDB
-- [ ] P11-6 List the upstream files touched, for future merges
+- [ ] P11-6 List the upstream files touched, for future merges; run the component tests again
+- [ ] P11-7 (low priority) Get a working golangci-lint for Go 1.26 and run `make lint`
 
 ## Acceptance criteria (from DEMAND section 13)
 - [ ] AC1 New image: 202, then `queued`, `scanning`, `done`, with stored result and timings

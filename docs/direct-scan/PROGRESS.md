@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 1 done; Phase 2 (DB pre-check module) next
+- Phase: 2 (DB pre-check module)
 - Last completed task: P1-5
 - In progress: none
-- Next task: P2-1 (route-aware dialer: direct, HTTP proxy CONNECT, SOCKS5 via `golang.org/x/net/proxy`)
-- Blockers / questions for the user: none blocking. Open for later: should v2 refuse to start when `SCANNER_DB_SOURCES` is empty (P3-6)?
+- Next task: P1-4 follow-up (source options `allow-http1`) and the P3-6 startup check, then P2-1
+- Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -58,6 +58,12 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The FULL TRIVY REPORT debug log stays until v2 logging exists (task P10-5).
   - Baseline must be green before P1-2 (task P0-6).
   - `vendor_attributes.Trivy`: KEEP. Tests updated; AC11 reworded to "adapter output matches upstream except the documented vendor attribute" (DEMAND section 13).
+- 2026-10-15 (owner, second round):
+  - P3-6: when v2 is enabled and `SCANNER_DB_SOURCES` is empty, refuse to start with a clear error. A fixed-DB mode, if ever needed, will be a separate explicit flag later. Implemented as a config check next to the Mongo checks.
+  - History: the CHECKLIST.md restore was folded into the P0-3 commit (no push had happened). New CLAUDE.md rule: run `git diff --stat` before every commit and check that no doc file was emptied or deleted.
+  - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
+  - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
+  - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
 - 2026-10-15 (P0-3): package layout confirmed as in PLAN.md: `pkg/v2/config`, `pkg/v2/dbmgr`, `pkg/v2/registry`, `pkg/v2/store`, `pkg/v2/runner`, `pkg/v2/queue`, `pkg/v2/api`, `pkg/v2/health`. Reason: no clashes with existing packages (`pkg/queue` vs `pkg/v2/queue` differ by path; import with an alias where both are used). Wiring: `cmd/scanner-trivy/main.go` is the one upstream file we must touch. When `SCANNER_V2_API_ENABLED=true` it wraps the existing v1 handler in a small `http.ServeMux` that sends `/api/v2/` to the v2 handler and everything else to the v1 handler, so `pkg/http/api/v1` stays unchanged. The v2 router uses gorilla/mux like v1. Readiness for Mongo and DB (P10-2) will need a touch to `/probe/ready` in `pkg/http/api/v1/handler.go`; decide the smallest hook when we get there.
 - 2026-10-15 (P0-4): libraries and Mongo test strategy.
   - Mongo driver: official `go.mongodb.org/mongo-driver/v2` (includes GridFS). The only new module dependency for Mongo.
@@ -93,6 +99,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  DECISIONS  Second round of owner answers, history fixed
+- Status: done
+- What changed: recorded the decisions above; DEMAND 7.3 and 11 now have the HTTP/2 policy, the `allow-http1` option and the required `SCANNER_DB_SOURCES`; CHECKLIST P2-3, P9-1 and P11-6 reworded and P11-7 added; new commit rule in CLAUDE.md. History rewritten (nothing was pushed): rebased from `cd0de8d` with an edit stop at the P0-3, P0-4, P0-5 and P1-1 commits to write the correct `CHECKLIST.md` in each, then took the decisions commit's own version on the expected conflict. The final tree was identical to the old HEAD (`git diff` empty). The old history is kept on branch `backup/pre-history-fix`; delete it when no longer needed. All commit hashes from P0-3 onward changed.
+- Files: `CLAUDE.md`, `docs/direct-scan/*`
+- Tests run: not applicable
+- Decisions / surprises: a plain `fixup!` commit would only have fixed the P0-3 commit; the P0-4, P0-5 and P1-1 commits each ticked an empty file, so each needed its own correct checklist.
+- Next: P1-4 follow-up, then P2-1
 
 ### 2026-10-15  P1-5  Config unit tests
 - Status: done
@@ -144,7 +158,7 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 
 ### 2026-10-15  CORRECTION  CHECKLIST.md was emptied
 - Status: done
-- What changed: a script bug in the P0-3 commit (`1a58c56`) truncated `CHECKLIST.md` (opened for writing before reading). Restored it from `cd0de8d` and re-ticked P0-3, P0-4, P0-5 and P1-1. Later doc edits use a read-then-write helper that asserts each match.
+- What changed: a script bug in the P0-3 commit (old hash `1a58c56`) truncated `CHECKLIST.md` (opened for writing before reading). Restored it from `cd0de8d` and re-ticked P0-3, P0-4, P0-5 and P1-1. (Later the history was rewritten so the file is never empty in any commit; see the second DECISIONS entry.) Later doc edits use a read-then-write helper that asserts each match.
 - Files: `docs/direct-scan/CHECKLIST.md`
 - Tests run: not applicable
 - Decisions / surprises: none

@@ -18,6 +18,7 @@ This repo is our fork of `goharbor/harbor-scanner-trivy`. We are adding a direct
 ## 2. Working rules
 
 - Write boring, simple, and maintainable code. Prefer existing patterns, basic syntax, and straightforward logic. Avoid unnecessary abstractions, new functions, helpers, classes, dependencies, or clever tricks. Make the smallest possible change and reuse existing code where appropriate. Preserve code ownership and ensure the implementation can be fully understood and reviewed by a human in a single pass.
+- Before every commit, run `git diff --stat` and verify no doc file was emptied or deleted unintentionally.
 - Work on **one checklist task at a time**. Small, reviewable commits, one task per commit where possible. Commit message starts with the task ID, for example `P2-3: add TLS handshake stage`.
 - The spec is `DEMAND.md`. Do not silently change behaviour. If the spec is ambiguous or you think it is wrong, stop and ask the user; record the answer in the PROGRESS.md "Decisions" section and propose the edit to `DEMAND.md`.
 - Do **not** implement deferred items (digest store collection, multi-architecture handling, queue priorities, Trivy analyzer-level restriction). They are listed in `DEMAND.md` section 14.
