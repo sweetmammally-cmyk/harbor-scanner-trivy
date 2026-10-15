@@ -80,6 +80,33 @@ func TestMongoRepositories(t *testing.T) {
 		assert.Equal(t, report, loaded)
 	})
 
+	t.Run("GridFS files carry scan_id and uploaded_at, one file per scan after a retry", func(t *testing.T) {
+		client := freshClient(t, mongoAddr)
+		reports := store.NewMongoReports(client, 100)
+		report := bson.M{"vulnerabilities": strings.Repeat("CVE-2026-0001 ", 50)}
+		before := time.Now().Add(-time.Second)
+
+		for attempt := 0; attempt < 3; attempt++ {
+			scan := store.Scan{ID: "scan-1", State: store.ScanDone}
+			require.NoError(t, reports.Attach(context.Background(), &scan, report))
+		}
+
+		ctx, cancel := client.OperationContext(context.Background())
+		defer cancel()
+		cursor, err := client.Database().Collection(store.ReportBucket+".files").Find(ctx, bson.M{"metadata.scan_id": "scan-1"})
+		require.NoError(t, err)
+		var files []struct {
+			Metadata struct {
+				ScanID     string    `bson:"scan_id"`
+				UploadedAt time.Time `bson:"uploaded_at"`
+			} `bson:"metadata"`
+		}
+		require.NoError(t, cursor.All(ctx, &files))
+		require.Len(t, files, 1, "earlier attempts were deleted")
+		assert.Equal(t, "scan-1", files[0].Metadata.ScanID)
+		assert.True(t, files[0].Metadata.UploadedAt.After(before), "uploaded_at is set")
+	})
+
 	t.Run("concurrent first sightings of a platform all count", func(t *testing.T) {
 		repository := store.NewMongoPlatforms(freshClient(t, mongoAddr))
 		var wg sync.WaitGroup

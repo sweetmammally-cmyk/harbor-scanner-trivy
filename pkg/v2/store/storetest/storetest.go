@@ -5,6 +5,7 @@ package storetest
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -200,6 +201,67 @@ func ReportStore(t *testing.T, newStore func(t *testing.T, limit int) store.Repo
 
 		require.NoError(t, err)
 		assert.Nil(t, loaded)
+	})
+
+	t.Run("a retry of the same scan deletes the earlier file", func(t *testing.T) {
+		reports := newStore(t, 100)
+		first := scan("scan-1", "", "sha256:a", store.ScanDone, at(1))
+		require.NoError(t, reports.Attach(ctx, &first, report))
+		retry := scan("scan-1", "", "sha256:a", store.ScanDone, at(2))
+		require.NoError(t, reports.Attach(ctx, &retry, report))
+
+		_, err := reports.Load(ctx, first)
+		assert.Error(t, err, "the earlier file is gone")
+		loaded, err := reports.Load(ctx, retry)
+		require.NoError(t, err)
+		assert.Equal(t, report, loaded)
+	})
+
+	t.Run("save with report: a failed save deletes the uploaded file", func(t *testing.T) {
+		reports := newStore(t, 100)
+		var attempted store.Scan
+		saveErr := errors.New("mongo write failed")
+
+		err := store.SaveWithReport(ctx, reports, scan("scan-1", "", "sha256:a", store.ScanDone, at(1)), report,
+			func(ctx context.Context, scan store.Scan) error {
+				attempted = scan
+				return saveErr
+			})
+
+		assert.ErrorIs(t, err, saveErr)
+		require.NotNil(t, attempted.ReportGridFSID, "the file was uploaded before the save")
+		_, err = reports.Load(ctx, attempted)
+		assert.Error(t, err, "and deleted after the failed save")
+	})
+
+	t.Run("save with report: a successful save keeps the file", func(t *testing.T) {
+		reports := newStore(t, 100)
+		var saved store.Scan
+
+		err := store.SaveWithReport(ctx, reports, scan("scan-1", "", "sha256:a", store.ScanDone, at(1)), report,
+			func(ctx context.Context, scan store.Scan) error {
+				saved = scan
+				return nil
+			})
+
+		require.NoError(t, err)
+		loaded, err := reports.Load(ctx, saved)
+		require.NoError(t, err)
+		assert.Equal(t, report, loaded)
+	})
+
+	t.Run("save with report: a small report has no file to delete", func(t *testing.T) {
+		reports := newStore(t, 10_000)
+		saveErr := errors.New("mongo write failed")
+
+		err := store.SaveWithReport(ctx, reports, scan("scan-1", "", "sha256:a", store.ScanDone, at(1)), report,
+			func(ctx context.Context, scan store.Scan) error {
+				assert.Nil(t, scan.ReportGridFSID)
+				assert.Equal(t, report, scan.Report)
+				return saveErr
+			})
+
+		assert.ErrorIs(t, err, saveErr)
 	})
 
 	t.Run("unknown GridFS file", func(t *testing.T) {

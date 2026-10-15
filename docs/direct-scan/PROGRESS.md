@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 5 (MongoDB data plane)
 - Last completed task: P5-5
 - In progress: none
-- Next task: P5-5 follow-up (GridFS upload/cleanup rules), then P5-6, P5-7
+- Next task: P5-6 (DB state per instance in Mongo, flush on reconnect, startup load with disk check, bounded db_checks buffer), then P5-7
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -160,6 +160,18 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-5  Follow-up: GridFS upload order and cleanup
+- Status: done
+- What changed: in `pkg/v2/store/reports.go`:
+  - `ReportStore.Attach` first deletes earlier GridFS files of the same `scan_id` (found by `metadata.scan_id`), then uploads with metadata `scan_id` and `uploaded_at`.
+  - New `ReportStore.Discard` deletes a scan's file.
+  - New `SaveWithReport(ctx, reports, scan, report, save)` holds the order: attach (upload first), save the scan document, and on a failed save discard the file at once (best effort, WARN if that fails too) and return the save error.
+  - The memory fake does the same.
+- Files: `pkg/v2/store/reports.go`, `pkg/v2/store/storetest/storetest.go`, `test/integration/store/repositories_test.go`
+- Tests run: `go test -short -race -count=2 ./pkg/v2/...` -> ok; `make test` -> ok; integration against `mongo:7` -> ok. New contract cases, run on the fake and on MongoDB: a retry of the same scan deletes the earlier file; a failed save deletes the file uploaded for it and returns the save error; a successful save keeps the file; a small report has no file. MongoDB only: after three attempts for one scan there is one file in `reports.files`, with `metadata.scan_id` and a recent `metadata.uploaded_at`.
+- Decisions / surprises: none.
+- Next: P5-6
 
 ### 2026-10-15  P5-5  Large reports in GridFS
 - Status: done
