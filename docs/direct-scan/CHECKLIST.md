@@ -52,7 +52,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P5-2 Models and collections: `scans`, `platforms`, `db_state`, `db_checks`
 - [x] P5-3 Ensure schema on every Mongo up transition (retried; readiness needs schema ready): indexes via createIndexes only (scans.request_id unique partial; image.digest+state+finished_at; customer_ids+finished_at; state+queued_at; TTL on `db_checks.at` from `SCANNER_DB_CHECKS_RETENTION` 30d, collMod on change); conflicting index = ERROR + not ready, never dropped; `schema_version` via upsert + $setOnInsert, newer stored = not ready, older = migrate then set
 - [x] P5-4 Repositories behind interfaces, with fakes for unit tests
-- [ ] P5-5 GridFS for reports above the size threshold
+- [x] P5-5 GridFS for reports above the size threshold
 - [ ] P5-6 Persist DB state and checks in Mongo (replace the in-memory implementation); the DB updater keeps running while Mongo is down, state stays in memory and is written when Mongo is back; not ready while Mongo is down
 - [ ] P5-7 Integration tests against real Mongo
 

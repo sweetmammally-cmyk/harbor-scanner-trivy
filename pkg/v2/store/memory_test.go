@@ -18,3 +18,7 @@ func TestMemoryPlatforms(t *testing.T) {
 func TestMemoryDBChecks(t *testing.T) {
 	storetest.DBCheckRepository(t, func(t *testing.T) store.DBCheckRepository { return store.NewMemoryDBChecks() })
 }
+
+func TestMemoryReports(t *testing.T) {
+	storetest.ReportStore(t, func(t *testing.T, limit int) store.ReportStore { return store.NewMemoryReports(limit) })
+}

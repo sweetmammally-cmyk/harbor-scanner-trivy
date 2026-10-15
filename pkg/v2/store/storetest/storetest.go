@@ -5,11 +5,13 @@ package storetest
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
@@ -156,5 +158,58 @@ func DBCheckRepository(t *testing.T, newRepository func(t *testing.T) store.DBCh
 		java, err := repository.Recent(ctx, "java-db", 10)
 		require.NoError(t, err)
 		assert.Len(t, java, 1)
+	})
+}
+
+// ReportStore checks the ReportStore contract. newStore returns an empty store
+// that keeps reports up to limit BSON bytes inline.
+func ReportStore(t *testing.T, newStore func(t *testing.T, limit int) store.ReportStore) {
+	ctx := context.Background()
+	report := bson.M{"vulnerabilities": strings.Repeat("CVE-2026-0001 ", 50)}
+
+	t.Run("small report stays inline", func(t *testing.T) {
+		reports := newStore(t, 10_000)
+		scan := scan("scan-1", "", "sha256:a", store.ScanDone, at(1))
+
+		require.NoError(t, reports.Attach(ctx, &scan, report))
+
+		assert.Equal(t, report, scan.Report)
+		assert.Nil(t, scan.ReportGridFSID)
+		loaded, err := reports.Load(ctx, scan)
+		require.NoError(t, err)
+		assert.Equal(t, report, loaded)
+	})
+
+	t.Run("large report goes to GridFS", func(t *testing.T) {
+		reports := newStore(t, 100)
+		scan := scan("scan-1", "", "sha256:a", store.ScanDone, at(1))
+
+		require.NoError(t, reports.Attach(ctx, &scan, report))
+
+		assert.Nil(t, scan.Report)
+		require.NotNil(t, scan.ReportGridFSID)
+		loaded, err := reports.Load(ctx, scan)
+		require.NoError(t, err)
+		assert.Equal(t, report, loaded)
+	})
+
+	t.Run("scan without report", func(t *testing.T) {
+		reports := newStore(t, 100)
+
+		loaded, err := reports.Load(ctx, scan("scan-1", "", "sha256:a", store.ScanQueued, nil))
+
+		require.NoError(t, err)
+		assert.Nil(t, loaded)
+	})
+
+	t.Run("unknown GridFS file", func(t *testing.T) {
+		reports := newStore(t, 100)
+		missing := bson.NewObjectID()
+		withMissingFile := scan("scan-1", "", "sha256:a", store.ScanDone, at(1))
+		withMissingFile.ReportGridFSID = &missing
+
+		_, err := reports.Load(ctx, withMissingFile)
+
+		assert.Error(t, err)
 	})
 }

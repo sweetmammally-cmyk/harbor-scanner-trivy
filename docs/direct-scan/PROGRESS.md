@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 5 (MongoDB data plane)
-- Last completed task: P5-4
+- Last completed task: P5-5
 - In progress: none
-- Next task: P5-5 (GridFS for reports above the size threshold)
+- Next task: P5-6 (DB state and checks in Mongo; the updater keeps running while Mongo is down, state in memory until Mongo is back)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -155,6 +155,19 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-5  Large reports in GridFS
+- Status: done
+- What changed: `pkg/v2/store/reports.go`:
+  - `ReportStore` interface: `Attach(ctx, *Scan, report)` keeps the report in `scan.Report` up to the limit, otherwise uploads its BSON to the GridFS bucket `reports` (file name = scan id) and sets `scan.ReportGridFSID`; `Load(ctx, scan)` reads it back from either place (nil when there is none).
+  - `MongoReports` (GridFS, with the operation deadline) and `MemoryReports` (fake). Constant `ReportInlineLimit` = 8 MiB of BSON.
+  - Contract tests `storetest.ReportStore`, run against both.
+- Files: `pkg/v2/store/reports.go`, `pkg/v2/store/storetest/storetest.go`, `pkg/v2/store/memory_test.go`, `test/integration/store/repositories_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/...` -> ok; `make test` -> ok; `go test -tags=integration ./test/integration/...` -> ok. Contract: small stays inline, large goes to GridFS and loads back equal, no report gives nil, an unknown GridFS id is an error. MongoDB only: a report of about 20 MB is refused inline by MongoDB, then stored through GridFS with the default limit; the scan document is saved, read back, and the report loads back identical.
+- Decisions / surprises:
+  - The threshold is a code constant (8 MiB, half of the 16 MiB document limit), not a setting; DEMAND only says "above a size threshold". To confirm with the owner.
+  - GridFS files are not deleted with their scans: retention is deferred (DEMAND section 14). A file uploaded for a scan whose document then fails to save stays orphaned until retention exists.
+- Next: P5-6
 
 ### 2026-10-15  P5-4  Repositories, fakes and contract tests
 - Status: done
