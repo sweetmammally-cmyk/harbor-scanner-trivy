@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 0
-- Last completed task: P0-4
+- Phase: 0 done; Phase 1 next
+- Last completed task: P0-5
 - In progress: none
-- Next task: P0-5
+- Next task: P1-1
 - Blockers / questions for the user: baseline has 3 failing tests caused by commit `0c87038` (Harbor report now carries `vendor_attributes.Trivy`). Owner must choose: keep the change and update the tests, or revert it. Also: the INFO-level "FULL TRIVY REPORT" dump in `pkg/trivy/wrapper.go` looks like leftover debug code.
 - Last updated: 2026-10-15
 
@@ -84,6 +84,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P0-5  Commands in CLAUDE.md
+- Status: done
+- What changed: filled section 4 (Commands) of `CLAUDE.md`.
+- Files: `CLAUDE.md`, `docs/direct-scan/PROGRESS.md`, `docs/direct-scan/CHECKLIST.md`
+- Tests run: not applicable (commands were run in P0-2)
+- Decisions / surprises: none
+- Next: P1-1
 
 ### 2026-10-15  P0-4  Mongo test strategy and libraries
 - Status: done

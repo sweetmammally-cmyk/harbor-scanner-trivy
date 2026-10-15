@@ -8,7 +8,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P0-2 Run existing build and tests; record exact commands and baseline result
 - [x] P0-3 Confirm or adjust the package layout (`pkg/v2/...`); record decision
 - [x] P0-4 Decide Mongo test strategy and libraries (Mongo driver, SOCKS5); record decision
-- [ ] P0-5 Fill the Commands section of `CLAUDE.md`
+- [x] P0-5 Fill the Commands section of `CLAUDE.md`
 
 ## Phase 1: Config and skeleton
 - [ ] P1-1 Feature flag `SCANNER_V2_API_ENABLED`; v2 wiring off by default

@@ -39,13 +39,17 @@ When the context is getting long, or the user ends the session, write a handoff 
 
 ## 4. Commands
 
-Filled in by task P0-5. Until then, discover them from the Makefile and CI files.
+```
+build:             go build ./...            (binary: make build)
+test:              make test                 (unit, -short -race, no Docker)
+one package:       go test -short ./pkg/v2/config/...
+integration:       make test-integration     (build tag integration, needs Docker: Redis, Mongo, registry)
+component:         make test-component       (builds the Docker image; slow)
+vet:               go vet ./...
+lint:              make lint                 (needs ./bin/golangci-lint; not installed locally, the pinned v1.21.0 is too old for Go 1.26)
+```
 
-```
-build:  (TBD)
-test:   (TBD)
-lint:   (TBD)
-```
+Baseline is not fully green: see PROGRESS.md "Repo facts" for the known failing tests. Do not count those as regressions, and do not count new failures as baseline.
 
 ## 5. Quick map
 
