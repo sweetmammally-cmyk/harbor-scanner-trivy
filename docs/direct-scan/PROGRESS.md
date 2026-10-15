@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 4 (updater and freshness)
-- Last completed task: P4-4
+- Phase: 4 done; Phase 5 (MongoDB data plane) next
+- Last completed task: P4-5
 - In progress: none
-- Next task: P4-5 (fake-clock tests, including the 3h fallback)
+- Next task: P5-1 (Mongo client, connect, ping; not ready and 503 while Mongo is down; the DB updater keeps running without Mongo, see Decisions)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -137,6 +137,18 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P4-5  Fake-clock tests
+- Status: done
+- What changed: `Updater.after` (default `time.After`) is the wait used by `Run`, next to `Updater.now`. `clock_test.go` has a `fakeClock` whose `After` records each requested wait and ends it only when the test fires it.
+- Files: `pkg/v2/dbmgr/updater.go`, `pkg/v2/dbmgr/clock_test.go`
+- Tests run: `go test -short -race -count=5 ./pkg/v2/...` -> ok; coverage config 100%, dbmgr 89.5%; `make test` -> ok; `go test -tags=integration ./test/integration/...` -> ok. Cases, without real waiting:
+  - `GetConfig` with `SCANNER_DB_CHECK_INTERVAL` unset gives 3h; a real `Run` then asks for 15m after a degraded first run (newer DB not installed), 3h after the retry installs, and 3h again when up to date.
+  - `1d` gives a 24h wait.
+  - The on-demand min gap follows the clock: 59s after a run there is no refresh, 61s after there is one.
+  - Freshness is `ok` exactly at max age and `stale` one second later.
+- Decisions / surprises: the age WARN in `update` still uses the real clock; it only logs, so it was not worth another injection point.
+- Next: P5-1
 
 ### 2026-10-15  P4-4  On-demand refresh
 - Status: done

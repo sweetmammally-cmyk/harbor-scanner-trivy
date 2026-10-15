@@ -31,8 +31,9 @@ type Updater struct {
 	cfg      config.Config
 	cacheDir string
 	store    StateStore
-	// now is the clock. Tests replace it.
-	now func() time.Time
+	// now and after are the clock. Tests replace them.
+	now   func() time.Time
+	after func(time.Duration) <-chan time.Time
 
 	mu      sync.Mutex
 	running *updateRun
@@ -49,7 +50,7 @@ type updateRun struct {
 // run it saves the state of each DB in store. ctx is the service lifetime: when it
 // ends, Run returns and runs stop.
 func NewUpdater(ctx context.Context, cfg config.Config, cacheDir string, store StateStore) *Updater {
-	return &Updater{ctx: ctx, cfg: cfg, cacheDir: cacheDir, store: store, now: time.Now}
+	return &Updater{ctx: ctx, cfg: cfg, cacheDir: cacheDir, store: store, now: time.Now, after: time.After}
 }
 
 // Run installs the seed DBs when no DB exists yet, updates at once, and then
@@ -76,7 +77,7 @@ func (u *Updater) Run() {
 		select {
 		case <-u.ctx.Done():
 			return
-		case <-time.After(next):
+		case <-u.after(next):
 		}
 	}
 }
