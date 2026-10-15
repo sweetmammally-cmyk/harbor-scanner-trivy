@@ -28,8 +28,10 @@ type Config struct {
 	MongoConnectTimeout         time.Duration `env:"SCANNER_MONGO_CONNECT_TIMEOUT" envDefault:"5s"`
 	MongoServerSelectionTimeout time.Duration `env:"SCANNER_MONGO_SERVER_SELECTION_TIMEOUT" envDefault:"5s"`
 	MongoOperationTimeout       time.Duration `env:"SCANNER_MONGO_OPERATION_TIMEOUT" envDefault:"10s"`
-	// DBChecksRetention is read from SCANNER_DB_CHECKS_RETENTION by GetConfig ("30d" style).
+	// DBChecksRetention and DBStateRetention are read from SCANNER_DB_CHECKS_RETENTION
+	// and SCANNER_DB_STATE_RETENTION by GetConfig ("30d" style).
 	DBChecksRetention time.Duration
+	DBStateRetention  time.Duration
 
 	RegistryURL      string `env:"SCANNER_REGISTRY_URL"`
 	RegistryUsername string `env:"SCANNER_REGISTRY_USERNAME"`
@@ -108,6 +110,9 @@ func GetConfig() (Config, error) {
 		if err != nil {
 			return cfg, fmt.Errorf("SCANNER_INSTANCE_ID is unset and the hostname is unknown: %w", err)
 		}
+		slog.Warn("SCANNER_INSTANCE_ID is not set, using the hostname; set it explicitly (for example in compose) "+
+			"so the instance keeps its DB state when its container is recreated",
+			slog.String("instance_id", cfg.InstanceID))
 	}
 
 	retention := os.Getenv("SCANNER_DB_CHECKS_RETENTION")
@@ -117,6 +122,20 @@ func GetConfig() (Config, error) {
 	cfg.DBChecksRetention, err = ParseDuration(retention)
 	if err != nil || cfg.DBChecksRetention < time.Second {
 		return cfg, fmt.Errorf("SCANNER_DB_CHECKS_RETENTION: invalid duration %q", retention)
+	}
+
+	stateRetention := os.Getenv("SCANNER_DB_STATE_RETENTION")
+	if stateRetention == "" {
+		stateRetention = "7d"
+	}
+	cfg.DBStateRetention, err = ParseDuration(stateRetention)
+	if err != nil {
+		return cfg, fmt.Errorf("SCANNER_DB_STATE_RETENTION: invalid duration %q", stateRetention)
+	}
+	// A live instance writes its state at least once per check interval.
+	if cfg.DBStateRetention < 2*cfg.DBCheckInterval {
+		return cfg, fmt.Errorf("SCANNER_DB_STATE_RETENTION (%s) must be at least twice SCANNER_DB_CHECK_INTERVAL (%s)",
+			cfg.DBStateRetention, cfg.DBCheckInterval)
 	}
 
 	cfg.DBSources, err = ParseDBSources(os.Getenv("SCANNER_DB_SOURCES"))

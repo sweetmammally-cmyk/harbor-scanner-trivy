@@ -28,6 +28,7 @@ type Client struct {
 	db                *mongo.Database
 	opTimeout         time.Duration
 	dbChecksRetention time.Duration
+	dbStateRetention  time.Duration
 	// uri is kept only to remove it from error messages.
 	uri string
 
@@ -62,6 +63,7 @@ func NewClient(cfg config.Config) (*Client, error) {
 		db:                client.Database(cfg.MongoDB),
 		opTimeout:         cfg.MongoOperationTimeout,
 		dbChecksRetention: cfg.DBChecksRetention,
+		dbStateRetention:  cfg.DBStateRetention,
 		uri:               cfg.MongoURI,
 	}
 	c.ping = func(ctx context.Context) error {

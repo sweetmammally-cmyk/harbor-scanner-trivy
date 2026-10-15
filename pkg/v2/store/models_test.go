@@ -137,6 +137,7 @@ func TestDBStateDocument_BSON(t *testing.T) {
 		ID:         "scanner-1:db",
 		InstanceID: "scanner-1",
 		DB:         "db",
+		UpdatedAt:  at,
 		DBState: dbmgr.DBState{
 			Mode:                   dbmgr.ModeNormal,
 			ActiveSource:           "ghcr.io/aquasecurity/trivy-db:2|direct",
@@ -150,7 +151,7 @@ func TestDBStateDocument_BSON(t *testing.T) {
 		},
 	}
 
-	assert.Equal(t, sorted("_id", "instance_id", "db", "mode", "active_source", "manifest_digest", "last_upstream_check_at",
+	assert.Equal(t, sorted("_id", "instance_id", "db", "updated_at", "mode", "active_source", "manifest_digest", "last_upstream_check_at",
 		"last_confirmed_current_at", "newer_available", "installed_at", "metadata", "last_sources"), keysOf(t, document))
 	assert.Equal(t, sorted("version", "next_update", "updated_at", "downloaded_at"), keysOf(t, document.Metadata))
 	assert.Equal(t, sorted("source", "precheck", "answered", "manifest_digest", "installed"), keysOf(t, sourceResult()))

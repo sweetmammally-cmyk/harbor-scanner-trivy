@@ -162,7 +162,7 @@ func (s *DBStateStore) Flush(ctx context.Context) {
 func (s *DBStateStore) writeState(ctx context.Context, db string, state dbmgr.DBState) error {
 	ctx, cancel := s.client.OperationContext(ctx)
 	defer cancel()
-	document := DBStateDocument{ID: s.instanceID + ":" + db, InstanceID: s.instanceID, DB: db, DBState: state}
+	document := DBStateDocument{ID: s.instanceID + ":" + db, InstanceID: s.instanceID, DB: db, UpdatedAt: time.Now(), DBState: state}
 	_, err := s.client.Database().Collection(CollectionDBState).ReplaceOne(ctx,
 		bson.D{{Key: "_id", Value: document.ID}}, document, options.Replace().SetUpsert(true))
 	if err != nil {

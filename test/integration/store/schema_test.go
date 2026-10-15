@@ -22,6 +22,7 @@ func schemaConfig(addr, database string, retention time.Duration) config.Config 
 	cfg := mongoConfig(addr)
 	cfg.MongoDB = database
 	cfg.DBChecksRetention = retention
+	cfg.DBStateRetention = 7 * 24 * time.Hour
 	return cfg
 }
 
@@ -141,6 +142,32 @@ func TestSchema(t *testing.T) {
 		require.NoError(t, changed.EnsureSchema(context.Background()))
 
 		assert.EqualValues(t, 7*24*3600, indexes(t, changed, "db_checks")["at_ttl"]["expireAfterSeconds"])
+	})
+
+	t.Run("db_state TTL on updated_at follows its retention, updated with collMod", func(t *testing.T) {
+		cfg := schemaConfig(mongoAddr, "state_ttl", retention)
+		client := newClient(t, cfg)
+		require.NoError(t, client.EnsureSchema(context.Background()))
+		ttl := indexes(t, client, "db_state")["updated_at_ttl"]
+		assert.EqualValues(t, 7*24*3600, ttl["expireAfterSeconds"])
+		assert.Equal(t, bson.M{"updated_at": int32(1)}, bsonToMap(ttl["key"]))
+
+		cfg.DBStateRetention = 2 * 24 * time.Hour
+		changed := newClient(t, cfg)
+		require.NoError(t, changed.EnsureSchema(context.Background()))
+
+		assert.EqualValues(t, 2*24*3600, indexes(t, changed, "db_state")["updated_at_ttl"]["expireAfterSeconds"])
+	})
+
+	t.Run("a zero retention is refused rather than deleting everything", func(t *testing.T) {
+		cfg := schemaConfig(mongoAddr, "zero_ttl", retention)
+		cfg.DBStateRetention = 0
+		client := newClient(t, cfg)
+
+		err := client.EnsureSchema(context.Background())
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "index db_state.updated_at_ttl: retention 0s is too short")
 	})
 
 	t.Run("a conflicting index is reported, kept, and the replica is not ready", func(t *testing.T) {

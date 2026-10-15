@@ -18,8 +18,11 @@ const SchemaVersion = 1
 // CollectionSchemaVersion holds one document, _id "schema", with the stored version.
 const CollectionSchemaVersion = "schema_version"
 
-// dbChecksTTLIndex is the TTL index on db_checks.at.
-const dbChecksTTLIndex = "at_ttl"
+// The TTL indexes: old db_checks rows and the db_state of instances that are gone expire.
+var (
+	dbChecksTTL = index{collection: CollectionDBChecks, name: "at_ttl", keys: bson.D{{Key: "at", Value: 1}}}
+	dbStateTTL  = index{collection: CollectionDBState, name: "updated_at_ttl", keys: bson.D{{Key: "updated_at", Value: 1}}}
+)
 
 // MongoDB error codes for an index that exists with other options or keys.
 const (
@@ -95,7 +98,10 @@ func (c *Client) EnsureSchema(ctx context.Context) error {
 			return err
 		}
 	}
-	if err = c.ensureDBChecksTTL(ctx); err != nil {
+	if err = c.ensureTTL(ctx, dbChecksTTL, c.dbChecksRetention); err != nil {
+		return err
+	}
+	if err = c.ensureTTL(ctx, dbStateTTL, c.dbStateRetention); err != nil {
 		return err
 	}
 
@@ -161,12 +167,16 @@ func isIndexConflict(err error) bool {
 		(serverError.HasErrorCode(codeIndexOptionsConflict) || serverError.HasErrorCode(codeIndexKeySpecsConflict))
 }
 
-// ensureDBChecksTTL creates the TTL index on db_checks.at, or updates its
-// expireAfterSeconds with collMod when the retention changed.
-func (c *Client) ensureDBChecksTTL(ctx context.Context) error {
-	want := int64(c.dbChecksRetention / time.Second)
+// ensureTTL creates the TTL index ix (one date field) with the retention, or
+// updates its expireAfterSeconds with collMod when the retention changed.
+func (c *Client) ensureTTL(ctx context.Context, ix index, retention time.Duration) error {
+	// A zero TTL would delete every document at once: never create one by mistake.
+	if retention < time.Second {
+		return fmt.Errorf("index %s.%s: retention %s is too short", ix.collection, ix.name, retention)
+	}
+	want := int64(retention / time.Second)
 
-	current, found, err := c.ttlSeconds(ctx)
+	current, found, err := c.ttlSeconds(ctx, ix)
 	if err != nil {
 		return err
 	}
@@ -177,46 +187,43 @@ func (c *Client) ensureDBChecksTTL(ctx context.Context) error {
 		opCtx, cancel := c.OperationContext(ctx)
 		defer cancel()
 		err = c.db.RunCommand(opCtx, bson.D{
-			{Key: "collMod", Value: CollectionDBChecks},
-			{Key: "index", Value: bson.D{{Key: "name", Value: dbChecksTTLIndex}, {Key: "expireAfterSeconds", Value: want}}},
+			{Key: "collMod", Value: ix.collection},
+			{Key: "index", Value: bson.D{{Key: "name", Value: ix.name}, {Key: "expireAfterSeconds", Value: want}}},
 		}).Err()
 		if err != nil {
-			return fmt.Errorf("updating index %s.%s with collMod: %w", CollectionDBChecks, dbChecksTTLIndex, err)
+			return fmt.Errorf("updating index %s.%s with collMod: %w", ix.collection, ix.name, err)
 		}
-		slog.Info("updated the db_checks retention", slog.Int64("from_seconds", current), slog.Int64("to_seconds", want))
+		slog.Info("updated a retention", slog.String("index", ix.collection+"."+ix.name),
+			slog.Int64("from_seconds", current), slog.Int64("to_seconds", want))
 		return nil
 	}
 
-	return c.createIndex(ctx, index{
-		collection: CollectionDBChecks,
-		name:       dbChecksTTLIndex,
-		keys:       bson.D{{Key: "at", Value: 1}},
-		options:    options.Index().SetExpireAfterSeconds(int32(want)),
-	})
+	ix.options = options.Index().SetExpireAfterSeconds(int32(want))
+	return c.createIndex(ctx, ix)
 }
 
-// ttlSeconds returns the expireAfterSeconds of the db_checks TTL index, if it exists.
-func (c *Client) ttlSeconds(ctx context.Context) (int64, bool, error) {
+// ttlSeconds returns the expireAfterSeconds of the TTL index ix, if it exists.
+func (c *Client) ttlSeconds(ctx context.Context, ix index) (int64, bool, error) {
 	opCtx, cancel := c.OperationContext(ctx)
 	defer cancel()
-	cursor, err := c.db.Collection(CollectionDBChecks).Indexes().List(opCtx)
+	cursor, err := c.db.Collection(ix.collection).Indexes().List(opCtx)
 	var serverError mongo.ServerError
 	if errors.As(err, &serverError) && serverError.HasErrorCode(codeNamespaceNotFound) {
 		return 0, false, nil
 	}
 	if err != nil {
-		return 0, false, fmt.Errorf("listing indexes of %s: %w", CollectionDBChecks, err)
+		return 0, false, fmt.Errorf("listing indexes of %s: %w", ix.collection, err)
 	}
 	var indexes []bson.M
 	if err = cursor.All(opCtx, &indexes); err != nil {
-		return 0, false, fmt.Errorf("listing indexes of %s: %w", CollectionDBChecks, err)
+		return 0, false, fmt.Errorf("listing indexes of %s: %w", ix.collection, err)
 	}
 
-	for _, ix := range indexes {
-		if ix["name"] != dbChecksTTLIndex {
+	for _, existing := range indexes {
+		if existing["name"] != ix.name {
 			continue
 		}
-		switch seconds := ix["expireAfterSeconds"].(type) {
+		switch seconds := existing["expireAfterSeconds"].(type) {
 		case int32:
 			return int64(seconds), true, nil
 		case int64:

@@ -16,6 +16,7 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	DBStateRetention:            7 * 24 * time.Hour,
 	InstanceID:                  hostname(),
 	DBChecksRetention:           30 * 24 * time.Hour,
 	MongoConnectTimeout:         5 * time.Second,
@@ -132,6 +133,21 @@ func TestGetConfig(t *testing.T) {
 			expectedError: `SCANNER_DB_CHECKS_RETENTION: invalid duration "500ms"`,
 		},
 		{
+			name: "Should return error when SCANNER_DB_STATE_RETENTION is invalid",
+			envs: Envs{
+				"SCANNER_DB_STATE_RETENTION": "a week",
+			},
+			expectedError: `SCANNER_DB_STATE_RETENTION: invalid duration "a week"`,
+		},
+		{
+			name: "Should return error when SCANNER_DB_STATE_RETENTION is shorter than twice the check interval",
+			envs: Envs{
+				"SCANNER_DB_CHECK_INTERVAL":  "1d",
+				"SCANNER_DB_STATE_RETENTION": "36h",
+			},
+			expectedError: "SCANNER_DB_STATE_RETENTION (36h0m0s) must be at least twice SCANNER_DB_CHECK_INTERVAL (24h0m0s)",
+		},
+		{
 			name: "Should return error when a duration is invalid",
 			envs: Envs{
 				"SCANNER_SCAN_TIMEOUT": "ten minutes",
@@ -164,6 +180,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_MONGO_SERVER_SELECTION_TIMEOUT": "2s",
 				"SCANNER_MONGO_OPERATION_TIMEOUT":        "3s",
 				"SCANNER_DB_CHECKS_RETENTION":            "7d",
+				"SCANNER_DB_STATE_RETENTION":             "3d",
 				"SCANNER_REGISTRY_URL":                   "https://harbor.local",
 				"SCANNER_REGISTRY_USERNAME":              "robot$scanner",
 				"SCANNER_REGISTRY_PASSWORD":              "s3cret",
@@ -200,6 +217,7 @@ func TestGetConfig(t *testing.T) {
 				MongoServerSelectionTimeout: 2 * time.Second,
 				MongoOperationTimeout:       3 * time.Second,
 				DBChecksRetention:           7 * 24 * time.Hour,
+				DBStateRetention:            3 * 24 * time.Hour,
 				RegistryURL:                 "https://harbor.local",
 				RegistryUsername:            "robot$scanner",
 				RegistryPassword:            "s3cret",
@@ -277,6 +295,7 @@ func TestGetConfig_DBCheckInterval(t *testing.T) {
 			defer slog.SetDefault(defaultLogger)
 
 			t.Setenv("SCANNER_DB_CHECK_INTERVAL", tc.value)
+			t.Setenv("SCANNER_INSTANCE_ID", "scanner-1") // only the interval may log here
 
 			cfg, err := GetConfig()
 			require.NoError(t, err)
@@ -332,10 +351,31 @@ func hostname() string {
 
 func TestGetConfig_InstanceIDDefaultsToHostname(t *testing.T) {
 	t.Setenv("SCANNER_INSTANCE_ID", "")
+	var logs bytes.Buffer
+	defaultLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(defaultLogger)
 
 	cfg, err := GetConfig()
 
 	require.NoError(t, err)
 	assert.Equal(t, hostname(), cfg.InstanceID)
 	assert.NotEmpty(t, cfg.InstanceID)
+	assert.Contains(t, logs.String(), "level=WARN msg=\"SCANNER_INSTANCE_ID is not set, using the hostname")
+	assert.Contains(t, logs.String(), "instance_id="+hostname())
+}
+
+func TestGetConfig_InstanceIDSetHasNoWarning(t *testing.T) {
+	t.Setenv("SCANNER_INSTANCE_ID", "scanner-1")
+	t.Setenv("SCANNER_DB_CHECK_INTERVAL", "1h")
+	var logs bytes.Buffer
+	defaultLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(defaultLogger)
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	assert.Equal(t, "scanner-1", cfg.InstanceID)
+	assert.NotContains(t, logs.String(), "SCANNER_INSTANCE_ID")
 }

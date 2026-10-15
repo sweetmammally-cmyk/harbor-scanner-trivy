@@ -111,6 +111,8 @@ func mongoConfig(addr string) config.Config {
 		MongoConnectTimeout:         2 * time.Second,
 		MongoServerSelectionTimeout: 2 * time.Second,
 		MongoOperationTimeout:       5 * time.Second,
+		DBChecksRetention:           24 * time.Hour,
+		DBStateRetention:            24 * time.Hour,
 	}
 }
 

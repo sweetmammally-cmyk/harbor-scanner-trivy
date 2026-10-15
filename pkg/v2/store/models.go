@@ -93,9 +93,12 @@ type Platform struct {
 // DBStateDocument is a document of the db_state collection: one per scanner
 // instance and DB kind, with _id "<instance_id>:<db>" (db is "db" or "java-db").
 type DBStateDocument struct {
-	ID            string `bson:"_id"`
-	InstanceID    string `bson:"instance_id"`
-	DB            string `bson:"db"`
+	ID         string `bson:"_id"`
+	InstanceID string `bson:"instance_id"`
+	DB         string `bson:"db"`
+	// UpdatedAt is set on every write; the TTL index on it removes the state of
+	// instances that are gone (SCANNER_DB_STATE_RETENTION).
+	UpdatedAt     time.Time `bson:"updated_at"`
 	dbmgr.DBState `bson:",inline"`
 }
 

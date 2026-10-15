@@ -166,6 +166,16 @@ Touched by this plan:
 - Next: <next task ID>
 ```
 
+### 2026-10-15  P5-6  Follow-up: db_state retention, instance id warning
+- Status: done
+- What changed:
+  - Config: `DBStateRetention` (`SCANNER_DB_STATE_RETENTION`, default `7d`); startup error when it is invalid or shorter than twice `SCANNER_DB_CHECK_INTERVAL`. When `SCANNER_INSTANCE_ID` falls back to the hostname, `GetConfig` logs a WARN asking to set it (for example in compose).
+  - Store: `DBStateDocument.UpdatedAt` is set on every write. `EnsureSchema` creates `db_state.updated_at_ttl` next to `db_checks.at_ttl`; both go through one `ensureTTL(index, retention)` (create, or `collMod` when the retention changed). `ensureTTL` refuses a retention under 1s, because a zero TTL would delete everything at once.
+- Files: `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`, `pkg/v2/store/schema.go`, `pkg/v2/store/client.go`, `pkg/v2/store/models.go`, `pkg/v2/store/dbstate.go`, `pkg/v2/store/models_test.go`, `test/integration/store/schema_test.go`, `test/integration/store/mongo_test.go`
+- Tests run: `go test -short -race ./pkg/v2/...` -> ok (config 98.9%); `make test` -> ok; `go test -tags=integration ./test/integration/...` -> ok. New: config default 7d, explicit 3d, invalid value, 36h with a 1d interval refused; WARN logged with the hostname, none when the id is set. Integration: `db_state.updated_at_ttl` is 604800 and becomes 172800 through `collMod`; a zero retention gives an error naming `db_state.updated_at_ttl`.
+- Decisions / surprises: the new zero-retention guard found a test bug from P5-1: `mongoConfig` in the integration tests set no retention, so the client tests had been creating a `db_checks` TTL index of 0 seconds without failing. Both retentions are set there now. The instance-id WARN, like the fallback-interval WARN, is logged by `GetConfig` even when v2 is disabled; P9-1 handles both.
+- Next: first-reconnect load
+
 ### 2026-10-15  P5-6  Follow-up: deterministic db_checks ids
 - Status: done
 - What changed: `DBCheck.ID` is a string, `DBCheckID(instance, db, runStartedAt, source)` = "<instance_id>:<db>:<run_started_at RFC3339Nano UTC>:<source>". `DBStateStore.Save` takes the run start from the first source's pre-check start. `MongoDBChecks.Add` writes with an unordered `BulkWrite` of `ReplaceOne` + upsert on `_id`; `MemoryDBChecks.Add` replaces by id too.
