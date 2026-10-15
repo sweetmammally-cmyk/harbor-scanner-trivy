@@ -4,7 +4,7 @@ Legend: `[ ]` todo, `[~]` in progress (note where you stopped in PROGRESS.md), `
 Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 
 ## Phase 0: Orientation and baseline
-- [ ] P0-1 Read repo; record package map, Go version, logger, config pattern, how Trivy is invoked, CI in PROGRESS "Repo facts"
+- [x] P0-1 Read repo; record package map, Go version, logger, config pattern, how Trivy is invoked, CI in PROGRESS "Repo facts"
 - [ ] P0-2 Run existing build and tests; record exact commands and baseline result
 - [ ] P0-3 Confirm or adjust the package layout (`pkg/v2/...`); record decision
 - [ ] P0-4 Decide Mongo test strategy and libraries (Mongo driver, SOCKS5); record decision
