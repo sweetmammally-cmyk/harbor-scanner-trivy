@@ -39,6 +39,7 @@ func TestMain(m *testing.M) {
 func newQueue(t *testing.T, change func(cfg *config.Config)) (*queue.Queue, *store.Client, config.Config) {
 	cfg := mongotest.Config(mongoAddr)
 	cfg.QueueMaxLength = 100
+	cfg.QueueWorkers = 1
 	cfg.QueueLease = 60 * time.Second
 	cfg.QueueMaxAttempts = 3
 	cfg.QueuePollInterval = 50 * time.Millisecond

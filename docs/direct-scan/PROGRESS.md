@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 8 (queue)
-- Last completed task: P8-1
+- Last completed task: P8-2
 - In progress: none
-- Next task: P8-2 (claim, heartbeat, fenced writes, worker loop)
+- Next task: P8-3 (reaper)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -178,6 +178,32 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P8-2  Claims, leases, fenced writes, worker pool
+- Status: done
+- What changed:
+  - `pkg/v2/queue/lease.go`, all on MongoDB's clock with pipeline updates:
+    - `Claim(ctx, worker)` = `findOneAndUpdate` on `state: queued`, sorted by `queued_at`, setting `scanning`, worker, `attempt + 1`, `started_at = $$NOW`, `lease_until = $$NOW + lease`; `ErrNoJob` when empty.
+    - `Heartbeat`, `Complete` and `Fail` are `UpdateOne` calls filtered on `_id` + `worker` + `attempt` + `state: scanning`; no match = `ErrLeaseLost`. Every value written goes inside `$literal`, because pipeline updates read strings starting with `$` as field paths.
+    - `Complete` sets the result (report or GridFS id), `finished_at`, `queue_wait_ms = started_at - queued_at`, `total_ms = $$NOW - queued_at`, and removes `active_key` and `lease_until`.
+    - `Fail` sets `failure_class`, `error` and `prior_request_id = $request_id`, and removes `request_id`, `active_key` and `lease_until`.
+  - `pkg/v2/queue/worker.go`: `Pool` with `Scanner` (runner) and `Refresher` (updater) interfaces, a `ready` function (MongoDB ready and a DB installed; no claim otherwise) and the replica name.
+    - `Run` starts `SCANNER_QUEUE_WORKERS` workers named `<replica>/worker-<n>`. They claim, or wait for the poll interval plus up to 50% jitter, or until an enqueue in the replica wakes them.
+    - `process` heartbeats every third of the lease; a lost lease cancels the job context (the runner then kills Trivy's process group) and discards the result.
+    - It calls `RefreshForScan` with the request's `max_db_age` (or `SCANNER_DB_MAX_AGE_DEFAULT`), then `Scan`. A `ScanError` gives `Fail` with its class (else `internal_error`); success gives `store.SaveWithReport` with `Complete`.
+    - Completion and failure writes are retried with growing pauses (1s up to 15s) for up to 2 minutes, then an ERROR log with the `scan_id`.
+  - Lease losses are counted (`metrics.go`, completed in P8-5).
+- Files: `pkg/v2/queue/lease.go`, `pkg/v2/queue/worker.go`, `pkg/v2/queue/metrics.go`, `test/integration/queue/lease_test.go`, `test/integration/queue/pool_test.go`, `test/integration/queue/enqueue_test.go`
+- Tests run: `go test -race -count=3 -tags=integration ./test/integration/queue/` -> ok; `go test -short -race ./pkg/v2/...` -> ok; `make test` -> ok. Integration (`mongo:7`):
+  - 40 scans claimed by 4 replicas (4 clients) x 4 goroutines: each exactly once;
+  - the oldest first, attempt 1, `lease_until` = MongoDB's now + 60s;
+  - a heartbeat extends the lease, a wrong attempt is `ErrLeaseLost`;
+  - after a requeue, the stale worker's `Complete` and `Fail` are rejected and the current worker's result is stored;
+  - values starting with `$` are stored literally, `active_key` and `lease_until` are removed, timings are set, a done scan keeps its `request_id`;
+  - a failed scan moves `request_id` to `prior_request_id` and a retry with the same `request_id` creates a new scan.
+  - Pool with fake scanner and refresher: two scans done, with the refresh given the request's `max_db_age` and the default; a `ScanError` ends `failed` with its class; no claim while not ready, then done once ready; with a 1h poll interval an enqueue is picked up at once; a lease taken over by another replica cancels the running scan and nothing is written.
+- Decisions / surprises: the test helper first created queues with 0 workers (the pool ran nothing); fixed. The completion retry window is a `Pool` field so it stays 2 minutes in production.
+- Next: P8-3
 
 ### 2026-10-15  P8-1  Enqueue, dedupe, idempotency
 - Status: done
