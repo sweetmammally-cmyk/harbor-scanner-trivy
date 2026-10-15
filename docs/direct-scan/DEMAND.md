@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.6 (update loop, freshness and DB age decided 2026-10-15)
+Status: DRAFT v0.7 (newer-but-not-installed handling, two check timestamps, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -128,7 +128,7 @@ Filters: `customer_id`, `digest`, `repository`, `state`, `severity`, `platform`,
 
 ### 5.4 DB status: `GET /api/v2/db`
 
-Current DB version, `updated_at`, `downloaded_at`, last upstream check, active source (mirror), mode (`normal` | `degraded`), and the last DB check results.
+Current DB version, `updated_at`, `downloaded_at`, `db_age`, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, active source (mirror), mode (`normal` | `degraded`), and the last DB check results.
 
 ### 5.5 Health
 
@@ -179,6 +179,7 @@ Notes:
 - `SCANNER_DB_CHECK_INTERVAL` (e.g. `1h`, `3h`, `1d`). The `d` suffix must be supported.
 - If unset or invalid, the **fallback interval is 3h** and a WARN log says "using fallback interval".
 - Each tick: cheap upstream check first (compare the upstream OCI manifest digest with the stored one). Download only if different.
+- While the mode is `degraded`, `SCANNER_DB_RETRY_INTERVAL` applies instead of the check interval (its default is still to be decided; see P4-1).
 
 ### 7.3 Pre-checks before any download (and before the upstream check)
 
@@ -217,9 +218,14 @@ If a stage fails: log the failure with the stage and timings, store it, move to 
 
 - Update loop, per source in order: pre-check, then upstream check, then download and install when the digest differs from the installed one. The loop stops when a source's digest equals the installed one or when a DB was installed. A failed source is recorded with its failure class and the loop goes on to the next source.
 - There is no downgrade guard: the first source that answers is trusted, even a mirror a few hours behind upstream.
-- A source has answered when its pre-check and upstream check succeeded. `last_upstream_check_at` is updated whenever at least one source answered.
-- No source answered: log ERROR once, set mode `degraded`, keep scanning with the existing DB, keep retrying on the interval until fixed.
-- `db.freshness` in responses: `ok` if the DB was verified against upstream within `max_db_age`, measured from `last_upstream_check_at` (not from `UpdatedAt`, because upstream may simply not have published a newer DB). "Upstream" here means the first source that answered. Otherwise `stale`.
+- A source has answered when its pre-check and upstream check succeeded.
+- Two timestamps:
+  - `last_upstream_check_at`: set whenever any source answered. Diagnostic only.
+  - `last_confirmed_current_at`: set only when the installed DB's digest equals the answering source's digest, or when a new DB was just installed.
+- `newer_available`: set when a source offered a different digest and no download could be installed. Cleared by the next successful install or confirmed-current check. A run where no source answered leaves it unchanged.
+- No source answered: log ERROR once, set mode `degraded`, keep scanning with the existing DB, keep retrying until fixed.
+- A newer DB was offered but none could be installed: set mode `degraded` and `newer_available`, log ONE ERROR "newer DB available but could not be installed" with each source's failure class, keep scanning with the existing DB. Responses say `stale`.
+- `db.freshness` in responses: `stale` while `newer_available` is set, regardless of `max_db_age`. Otherwise `ok` if the DB was confirmed current within `max_db_age`, measured from `last_confirmed_current_at` (not from `UpdatedAt`, because upstream may simply not have published a newer DB). "Upstream" here means the first source that answered. Otherwise `stale`.
 - DB age (now minus the installed DB's `metadata.json` `UpdatedAt`) is reported separately as `db_age` in `GET /api/v2/db` and in the health output. After each check, when the age is above `SCANNER_DB_AGE_WARN`, a WARN log gives the age and the active source. This is for visibility only and never blocks an install.
 - If the request's `max_db_age` is exceeded, the service attempts one refresh (single-flight, bounded by the pre-check and download timeouts). On failure the scan proceeds with the old DB and the response says `stale`.
 

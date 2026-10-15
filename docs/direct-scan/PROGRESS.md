@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 3 (DB download module)
 - Last completed task: P3-6
 - In progress: none
-- Next task: P3-7 (Java DB through the same flow: `javaDB` kind with `trivy-java.db` and the javadb layer media type)
+- Next task: P3-6 follow-up (degraded when a newer DB could not be installed, two timestamps, `newer_available`), then the real ghcr.io download (P3-9), then P3-7 and the rest of P3-9
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,13 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, fifth round): a source offered a different digest but nothing could be installed (DEMAND v0.7, 5.4, 7.2, 7.4).
+  - Mode `degraded` (so the retry interval applies) and ONE ERROR "newer DB available but could not be installed" with each source's failure class. Replaces the WARN from P3-6.
+  - Two timestamps: `last_upstream_check_at` (any source answered, diagnostic only) and `last_confirmed_current_at` (installed digest equals upstream, or just installed). Freshness (P4-3) uses `last_confirmed_current_at`.
+  - `newer_available`: set when a different digest was offered and the install failed; cleared by the next install or confirmed-current check. While set, freshness is `stale` regardless of `max_db_age`. Scans keep running with the old DB and say `stale`.
+  - `GET /api/v2/db` shows both timestamps and `newer_available`.
+  - The real ghcr.io download test moves into P3-9 and runs now, before Phase 4.
+  - Open: `SCANNER_DB_RETRY_INTERVAL` is referenced but not yet defined (no default); asked the owner, to be added in P4-1.
 - 2026-10-15 (owner, fourth round): update loop and DB age (DEMAND v0.6, 7.4 and 11).
   - No downgrade guard: install what the first answering source offers. A mirror a few hours behind is accepted. (No guard or "behind" class had been built; nothing to remove.)
   - Loop per source in order: pre-check, upstream check, then download and install if the digest differs. Stop on an equal digest or after an install. A failed source is recorded with its class and the loop continues. No source answered: mode `degraded`, one ERROR log, old DB kept. Return the mode, the active source and the per-source results. `last_upstream_check_at` is updated when at least one source answered.
