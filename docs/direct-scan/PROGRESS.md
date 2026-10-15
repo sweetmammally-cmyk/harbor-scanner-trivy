@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 3 (DB download module)
-- Last completed task: P3-2
+- Last completed task: P3-3
 - In progress: none
-- Next task: P3-3 (download the DB layer with stall timeout and overall cap, verify digest and size, extract `trivy.db` and `metadata.json` to a temp dir)
+- Next task: P3-4 (atomic swap: versioned directories plus a symlink replaced with rename)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -107,6 +107,17 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-3  DB layer download
+- Status: done
+- What changed: `downloadDB(ctx, client, layer, destDir, stallTimeout, wantFiles)` streams the blob into a sha256 hasher (`io.TeeReader`), then gzip, then tar. It extracts only regular files whose exact top-level name is in `wantFiles` (`O_EXCL`, so nothing is overwritten and paths like `../x` are never written), then checks the size, the digest and that every wanted file was present.
+  - Stall timeout: a `time.AfterFunc` that cancels the download context with the cause "download stalled: no data for X". It is reset on every read that returns data (`stallReader`).
+  - Overall cap: the caller's context deadline (`SCANNER_DB_DOWNLOAD_TIMEOUT`).
+  - `downloadError` adds the cause (stall or overall limit) to the read error.
+- Files: `pkg/v2/dbmgr/download.go`, `pkg/v2/dbmgr/download_test.go`
+- Tests run: `go test -short -race -count=10 ./pkg/v2/dbmgr/` -> ok; coverage 87%+. Cases: success through token and CDN redirect with only the wanted files extracted (README and `../evil` skipped), wrong digest, truncated layer, layer larger than the manifest, missing `metadata.json`, a server that hangs mid-download (stall 100ms), and a server sending one byte every 10ms (stall never fires, overall limit 150ms does).
+- Decisions / surprises: the digest is checked after extraction into the temp dir, which is fine because nothing is installed until P3-4 swaps it in. Part of the P3-9 test list (wrong digest, truncated, hang mid-download) is done here.
+- Next: P3-4
 
 ### 2026-10-15  P3-2  Upstream check
 - Status: done
