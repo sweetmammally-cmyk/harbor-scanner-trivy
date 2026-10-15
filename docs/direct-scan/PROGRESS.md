@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 2 done; Phase 3 (DB download module) next
+- Phase: 2 (P2-8 added), then Phase 3
 - Last completed task: P2-7
 - In progress: none
-- Next task: P3-1 (OCI client over our transport: reuse `dialTLS`, `getManifest`, `getToken` from `pkg/v2/dbmgr/registry.go`; add blob download)
+- Next task: P2-8 (classify pre-check failures), then P3-1
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,12 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, third round):
+  - TLS stage purpose: only to see whether the network path interferes with the TLS handshake, not certificate security. Normal verification against the system CA pool stays. No CA file option, no pinning, no insecure-skip-verify. (No CA option was ever added; nothing to undo.)
+  - P2-8 added: classify pre-check failures and record the class in the result and the log.
+  - Accepted limit: the direct route tries only the first resolved address. The owner runs the DNS, and the source pool already provides fallback. Not a task.
+  - No DNS pool in code. DNS servers are set with Docker's `dns:` setting or `/etc/resolv.conf`, which Go's resolver tries in order; this goes into the v2 config README (P11-4).
+  - The odd local timings (connect about 0.3ms) are expected on this network; no note in P11-1.
 - 2026-10-15 (owner): pre-check DNS stage. Direct route: resolve the registry host. Proxy route (HTTP CONNECT or SOCKS5): record the DNS stage as skipped; the connect stage covers the proxy's DNS and TCP. Chosen from three options (resolve first hop, always resolve registry, skip). DEMAND 7.3 item 6 added.
 - 2026-10-15 (P0-3): package layout confirmed as in PLAN.md: `pkg/v2/config`, `pkg/v2/dbmgr`, `pkg/v2/registry`, `pkg/v2/store`, `pkg/v2/runner`, `pkg/v2/queue`, `pkg/v2/api`, `pkg/v2/health`. Reason: no clashes with existing packages (`pkg/queue` vs `pkg/v2/queue` differ by path; import with an alias where both are used). Wiring: `cmd/scanner-trivy/main.go` is the one upstream file we must touch. When `SCANNER_V2_API_ENABLED=true` it wraps the existing v1 handler in a small `http.ServeMux` that sends `/api/v2/` to the v2 handler and everything else to the v1 handler, so `pkg/http/api/v1` stays unchanged. The v2 router uses gorilla/mux like v1. Readiness for Mongo and DB (P10-2) will need a touch to `/probe/ready` in `pkg/http/api/v1/handler.go`; decide the smallest hook when we get there.
 - 2026-10-15 (P0-4): libraries and Mongo test strategy.
@@ -106,7 +112,7 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - What changed: `pkg/v2/dbmgr/precheck_manual_test.go` (build tag `manual`) runs `Precheck` on every source in `SCANNER_DB_SOURCES`, with the normal v2 config and timeouts, printing the logs and the JSON result. It is skipped when no sources are set. The command is listed in `CLAUDE.md` section 4.
 - Files: `pkg/v2/dbmgr/precheck_manual_test.go`, `CLAUDE.md`
 - Tests run: `go vet -tags=manual` -> ok; run without sources -> skipped; manual run on this dev machine against `ghcr.io/aquasecurity/trivy-db:2|direct` and `docker.io/aquasec/trivy-db:2|direct` -> both passed over HTTP/2, TLS 1.3, anonymous token flow working. ghcr.io: total 1543ms (dns 218, tls 340, http 194, manifest 789). Docker Hub: total 2247ms (manifest 1330).
-- Decisions / surprises: on this dev machine the connect stage takes about 0.3ms to reach GitHub and Docker Hub, so something local (VPN/TUN or transparent proxy) accepts TCP; the real network latency shows up in the TLS stage. Keep this in mind when reading timings from such hosts. Known limitation: the direct route connects only to the first resolved address (normally IPv4 first when the host has no IPv6 route); trying the next addresses can be added if a mirror needs it.
+- Decisions / surprises: on this dev machine the connect stage takes about 0.3ms to reach GitHub and Docker Hub, so something local (VPN/TUN or transparent proxy) accepts TCP; the real network latency shows up in the TLS stage. This is expected on this network (owner). The direct route connects only to the first resolved address; this is an accepted limit (owner decision, see Decisions).
 - Next: P3-1
 
 ### 2026-10-15  P2-6  Pre-check test matrix
@@ -145,7 +151,7 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Tests run: `go test -short -race -count=10 ./pkg/v2/dbmgr/` -> ok; `make test` -> ok; `go vet` -> ok; `go.mod` unchanged. Fake TLS registry (HTTP/2 or HTTP/1.1, with or without token): direct HTTP/2, token flow, HTTP/1.1 rejected by default, HTTP/1.1 with `allow-http1`, manifest 404, untrusted certificate, blackholed registry stops at the TLS timeout, via HTTP proxy, via SOCKS5 with credentials. Neither the token nor the proxy password appears in the marshalled result.
 - Decisions / surprises:
   - `docker.io` is mapped to `registry-1.docker.io` (the Docker Hub API host).
-  - Registry TLS uses the system CA pool; tests swap the package variable `rootCAs`. Internal mirror CAs must be in the system pool for now (`SSL_CERT_FILE` / `SSL_CERT_DIR` work); a per-source CA option can be added if needed.
+  - Registry TLS uses the system CA pool; tests swap the package variable `rootCAs`. Internal mirror CAs must be in the system pool (`SSL_CERT_FILE` / `SSL_CERT_DIR` work). Owner decision: no per-source CA option.
   - The token flow belongs to P3-1 but the manifest stage needs it now; P3-1 will reuse `getManifest` and `getToken`.
   - The tests caught a bug before commit: `Duration` was set in a defer on a non-named return value; fixed with a named return.
 - Next: P2-4

@@ -26,6 +26,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P2-5 Log effective source, route and each stage result; redact credentials and Authorization
 - [x] P2-6 Tests: ok server, blackhole (timeout), TLS failure, no HTTP/2, HTTP proxy, SOCKS5, redaction
 - [x] P2-7 Manual debug entrypoint or test helper to run a pre-check against one source
+- [ ] P2-8 Classify pre-check failures (dns_failure, tcp_timeout, tcp_refused, tls_reset, tls_timeout, tls_alert, tls_cert_invalid with peer cert subject/issuer/expiry, plus http/manifest classes); record the class in the result and the log; tests with servers that reset, go silent, or send an alert after the ClientHello, and with an unknown-CA certificate
 
 ## Phase 3: DB download module
 - [ ] P3-1 OCI client over our transport (token auth if needed, manifest, blob); record raw-HTTP vs library decision
@@ -97,7 +98,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P11-1 End-to-end run in docker compose (scanner, Mongo, mirror or fake mirror)
 - [ ] P11-2 Walk the acceptance criteria below and record evidence in PROGRESS.md
 - [ ] P11-3 Harbor adapter regression: existing tests pass and one manual Harbor scan works
-- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2
+- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code
 - [ ] P11-5 Secrets review: no tokens or passwords in logs, argv or MongoDB
 - [ ] P11-6 List the upstream files touched, for future merges; run the component tests again
 - [ ] P11-7 (low priority) Get a working golangci-lint for Go 1.26 and run `make lint`
