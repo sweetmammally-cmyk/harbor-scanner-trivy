@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 7 (scan runner)
-- Last completed task: P7-1
-- In progress: none
-- Next task: P7-2 (stream-parse the output, validate platforms and severities, filter)
+- Last completed task: P7-3
+- In progress: P7-4 (`[~]`): platform discovery is done; the upsert into `platforms` is part of the scan orchestration
+- Next task: P7-5 (scan orchestration: run, parse, upsert platforms, report inline or GridFS), then P7-6, P7-7
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -174,6 +174,16 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P7-2, P7-3 (and the discovery part of P7-4)  Parsing Trivy output
+- Status: done (P7-4 partial: the upsert into `platforms` comes with P7-5)
+- What changed: `pkg/v2/runner/result.go`:
+  - `ValidateOptions(platforms, severities)`: platforms required, at most `MaxPlatforms` (50), each `^[a-z0-9_-]{1,64}$`; severities from `Severities` (UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL, uppercase); errors wrap `ErrInvalidOptions` (400 in P9-2).
+  - `parseResult(output, platforms, severities, maxFindings)` reads the JSON with a streaming decoder, one result at a time (other top-level values are skipped). For results whose type (lowercased) is requested: `Summary` counts every severity (all five keys, lowercase); `Findings` keep only the requested severities, with the stored fields (id, package, installed and fixed version, severity, title, primary URL, status, target, type), at most `maxFindings`, then `Truncated`. Across all results: `ImagePlatforms` (sorted), `PlatformsFound` / `PlatformsNotFound` for the requested ones, `HasMorePlatforms`. A `SchemaVersion` other than 2 or malformed JSON is `output_invalid`.
+- Files: `pkg/v2/runner/result.go`, `pkg/v2/runner/result_test.go`, `pkg/v2/runner/testdata/node-alpine.json` (real Trivy 0.71.2 output for node:22-alpine3.20, trimmed to a few vulnerabilities per result plus a real `pip` result without findings; descriptions kept)
+- Tests run: `go test -short -race -count=3 ./pkg/v2/runner/` -> ok. Cases: alpine with HIGH,CRITICAL (3 findings, full summary, found, has more); the first finding equals the fixture's fields and the fixture's description is not kept; requested `npm` not in the image is reported as not found, not clean; `pip` found with no findings; all types requested (no more platforms); limit 2 truncates while the counts stay complete; a capitalised type matches; 20000 results streamed; 7 kinds of invalid output; option validation (2 valid, 8 invalid).
+- Decisions / surprises: one commit for P7-2 and P7-3 because parsing, filtering and counting are one pass over the results.
+- Next: P7-5
 
 ### 2026-10-15  P7-1  Running Trivy
 - Status: done
