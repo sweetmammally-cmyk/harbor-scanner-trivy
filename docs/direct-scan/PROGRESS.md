@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 3 (P3-10 added), then Phase 4
-- Last completed task: P3-9
+- Phase: 3 done; Phase 4 (updater and freshness) next
+- Last completed task: P3-10
 - In progress: none
-- Next task: P3-10 (Java DB download cap, disk space check), then P4-1
+- Next task: P4-1
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -127,6 +127,17 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-10  Disk space check and Java DB download cap
+- Status: done
+- What changed:
+  - Config `JavaDBDownloadTimeout` (`SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT`, default 45m); `update` uses it for the Java DB and `SCANNER_DB_DOWNLOAD_TIMEOUT` for the Trivy DB. The stall timeout is shared.
+  - Before creating the version directory, `update` checks free space in the cache directory: layer size plus layer size times `dbKind.ExtractRatio` (13 Trivy DB, 2 Java DB), plus 10%. Too little space, or an error from the check, fails the source with class `disk_space` (the error gives MiB needed and available) and the loop continues. A newer DB that cannot be installed this way leads to `degraded` with `newer_available`, as for any other failure.
+  - `freeSpace` is a package variable using `syscall.Statfs` (`Bavail * Bsize`), replaced in tests.
+- Files: `pkg/v2/dbmgr/update.go`, `pkg/v2/dbmgr/update_test.go`, `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`
+- Tests run: `go test -short -race -count=5` (disk space and Java cap tests) -> ok; `go test -short -race -count=3 ./pkg/v2/...` -> ok; `make test` -> ok. Cases: one byte too little fails both sources with `disk_space` and no blob request (counted atomically), exactly enough downloads, a failing check is `disk_space`, the real `statfs` returns a positive value; the Java DB installs with an expired Trivy DB cap and fails with an expired Java cap.
+- Decisions / surprises: none beyond the recorded formula.
+- Next: P4-1
 
 ### 2026-10-15  P3-9  Fake-registry test list complete
 - Status: done

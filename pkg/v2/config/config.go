@@ -47,6 +47,7 @@ type Config struct {
 
 	DBDownloadStallTimeout time.Duration `env:"SCANNER_DB_DOWNLOAD_STALL_TIMEOUT" envDefault:"30s"`
 	DBDownloadTimeout      time.Duration `env:"SCANNER_DB_DOWNLOAD_TIMEOUT" envDefault:"15m"`
+	JavaDBDownloadTimeout  time.Duration `env:"SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT" envDefault:"45m"`
 	DBMaxAgeDefault        time.Duration `env:"SCANNER_DB_MAX_AGE_DEFAULT" envDefault:"6h"`
 	// DBAgeWarn is read from SCANNER_DB_AGE_WARN by GetConfig, because it accepts days ("7d").
 	DBAgeWarn time.Duration

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
@@ -25,20 +26,34 @@ type dbKind struct {
 	Files []string
 	// MediaType is the media type of the DB layer in the manifest.
 	MediaType string
+	// ExtractRatio estimates the extracted size from the compressed layer size, for the
+	// disk space check. Measured on 2026-10-15: Trivy DB 12.1, Java DB 1.6.
+	ExtractRatio uint64
+}
+
+// freeSpace returns the bytes we may still write in dir's filesystem. Tests replace it.
+var freeSpace = func(dir string) (uint64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(dir, &stat); err != nil {
+		return 0, err
+	}
+	return stat.Bavail * uint64(stat.Bsize), nil
 }
 
 var trivyDB = dbKind{
-	Name:      "db",
-	Files:     []string{"trivy.db", "metadata.json"},
-	MediaType: "application/vnd.aquasec.trivy.db.layer.v1.tar+gzip",
+	Name:         "db",
+	Files:        []string{"trivy.db", "metadata.json"},
+	MediaType:    "application/vnd.aquasec.trivy.db.layer.v1.tar+gzip",
+	ExtractRatio: 13,
 }
 
 // javaDB is Trivy's Java DB (for example ghcr.io/aquasecurity/trivy-java-db:1),
 // read from <cache-dir>/java-db.
 var javaDB = dbKind{
-	Name:      "java-db",
-	Files:     []string{"trivy-java.db", "metadata.json"},
-	MediaType: "application/vnd.aquasec.trivy.javadb.layer.v1.tar+gzip",
+	Name:         "java-db",
+	Files:        []string{"trivy-java.db", "metadata.json"},
+	MediaType:    "application/vnd.aquasec.trivy.javadb.layer.v1.tar+gzip",
+	ExtractRatio: 2,
 }
 
 // SourceResult is what happened with one source during an update.
@@ -154,12 +169,35 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 			continue
 		}
 
+		// Check free space before starting: compressed size plus estimated extracted
+		// size plus 10%. The compressed part is headroom, the layer is streamed.
+		needed := uint64(layer.Size) + uint64(layer.Size)*kind.ExtractRatio
+		needed += needed / 10
+		if err = os.MkdirAll(cacheDir, 0o755); err != nil {
+			fail("install_error", err)
+			continue
+		}
+		free, err := freeSpace(cacheDir)
+		if err != nil {
+			fail("disk_space", fmt.Errorf("checking free disk space in %s: %w", cacheDir, err))
+			continue
+		}
+		if free < needed {
+			fail("disk_space", fmt.Errorf("not enough free disk space in %s: need %d MiB, have %d MiB",
+				cacheDir, needed>>20, free>>20))
+			continue
+		}
+
 		versionDir, err := newVersionDir(cacheDir, kind.Name)
 		if err != nil {
 			fail("install_error", err)
 			continue
 		}
-		downloadCtx, cancel := context.WithTimeout(ctx, cfg.DBDownloadTimeout)
+		downloadTimeout := cfg.DBDownloadTimeout
+		if kind.Name == javaDB.Name {
+			downloadTimeout = cfg.JavaDBDownloadTimeout
+		}
+		downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
 		start := time.Now()
 		err = downloadDB(downloadCtx, client, layer, versionDir, cfg.DBDownloadStallTimeout, kind.Files)
 		cancel()

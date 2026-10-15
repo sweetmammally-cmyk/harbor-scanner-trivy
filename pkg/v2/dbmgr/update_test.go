@@ -1,11 +1,13 @@
 package dbmgr
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 var updateConfig = func() config.Config {
 	cfg := testConfig
 	cfg.DBDownloadTimeout = 5 * time.Second
+	cfg.JavaDBDownloadTimeout = 5 * time.Second
 	cfg.DBDownloadStallTimeout = time.Second
 	cfg.DBAgeWarn = 7 * 24 * time.Hour
 	return cfg
@@ -364,4 +367,102 @@ func TestUpdate_DownloadFailuresFallBack(t *testing.T) {
 			assert.Len(t, versionNames(t, cacheDir), 1, "the broken download left nothing behind")
 		})
 	}
+}
+
+// fakeFreeSpace replaces freeSpace for the rest of the test.
+func fakeFreeSpace(t *testing.T, free uint64, err error) {
+	previous := freeSpace
+	freeSpace = func(dir string) (uint64, error) { return free, err }
+	t.Cleanup(func() { freeSpace = previous })
+}
+
+func TestUpdate_DiskSpace(t *testing.T) {
+	now := time.Now()
+	layer := dbLayer(t, "db", now)
+	size := uint64(len(layer))
+	needed := size + size*trivyDB.ExtractRatio
+	needed += needed / 10
+
+	// startCountingRegistry counts the blob requests, to prove no download started.
+	startCountingRegistry := func(t *testing.T) (*fakeOCIRegistry, *atomic.Int32) {
+		f := startFakeOCIRegistry(t, layer)
+		var blobRequests atomic.Int32
+		serveBlob(f, func(w http.ResponseWriter, r *http.Request) {
+			blobRequests.Add(1)
+			_, _ = w.Write(layer)
+		})
+		return f, &blobRequests
+	}
+
+	t.Run("not enough space fails every source without downloading", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		first, firstBlobs := startCountingRegistry(t)
+		second, secondBlobs := startCountingRegistry(t)
+		fakeFreeSpace(t, needed-1, nil)
+
+		result := update(testContext(t), updateConfig, cacheDir, trivyDB,
+			[]config.DBSource{first.source(t, "direct"), second.source(t, "direct")})
+
+		assert.Equal(t, []string{"disk_space", "disk_space"}, sourceClasses(result), "each source is tried")
+		assert.Contains(t, result.Sources[0].Error, "not enough free disk space in "+cacheDir)
+		assert.Equal(t, int32(0), firstBlobs.Load()+secondBlobs.Load(), "no download was started")
+		assert.Equal(t, ModeDegraded, result.Mode)
+		assert.True(t, result.NewerAvailable)
+		assert.False(t, dbPresent(cacheDir, "db", "trivy.db"))
+	})
+
+	t.Run("exactly enough space downloads", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		f, blobs := startCountingRegistry(t)
+		fakeFreeSpace(t, needed, nil)
+
+		result := update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{f.source(t, "direct")})
+
+		assert.True(t, result.Installed)
+		assert.Equal(t, int32(1), blobs.Load())
+	})
+
+	t.Run("free space check error is a disk_space failure", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		f, blobs := startCountingRegistry(t)
+		fakeFreeSpace(t, 0, errors.New("statfs failed"))
+
+		result := update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{f.source(t, "direct")})
+
+		assert.Equal(t, []string{"disk_space"}, sourceClasses(result))
+		assert.Contains(t, result.Sources[0].Error, "statfs failed")
+		assert.Equal(t, int32(0), blobs.Load())
+	})
+
+	t.Run("real free space function works on the cache directory", func(t *testing.T) {
+		free, err := freeSpace(t.TempDir())
+		require.NoError(t, err)
+		assert.Greater(t, free, uint64(0))
+	})
+}
+
+func TestUpdate_JavaDBDownloadTimeout(t *testing.T) {
+	now := time.Now()
+	f := startFakeOCIRegistry(t, makeLayer(t,
+		"trivy-java.db", "java db",
+		"metadata.json", `{"Version":1,"UpdatedAt":"`+now.UTC().Format(time.RFC3339Nano)+`"}`,
+	))
+	f.manifest = []byte(strings.Replace(string(f.manifest), trivyDB.MediaType, javaDB.MediaType, 1))
+	f.manifestDigest = digestOf(f.manifest)
+
+	// A Trivy DB cap that is already over must not affect the Java DB, which has its own.
+	cfg := updateConfig
+	cfg.DBDownloadTimeout = time.Nanosecond
+	cfg.JavaDBDownloadTimeout = 5 * time.Second
+
+	result := update(testContext(t), cfg, t.TempDir(), javaDB, []config.DBSource{f.source(t, "direct")})
+
+	assert.True(t, result.Installed, "%+v", result.Sources)
+
+	cfg.JavaDBDownloadTimeout = time.Nanosecond
+	result = update(testContext(t), cfg, t.TempDir(), javaDB, []config.DBSource{f.source(t, "direct")})
+
+	assert.False(t, result.Installed)
+	assert.Equal(t, []string{"download_error"}, sourceClasses(result))
+	assert.Contains(t, result.Sources[0].Error, "download exceeded the overall limit")
 }
