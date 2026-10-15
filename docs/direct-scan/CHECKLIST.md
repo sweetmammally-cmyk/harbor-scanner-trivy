@@ -38,7 +38,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P3-7 Java DB through the same flow
 - [x] P3-8 Parse `metadata.json` (UpdatedAt, NextUpdate, Version, DownloadedAt)
 - [x] P3-9 Tests with a fake registry: success, wrong digest, truncated, hang mid-download, fallback to second source, all sources fail; plus a manual download of the real ghcr.io DB (about 70 MB) with duration, size and result recorded in PROGRESS
-- [x] P3-10 Free disk space check before each download (layer size plus estimated extracted size plus margin); class `disk_space`, next source; test with a fake free-space function; `SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT` (45m) for the Java DB
+- [x] P3-10 ~~Free disk space check before each download~~ dropped by owner (reverted). Kept from this task: `SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT` (45m) for the Java DB
 
 ## Phase 4: Updater and freshness
 - [x] P4-1 Interval loop, first run at startup, single-flight; skip the Java DB when `SCANNER_JAVA_DB_SOURCES` is empty; `SCANNER_DB_RETRY_INTERVAL` (15m) while degraded, back to the check interval after a success

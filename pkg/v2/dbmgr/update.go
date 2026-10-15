@@ -2,6 +2,7 @@ package dbmgr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -173,7 +174,11 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 		}
 		if err != nil {
 			_ = os.RemoveAll(versionDir)
-			fail("download_error", err)
+			if errors.Is(err, errLocalDisk) {
+				fail("install_error", err)
+			} else {
+				fail("download_error", err)
+			}
 			continue
 		}
 		if err = installDB(cacheDir, kind.Name, versionDir, digest); err != nil {

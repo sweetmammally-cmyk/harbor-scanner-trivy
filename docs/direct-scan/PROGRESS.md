@@ -6,7 +6,7 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 4 (updater and freshness)
-- Last completed task: P4-1
+- Last completed task: P4-1 (then the P3-10 revert and the install_error follow-up)
 - In progress: none
 - Next task: P4-2 (state behind an interface, in memory first: last_upstream_check_at, last_confirmed_current_at, newer_available kept when no source answered, mode, active source; fed from `UpdateResults`)
 - Blockers / questions for the user: none
@@ -64,10 +64,14 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, seventh round): the free disk space check (P3-10) is dropped. It was removed with a revert commit (`9f42746`) because P4-1 was already built on top; the Java DB download cap from the same commit was kept. DEMAND v0.9, 7.3, 7.4 and 11 updated.
+  - A full disk during install fails as `install_error`, leaves no partial directory, keeps the old DB, and results in `degraded` + `newer_available`. Implementation: file errors (`*fs.PathError`) while extracting are marked `errLocalDisk` in `downloadDB`, and `update` reports them as `install_error`; network and layer read errors stay `download_error`.
+  - No `SCANNER_JAVA_DB_SOURCES` means no Java DB at all, seed included (DEMAND section 11).
+  - The disk sizing notes below stay, as sizing information for P11-4 only.
 - 2026-10-15 (owner, sixth round): DEMAND v0.8, 7.2, 7.3 and 11.
   - `SCANNER_DB_RETRY_INTERVAL`, default 15m, used while degraded; back to `SCANNER_DB_CHECK_INTERVAL` after a success.
   - `SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT`, default 45m, for the Java DB; the Trivy DB keeps `SCANNER_DB_DOWNLOAD_TIMEOUT` (15m); the 30s stall timeout applies to both. Empty `SCANNER_JAVA_DB_SOURCES` means no Java DB is downloaded.
-  - Free disk space check before each download, class `disk_space`, next source (task P3-10). Formula: layer size plus layer size times the extract ratio (13 for the Trivy DB, 2 for the Java DB, from the measured 12.1 and 1.6) plus 10%. The download streams into extraction, so the compressed size is never on disk; it is kept in the formula as headroom, as the owner asked.
+  - (Superseded by the seventh round: the free disk space check was dropped and reverted.)
 - Disk sizing notes for P11-4 (Dockerfile, volume, README): the Trivy DB needs about 5 GB in the cache volume (current 1.62 GB, previous 1.62 GB, one download in progress 1.62 GB, plus headroom); the Java DB about 3x 1.55 GB more when enabled; the seed DB adds 1.6 GB to the image (plus 1.55 GB if a Java seed is baked in).
 - 2026-10-15 (owner, fifth round): a source offered a different digest but nothing could be installed (DEMAND v0.7, 5.4, 7.2, 7.4).
   - Mode `degraded` (so the retry interval applies) and ONE ERROR "newer DB available but could not be installed" with each source's failure class. Replaces the WARN from P3-6.
@@ -127,6 +131,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-6  Follow-up: disk check reverted, local write errors are install_error
+- Status: done
+- What changed: revert commit `9f42746` removed the free-space check, the `disk_space` class, the extract ratios, `freeSpace` and its tests; the Java DB download cap was restored in the same commit. Then `downloadDB` marks file errors while extracting (open, write, fsync, close, all `*fs.PathError`) with `errLocalDisk`, and `update` reports them as `install_error` instead of `download_error`.
+- Files: `pkg/v2/dbmgr/update.go`, `pkg/v2/dbmgr/download.go`, `pkg/v2/dbmgr/update_test.go`, `pkg/v2/dbmgr/download_test.go`, `docs/direct-scan/*`
+- Tests run: `go test -short -race -count=3` (write-error and download tests) -> ok; `go test -short -race ./pkg/v2/...` -> ok. `TestUpdate_InstallWriteError`: v1 installed, versions directory made read-only, v2 offered: `install_error` ("permission denied"), `degraded`, `newer_available`, old DB and digest kept, version list unchanged (no partial directory); after write access is restored, the next run installs v2 and clears the flag. `TestDownloadDB_LocalWriteError`: a read-only target directory gives an error that `errors.Is(errLocalDisk)`. Both skip as root.
+- Decisions / surprises: a real full disk (ENOSPC) cannot be made in a unit test without root; the read-only directory gives the same kind of file error on the same code path.
+- Next: P4-2
 
 ### 2026-10-15  P4-1  DB updater loop
 - Status: done

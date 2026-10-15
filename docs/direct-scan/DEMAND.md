@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.8 (retry interval, Java DB download cap, disk space check, 2026-10-15)
+Status: DRAFT v0.9 (disk space check dropped, full-disk behaviour, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -212,8 +212,6 @@ If all stages pass, download with two limits:
 
 On either limit the download is aborted and the next source is tried. The Java DB has its own cap (`SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT`, default 45m) because its layer is about 7 times larger; the stall timeout is the same for both.
 
-Before each download, free disk space in the cache directory is checked: the layer size from the manifest plus the estimated extracted size (layer size times 13 for the Trivy DB, times 2 for the Java DB, from measured ratios of 12.1 and 1.6), plus a 10% margin. If there is not enough, the source fails with class `disk_space` without starting the download, and the next source is tried.
-
 If a stage fails: log the failure with the stage and timings, store it, move to the next configured fallback source. Authorization headers and tokens never appear in logs.
 
 ### 7.4 Failure policy and freshness
@@ -225,13 +223,14 @@ If a stage fails: log the failure with the stage and timings, store it, move to 
   - `last_upstream_check_at`: set whenever any source answered. Diagnostic only.
   - `last_confirmed_current_at`: set only when the installed DB's digest equals the answering source's digest, or when a new DB was just installed.
 - `newer_available`: set when a source offered a different digest and no download could be installed. Cleared by the next successful install or confirmed-current check. A run where no source answered leaves it unchanged.
+- A write error on our own disk during install (for example a full disk) fails that source with class `install_error`, leaves no partial directory and keeps the old DB; when no other source installs, the result is `degraded` with `newer_available`. There is no free-space check before downloading.
 - No source answered: log ERROR once, set mode `degraded`, keep scanning with the existing DB, keep retrying until fixed.
 - A newer DB was offered but none could be installed: set mode `degraded` and `newer_available`, log ONE ERROR "newer DB available but could not be installed" with each source's failure class, keep scanning with the existing DB. Responses say `stale`.
 - `db.freshness` in responses: `stale` while `newer_available` is set, regardless of `max_db_age`. Otherwise `ok` if the DB was confirmed current within `max_db_age`, measured from `last_confirmed_current_at` (not from `UpdatedAt`, because upstream may simply not have published a newer DB). "Upstream" here means the first source that answered. Otherwise `stale`.
 - DB age (now minus the installed DB's `metadata.json` `UpdatedAt`) is reported separately as `db_age` in `GET /api/v2/db` and in the health output. After each check, when the age is above `SCANNER_DB_AGE_WARN`, a WARN log gives the age and the active source. This is for visibility only and never blocks an install.
 - If the request's `max_db_age` is exceeded, the service attempts one refresh (single-flight, bounded by the pre-check and download timeouts). On failure the scan proceeds with the old DB and the response says `stale`.
 
-Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format) and follows the same pre-check and fallback flow.
+Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format) and follows the same pre-check and fallback flow. Without Java sources there is no Java DB at all, not even the seed.
 
 ### 7.5 Own DB download module
 
@@ -297,7 +296,7 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 | `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret) |
 | `SCANNER_DB_CHECK_INTERVAL` | `1h`, `3h`, `1d`... fallback `3h` |
 | `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Example: `mirror.local/aquasec/trivy-db:2\|direct\|allow-http1,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
-| `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB. Empty means no Java DB is downloaded |
+| `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB. Empty means no Java DB at all: nothing is downloaded and the Java seed is not installed |
 | `SCANNER_PRECHECK_TIMEOUT_DNS`, `_CONNECT`, `_TLS`, `_HTTP`, `_MANIFEST`, `_TOTAL` | Pre-check timeouts per stage and overall. Defaults 5s, 5s, 5s, 10s, 10s, 30s |
 | `SCANNER_DB_SEED_DIR`, `SCANNER_JAVA_DB_SEED_DIR` | Seed DB baked into the image, installed when no DB exists yet (with no digest, so the first update downloads). Defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing directory means no seed; the service is then not ready until the first download succeeds |
 | `SCANNER_DB_DOWNLOAD_STALL_TIMEOUT` | Abort a download when no bytes arrive for this long. Default 30s |

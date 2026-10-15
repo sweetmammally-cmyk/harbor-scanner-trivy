@@ -214,3 +214,21 @@ func TestDownloadDB(t *testing.T) {
 		assert.Less(t, time.Since(start), 2*time.Second)
 	})
 }
+
+func TestDownloadDB_LocalWriteError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	f := startFakeOCIRegistry(t, makeLayer(t, "trivy.db", "db", "metadata.json", "{}"))
+	client, err := newRegistryClient(f.source(t, "direct"))
+	require.NoError(t, err)
+	dest := t.TempDir()
+	require.NoError(t, os.Chmod(dest, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dest, 0o755) })
+
+	err = downloadDB(testContext(t), client, ociDescriptor{Digest: f.layerDigest, Size: int64(len(f.layer))}, dest, time.Second, dbFiles)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errLocalDisk, "a write error on our disk is not the source's fault")
+	assert.Contains(t, err.Error(), "local disk error: extracting trivy.db")
+}

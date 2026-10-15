@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -81,7 +82,7 @@ func downloadDB(ctx context.Context, client *registryClient, layer ociDescriptor
 		}
 		file, err := os.OpenFile(filepath.Join(destDir, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err != nil {
-			return fmt.Errorf("extracting %s: %w", name, err)
+			return fmt.Errorf("%w: extracting %s: %w", errLocalDisk, name, err)
 		}
 		_, err = io.Copy(file, archive)
 		if err == nil {
@@ -89,11 +90,16 @@ func downloadDB(ctx context.Context, client *registryClient, layer ociDescriptor
 			err = file.Sync()
 		}
 		closeErr := file.Close()
+		// File errors (write, sync) are *fs.PathError; reading the layer never returns one.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			return fmt.Errorf("%w: extracting %s: %w", errLocalDisk, name, err)
+		}
 		if err != nil {
 			return downloadError(ctx, fmt.Errorf("extracting %s: %w", name, err))
 		}
 		if closeErr != nil {
-			return fmt.Errorf("extracting %s: %w", name, closeErr)
+			return fmt.Errorf("%w: extracting %s: %w", errLocalDisk, name, closeErr)
 		}
 		found[name] = true
 	}
@@ -115,6 +121,10 @@ func downloadDB(ctx context.Context, client *registryClient, layer ociDescriptor
 	}
 	return nil
 }
+
+// errLocalDisk marks download errors caused by our own disk (for example a full
+// disk) rather than by the source. The update loop reports them as install_error.
+var errLocalDisk = errors.New("local disk error")
 
 // downloadError explains why the download context ended (stall or overall cap),
 // because the read error alone only says "context canceled" or "deadline exceeded".
