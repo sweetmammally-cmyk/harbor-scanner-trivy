@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,7 +26,7 @@ func runState(mode string, minutes ...int) dbmgr.DBState {
 	state := dbmgr.DBState{Mode: mode}
 	for _, minute := range minutes {
 		state.LastSources = append(state.LastSources, dbmgr.SourceResult{
-			Source:   "mirror|direct",
+			Source:   fmt.Sprintf("mirror-%d|direct", minute),
 			Precheck: dbmgr.CheckResult{StartedAt: at.Add(time.Duration(minute) * time.Minute)},
 		})
 	}
@@ -105,4 +107,40 @@ func TestDBStateStore_UpdaterKeepsRunningWhileMongoIsDown(t *testing.T) {
 	state, err := s.Get(context.Background(), "db")
 	require.NoError(t, err)
 	assert.Equal(t, dbmgr.ModeDegraded, state.Mode, "the state is kept in memory")
+}
+
+// writtenButFailing is a DBCheckRepository that keeps every row but reports an
+// error on its first Add, like a write that reached MongoDB before a timeout.
+type writtenButFailing struct {
+	MemoryDBChecks
+	adds int
+}
+
+func (w *writtenButFailing) Add(ctx context.Context, checks []DBCheck) error {
+	w.adds++
+	_ = w.MemoryDBChecks.Add(ctx, checks)
+	if w.adds == 1 {
+		return errors.New("timeout after the write")
+	}
+	return nil
+}
+
+func TestDBStateStore_FlushTwiceDoesNotDuplicateChecks(t *testing.T) {
+	s := unreachableStore(t)
+	repository := &writtenButFailing{}
+	s.checks = repository
+	require.NoError(t, s.Save(context.Background(), "db", runState(dbmgr.ModeDegraded, 1, 2)))
+
+	s.Flush(context.Background()) // rows written, but reported as failed: buffered again
+	require.Len(t, s.buffer, 2)
+	s.Flush(context.Background()) // the same rows again, with the same ids
+
+	assert.Equal(t, 2, repository.adds)
+	rows, err := repository.Recent(context.Background(), "db", 10)
+	require.NoError(t, err)
+	assert.Len(t, rows, 2, "the second flush replaced the rows instead of adding copies")
+	// Both rows carry the run start (the first source's pre-check start), newest first.
+	runStart := at.Add(time.Minute).Format(time.RFC3339Nano)
+	assert.Equal(t, "scanner-1:db:"+runStart+":mirror-2|direct", rows[0].ID)
+	assert.Equal(t, "scanner-1:db:"+runStart+":mirror-1|direct", rows[1].ID)
 }

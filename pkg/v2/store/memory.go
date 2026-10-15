@@ -123,10 +123,22 @@ func NewMemoryDBChecks() *MemoryDBChecks {
 	return &MemoryDBChecks{}
 }
 
+// Add replaces checks with the same ID, like the MongoDB upsert.
 func (m *MemoryDBChecks) Add(_ context.Context, checks []DBCheck) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.checks = append(m.checks, checks...)
+	for _, check := range checks {
+		replaced := false
+		for i := range m.checks {
+			if m.checks[i].ID == check.ID {
+				m.checks[i] = check
+				replaced = true
+			}
+		}
+		if !replaced {
+			m.checks = append(m.checks, check)
+		}
+	}
 	return nil
 }
 

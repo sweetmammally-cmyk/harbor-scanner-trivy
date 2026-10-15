@@ -166,6 +166,16 @@ Touched by this plan:
 - Next: <next task ID>
 ```
 
+### 2026-10-15  P5-6  Follow-up: deterministic db_checks ids
+- Status: done
+- What changed: `DBCheck.ID` is a string, `DBCheckID(instance, db, runStartedAt, source)` = "<instance_id>:<db>:<run_started_at RFC3339Nano UTC>:<source>". `DBStateStore.Save` takes the run start from the first source's pre-check start. `MongoDBChecks.Add` writes with an unordered `BulkWrite` of `ReplaceOne` + upsert on `_id`; `MemoryDBChecks.Add` replaces by id too.
+- Files: `pkg/v2/store/models.go`, `pkg/v2/store/dbstate.go`, `pkg/v2/store/repositories_mongo.go`, `pkg/v2/store/memory.go`, `pkg/v2/store/models_test.go`, `pkg/v2/store/dbstate_test.go`, `pkg/v2/store/storetest/storetest.go`, `test/integration/store/dbstate_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/...` -> ok; integration `./test/integration/store/` -> ok. New: contract "adding the same rows twice keeps one of each" (fake and MongoDB; the second write replaces). Unit `TestDBStateStore_FlushTwiceDoesNotDuplicateChecks`: a repository that stores the rows but reports a failure on the first `Add` (a timeout after the write); the second `Flush` sends the same ids and the rows stay 2, both carrying the run start.
+- Decisions / surprises:
+  - The same source listed twice in `SCANNER_DB_SOURCES` gives both rows of a run the same id, so only the later one is kept. This is harmless: duplicate sources are a config mistake, and the state keeps all results.
+  - The integration test that saved 10 runs in a tight loop now gives each run its own start time; with real timestamps, runs within the same millisecond would have shared ids.
+- Next: instance id WARN and `db_state` retention
+
 ### 2026-10-15  P5-7  MongoDB integration tests
 - Status: done
 - What changed: the MongoDB integration tests were written with each task (P5-1 to P5-6) in `test/integration/store/` (`mongo_test.go`, `schema_test.go`, `repositories_test.go`, `dbstate_test.go`, one `mongo:7` container per test function). Added for P5-7: an end-to-end test where a real `dbmgr.Updater` run (one source with a closed port) goes through `DBStateStore` into `db_state` (degraded, `tcp_refused`) and `db_checks` (instance id, class, per-stage results); and the older-schema-version path (stored 0 is migrated and set to 1).

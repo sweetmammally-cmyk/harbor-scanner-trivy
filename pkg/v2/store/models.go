@@ -101,10 +101,12 @@ type DBStateDocument struct {
 
 // DBCheck is a document of the db_checks collection: the result of one source
 // in one update run. Old documents expire through a TTL index on at (P5-3).
+// ID is "<instance_id>:<db>:<run_started_at>:<source>" (see DBCheckID), so
+// writing the same row again replaces it instead of adding a copy.
 type DBCheck struct {
-	ID                 bson.ObjectID `bson:"_id,omitempty"`
-	InstanceID         string        `bson:"instance_id"`
-	DB                 string        `bson:"db"`
-	At                 time.Time     `bson:"at"`
+	ID                 string    `bson:"_id"`
+	InstanceID         string    `bson:"instance_id"`
+	DB                 string    `bson:"db"`
+	At                 time.Time `bson:"at"`
 	dbmgr.SourceResult `bson:",inline"`
 }

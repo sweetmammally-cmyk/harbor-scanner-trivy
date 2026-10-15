@@ -163,12 +163,12 @@ func TestDBStateDocument_BSON(t *testing.T) {
 }
 
 func TestDBCheck_BSON(t *testing.T) {
-	check := DBCheck{InstanceID: "scanner-1", DB: "db", At: at, SourceResult: sourceResult()}
+	check := DBCheck{ID: DBCheckID("scanner-1", "db", at, "mirror|direct"), InstanceID: "scanner-1", DB: "db", At: at, SourceResult: sourceResult()}
 
 	keys := keysOf(t, check)
 
-	assert.Equal(t, sorted("instance_id", "db", "at", "source", "precheck", "answered", "manifest_digest", "installed"), keys,
-		"no _id until MongoDB assigns one")
+	assert.Equal(t, sorted("_id", "instance_id", "db", "at", "source", "precheck", "answered", "manifest_digest", "installed"), keys)
+	assert.Equal(t, "scanner-1:db:2026-10-15T10:00:00.123Z:mirror|direct", check.ID)
 	var decoded DBCheck
 	roundTrip(t, check, &decoded)
 	assert.Equal(t, check, decoded)

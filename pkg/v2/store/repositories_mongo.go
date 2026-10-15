@@ -124,17 +124,21 @@ func NewMongoDBChecks(client *Client) *MongoDBChecks {
 	return &MongoDBChecks{client: client}
 }
 
+// Add writes the checks with an upsert on their _id, so writing the same rows
+// again (a retried flush) never adds copies.
 func (r *MongoDBChecks) Add(ctx context.Context, checks []DBCheck) error {
 	if len(checks) == 0 {
 		return nil
 	}
 	ctx, cancel := r.client.OperationContext(ctx)
 	defer cancel()
-	documents := make([]any, len(checks))
+	writes := make([]mongo.WriteModel, len(checks))
 	for i, check := range checks {
-		documents[i] = check
+		writes[i] = mongo.NewReplaceOneModel().SetFilter(bson.D{{Key: "_id", Value: check.ID}}).
+			SetReplacement(check).SetUpsert(true)
 	}
-	if _, err := r.client.Database().Collection(CollectionDBChecks).InsertMany(ctx, documents); err != nil {
+	_, err := r.client.Database().Collection(CollectionDBChecks).BulkWrite(ctx, writes, options.BulkWrite().SetOrdered(false))
+	if err != nil {
 		return fmt.Errorf("adding DB checks: %w", err)
 	}
 	return nil

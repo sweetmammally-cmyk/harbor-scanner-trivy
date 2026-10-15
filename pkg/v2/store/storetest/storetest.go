@@ -133,7 +133,7 @@ func PlatformRepository(t *testing.T, newRepository func(t *testing.T) store.Pla
 func DBCheckRepository(t *testing.T, newRepository func(t *testing.T) store.DBCheckRepository) {
 	ctx := context.Background()
 	check := func(db string, minutes int, class string) store.DBCheck {
-		return store.DBCheck{DB: db, At: *at(minutes), SourceResult: dbmgr.SourceResult{
+		return store.DBCheck{ID: store.DBCheckID("scanner-1", db, *at(minutes), "mirror|direct"), DB: db, At: *at(minutes), SourceResult: dbmgr.SourceResult{
 			Source:       "mirror|direct",
 			FailureClass: class,
 			Precheck:     dbmgr.CheckResult{Source: "mirror|direct", StartedAt: *at(minutes), Duration: time.Second},
@@ -159,6 +159,20 @@ func DBCheckRepository(t *testing.T, newRepository func(t *testing.T) store.DBCh
 		java, err := repository.Recent(ctx, "java-db", 10)
 		require.NoError(t, err)
 		assert.Len(t, java, 1)
+	})
+
+	t.Run("adding the same rows twice keeps one of each", func(t *testing.T) {
+		repository := newRepository(t)
+		rows := []store.DBCheck{check("db", 1, "tls_reset"), check("db", 2, "")}
+		require.NoError(t, repository.Add(ctx, rows))
+
+		rows[0].FailureClass = "tls_timeout" // the second write replaces the first
+		require.NoError(t, repository.Add(ctx, rows))
+
+		recent, err := repository.Recent(ctx, "db", 10)
+		require.NoError(t, err)
+		require.Len(t, recent, 2)
+		assert.Equal(t, "tls_timeout", recent[1].FailureClass)
 	})
 }
 

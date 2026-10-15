@@ -41,14 +41,16 @@ func countChecks(t *testing.T, client *store.Client, instanceID string) int64 {
 	return count
 }
 
-func stateWithSource(mode, digest string) dbmgr.DBState {
+// stateWithSource is the state after one run with one source; runs started at
+// different times get different db_checks ids, as real runs do.
+func stateWithSource(mode, digest string, runStartedAt time.Time) dbmgr.DBState {
 	return dbmgr.DBState{
 		Mode:           mode,
 		ManifestDigest: digest,
 		LastSources: []dbmgr.SourceResult{{
 			Source:   "mirror|direct",
 			Answered: true,
-			Precheck: dbmgr.CheckResult{OK: true, StartedAt: time.Now().UTC().Truncate(time.Millisecond)},
+			Precheck: dbmgr.CheckResult{OK: true, StartedAt: runStartedAt.UTC().Truncate(time.Millisecond)},
 		}},
 	}
 }
@@ -77,7 +79,8 @@ func TestDBStateStore(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				for run := 1; run <= 10; run++ {
-					_ = s.Save(context.Background(), "db", stateWithSource(dbmgr.ModeNormal, fmt.Sprintf("sha256:%s-%d", instance, run)))
+					_ = s.Save(context.Background(), "db", stateWithSource(dbmgr.ModeNormal,
+						fmt.Sprintf("sha256:%s-%d", instance, run), time.Now().Add(time.Duration(run)*time.Minute)))
 				}
 			}()
 		}
@@ -101,7 +104,7 @@ func TestDBStateStore(t *testing.T) {
 		monitor(t, client)
 		direct := newClient(t, schemaConfig(mongoAddr, name, 24*time.Hour))
 
-		require.NoError(t, s.Save(context.Background(), "db", stateWithSource(dbmgr.ModeDegraded, "sha256:while-down")))
+		require.NoError(t, s.Save(context.Background(), "db", stateWithSource(dbmgr.ModeDegraded, "sha256:while-down", time.Now())))
 		time.Sleep(500 * time.Millisecond)
 		_, found := storedState(t, direct, "scanner-1:db")
 		assert.False(t, found, "nothing written while MongoDB is down")

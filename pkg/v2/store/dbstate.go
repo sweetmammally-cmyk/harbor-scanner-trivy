@@ -67,12 +67,23 @@ func (s *DBStateStore) Save(ctx context.Context, db string, state dbmgr.DBState)
 	s.mu.Lock()
 	s.states[db] = state
 	s.unwritten[db] = true
+	// The run started with the pre-check of its first source.
+	var runStartedAt time.Time
+	if len(state.LastSources) > 0 {
+		runStartedAt = state.LastSources[0].Precheck.StartedAt
+	}
 	for _, source := range state.LastSources {
 		at := source.Precheck.StartedAt
 		if at.IsZero() {
 			at = time.Now()
 		}
-		s.bufferCheck(DBCheck{InstanceID: s.instanceID, DB: db, At: at, SourceResult: source})
+		s.bufferCheck(DBCheck{
+			ID:           DBCheckID(s.instanceID, db, runStartedAt, source.Source),
+			InstanceID:   s.instanceID,
+			DB:           db,
+			At:           at,
+			SourceResult: source,
+		})
 	}
 	s.mu.Unlock()
 
@@ -80,6 +91,12 @@ func (s *DBStateStore) Save(ctx context.Context, db string, state dbmgr.DBState)
 		s.Flush(ctx)
 	}
 	return nil
+}
+
+// DBCheckID is the _id of a db_checks row: "<instance_id>:<db>:<run_started_at>:<source>".
+// The source is already redacted (DBSource.String).
+func DBCheckID(instanceID, db string, runStartedAt time.Time, source string) string {
+	return instanceID + ":" + db + ":" + runStartedAt.UTC().Format(time.RFC3339Nano) + ":" + source
 }
 
 // bufferCheck adds a check, dropping the oldest when the buffer is full.
