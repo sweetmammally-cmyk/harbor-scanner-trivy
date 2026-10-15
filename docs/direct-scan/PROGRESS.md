@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 3 (DB download module)
-- Last completed task: P3-5
+- Last completed task: P3-8
 - In progress: none
-- Next task: P3-8 (parse `metadata.json`, needed by the age WARN), then P3-6
+- Next task: P3-6 (source loop, degraded mode, age WARN)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -115,6 +115,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-8  metadata.json
+- Status: done (done before P3-6, because the age WARN needs it)
+- What changed: `Metadata` (Version, NextUpdate, UpdatedAt, DownloadedAt) and `readMetadata(dir)` in `pkg/v2/dbmgr/metadata.go`. `UpdatedAt` is required, because the scan cache and the DB age depend on it.
+- Files: `pkg/v2/dbmgr/metadata.go`, `pkg/v2/dbmgr/metadata_test.go`
+- Tests run: `go test -short -race -run TestReadMetadata ./pkg/v2/dbmgr/` -> ok. The fixture is the real `metadata.json` from this machine's Trivy cache. Missing file, bad JSON and no UpdatedAt are errors.
+- Decisions / surprises: `readMetadata` takes a directory, so P3-6 can check a downloaded version before installing it. `DownloadedAt` in the file is what upstream wrote; our own install time will be stored in the DB state.
+- Next: P3-6
 
 ### 2026-10-15  P3-5  Seed DB
 - Status: done

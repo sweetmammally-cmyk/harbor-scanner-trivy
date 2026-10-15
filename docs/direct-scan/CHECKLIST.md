@@ -36,7 +36,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P3-5 Seed DB support; service not ready until a DB exists
 - [ ] P3-6 (startup check for empty `SCANNER_DB_SOURCES` already done) Source loop: pre-check, upstream check, download and install if the digest differs; stop on equal digest or install; failed sources recorded with class; no source answered = degraded, one ERROR log, old DB kept; return mode, active source and per-source results; `SCANNER_DB_AGE_WARN` WARN after each check; no downgrade guard
 - [ ] P3-7 Java DB through the same flow
-- [ ] P3-8 Parse `metadata.json` (UpdatedAt, NextUpdate, Version, DownloadedAt)
+- [x] P3-8 Parse `metadata.json` (UpdatedAt, NextUpdate, Version, DownloadedAt)
 - [ ] P3-9 Tests with a fake registry: success, wrong digest, truncated, hang mid-download, fallback to second source, all sources fail
 
 ## Phase 4: Updater and freshness
