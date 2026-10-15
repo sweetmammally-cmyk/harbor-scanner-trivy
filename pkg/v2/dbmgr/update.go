@@ -90,7 +90,7 @@ type UpdateResult struct {
 // DB is kept. There is no downgrade guard: the first source that answers wins.
 func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind, sources []config.DBSource) UpdateResult {
 	logger := slog.With(slog.String("db", kind.Name))
-	installed := installedDigest(cacheDir, kind.Name)
+	installed := InstalledDigest(cacheDir, kind.Name)
 	var result UpdateResult
 
 	// newerNotInstalled is set when a source offered a different DB that could not be installed.
@@ -199,7 +199,7 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 	}
 
 	if result.ManifestDigest == "" {
-		result.ManifestDigest = installedDigest(cacheDir, kind.Name)
+		result.ManifestDigest = InstalledDigest(cacheDir, kind.Name)
 	}
 
 	var failures []string

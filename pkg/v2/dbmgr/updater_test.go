@@ -75,7 +75,7 @@ func TestUpdater_Run(t *testing.T) {
 
 		runUpdater(t, cfg, cacheDir)
 
-		require.Eventually(t, func() bool { return installedDigest(cacheDir, "db") == f.manifestDigest },
+		require.Eventually(t, func() bool { return InstalledDigest(cacheDir, "db") == f.manifestDigest },
 			5*time.Second, 10*time.Millisecond, "first run at startup")
 		// Each run asks for the manifest twice (pre-check and upstream check).
 		require.Eventually(t, func() bool { return manifests.Load() >= 6 }, 5*time.Second, 10*time.Millisecond,
@@ -115,7 +115,7 @@ func TestUpdater_Run(t *testing.T) {
 
 		runUpdater(t, cfg, cacheDir)
 
-		require.Eventually(t, func() bool { return installedDigest(cacheDir, "db") == f.manifestDigest },
+		require.Eventually(t, func() bool { return InstalledDigest(cacheDir, "db") == f.manifestDigest },
 			5*time.Second, 10*time.Millisecond, "the retry installs the DB")
 		afterInstall := manifests.Load()
 		time.Sleep(300 * time.Millisecond)

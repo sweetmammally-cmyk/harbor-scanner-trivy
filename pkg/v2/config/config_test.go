@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	InstanceID:                  hostname(),
 	DBChecksRetention:           30 * 24 * time.Hour,
 	MongoConnectTimeout:         5 * time.Second,
 	MongoServerSelectionTimeout: 5 * time.Second,
@@ -156,6 +158,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_V2_API_ENABLED":                 "true",
 				"SCANNER_V2_AUTH_TOKEN":                  "token",
 				"SCANNER_MONGO_URI":                      "mongodb://mongo:27017",
+				"SCANNER_INSTANCE_ID":                    "scanner-1",
 				"SCANNER_MONGO_DB":                       "scanner",
 				"SCANNER_MONGO_CONNECT_TIMEOUT":          "1s",
 				"SCANNER_MONGO_SERVER_SELECTION_TIMEOUT": "2s",
@@ -191,6 +194,7 @@ func TestGetConfig(t *testing.T) {
 				Enabled:                     true,
 				AuthToken:                   "token",
 				MongoURI:                    "mongodb://mongo:27017",
+				InstanceID:                  "scanner-1",
 				MongoDB:                     "scanner",
 				MongoConnectTimeout:         1 * time.Second,
 				MongoServerSelectionTimeout: 2 * time.Second,
@@ -316,4 +320,22 @@ func TestParseDuration(t *testing.T) {
 			assert.Equal(t, tc.expectedDuration, duration)
 		})
 	}
+}
+
+func hostname() string {
+	name, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+	return name
+}
+
+func TestGetConfig_InstanceIDDefaultsToHostname(t *testing.T) {
+	t.Setenv("SCANNER_INSTANCE_ID", "")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	assert.Equal(t, hostname(), cfg.InstanceID)
+	assert.NotEmpty(t, cfg.InstanceID)
 }

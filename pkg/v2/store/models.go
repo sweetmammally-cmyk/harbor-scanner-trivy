@@ -90,10 +90,12 @@ type Platform struct {
 	ExampleDigest string    `bson:"example_digest"`
 }
 
-// DBStateDocument is a document of the db_state collection: one per DB,
-// with _id "db" or "java-db".
+// DBStateDocument is a document of the db_state collection: one per scanner
+// instance and DB kind, with _id "<instance_id>:<db>" (db is "db" or "java-db").
 type DBStateDocument struct {
 	ID            string `bson:"_id"`
+	InstanceID    string `bson:"instance_id"`
+	DB            string `bson:"db"`
 	dbmgr.DBState `bson:",inline"`
 }
 
@@ -101,6 +103,7 @@ type DBStateDocument struct {
 // in one update run. Old documents expire through a TTL index on at (P5-3).
 type DBCheck struct {
 	ID                 bson.ObjectID `bson:"_id,omitempty"`
+	InstanceID         string        `bson:"instance_id"`
 	DB                 string        `bson:"db"`
 	At                 time.Time     `bson:"at"`
 	dbmgr.SourceResult `bson:",inline"`

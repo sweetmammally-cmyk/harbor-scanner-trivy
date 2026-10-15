@@ -108,7 +108,7 @@ func TestUpdater_RefreshForScan(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, FreshnessStale, freshness, "the scan proceeds with the current DB")
 		assert.Less(t, time.Since(start), 250*time.Millisecond)
-		require.Eventually(t, func() bool { return installedDigest(cacheDir, "db") == f.manifestDigest },
+		require.Eventually(t, func() bool { return InstalledDigest(cacheDir, "db") == f.manifestDigest },
 			5*time.Second, 10*time.Millisecond, "the refresh went on")
 		require.Eventually(t, func() bool {
 			state, _ := store.Get(context.Background(), "db")

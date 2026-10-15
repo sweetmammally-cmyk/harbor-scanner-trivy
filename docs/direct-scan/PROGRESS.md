@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 5 (MongoDB data plane)
-- Last completed task: P5-5
+- Last completed task: P5-6
 - In progress: none
-- Next task: P5-6 (DB state per instance in Mongo, flush on reconnect, startup load with disk check, bounded db_checks buffer), then P5-7
+- Next task: P5-7 (integration tests against real Mongo: review coverage, run the suite)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -160,6 +160,26 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-6  DB state in MongoDB, per instance
+- Status: done
+- What changed:
+  - `pkg/v2/store/dbstate.go`: `DBStateStore` implements `dbmgr.StateStore`. `Get` reads memory only. `Save` updates memory, marks the DB unwritten, buffers one `db_checks` row per source of the run (instance id, db, `at` = the pre-check start), and flushes if `Client.Ready()`; it never fails. `Flush` (one at a time) takes the unwritten states and buffered checks out under the lock and writes them without it: `db_state` with `ReplaceOne` + upsert on `_id` "<instance_id>:<db>", checks through `MongoDBChecks.Add`. What fails is put back (states re-marked; checks back before newer ones, bounded). It logs WARN with the dropped count. The buffer holds `MaxBufferedDBChecks` = 1000 and drops the oldest. `Load(ctx, cacheDir)` reads this instance's documents at startup and, when a stored digest differs from `dbmgr.InstalledDigest` on disk, uses the disk digest and clears `last_confirmed_current_at` and `newer_available`; states already in memory are kept.
+  - `Client.OnReady(f)`: functions run in `Monitor` each time MongoDB becomes ready (after the schema step); `NewDBStateStore` registers its `Flush` there, so the latest state is written after a reconnect without a new run.
+  - Models: `DBStateDocument` has `instance_id` and `db`; `DBCheck` has `instance_id`.
+  - Config `InstanceID` (`SCANNER_INSTANCE_ID`, default `os.Hostname()`; error if both are missing).
+  - `dbmgr.installedDigest` exported as `InstalledDigest` for the startup check.
+- Files: `pkg/v2/store/dbstate.go`, `pkg/v2/store/dbstate_test.go`, `pkg/v2/store/client.go`, `pkg/v2/store/models.go`, `pkg/v2/store/models_test.go`, `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`, `pkg/v2/dbmgr/*` (rename), `test/integration/store/dbstate_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/...` -> ok; `make test` -> ok; `go test -count=2 -tags=integration ./test/integration/...` -> ok (config coverage 98.7%: the "hostname unknown" branch cannot be triggered in a test).
+  - Unit, MongoDB unreachable: `Save` returns in under 100ms and `Get` sees it; the buffer of 3 keeps the newest 3 and counts 1 dropped; a failed `Flush` logs the dropped count and both write errors, keeps the state unwritten and the checks in order, and a later run's checks go after them; a real `dbmgr.Updater` completes three runs in under a second each and its degraded state is kept in memory.
+  - Integration (`mongo:7`):
+    - two instances save 10 runs each concurrently into one database: each has its own document with its own last digest and 10 `db_checks` rows;
+    - with MongoDB down (forwarder off) a saved state is not written; after the forwarder starts, the document and its check appear with no further `Save`;
+    - `Load` with a stored digest different from the disk clears the confirmation and uses the disk digest, a matching digest keeps it, and another instance's document is not loaded.
+- Decisions / surprises:
+  - `db_checks` rows come from `state.LastSources` at `Save`, because each `Save` from the updater is one run; this needed no change to the `StateStore` interface (documented on `DBStateStore`).
+  - If MongoDB is down at startup, `Load` fails and the instance starts from memory; its next flush then replaces the stored document. Wiring (startup order, `Load` with a timeout) comes in P9-1.
+- Next: P5-7
 
 ### 2026-10-15  P5-5  Follow-up: GridFS upload order and cleanup
 - Status: done

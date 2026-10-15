@@ -71,7 +71,7 @@ func TestUpdate(t *testing.T) {
 		require.Len(t, result.Sources, 1, "the loop stops after an install")
 		assert.True(t, result.Sources[0].Installed)
 		assert.Equal(t, "db v1", readDB(t, cacheDir))
-		assert.Equal(t, f.manifestDigest, installedDigest(cacheDir, "db"))
+		assert.Equal(t, f.manifestDigest, InstalledDigest(cacheDir, "db"))
 
 		again := update(testContext(t), updateConfig, cacheDir, trivyDB, sources)
 
@@ -274,8 +274,8 @@ func TestUpdate_JavaDB(t *testing.T) {
 		assert.Equal(t, []string{"tcp_refused", ""}, sourceClasses(javaResult), "the Java DB uses the same fallback")
 		assert.Equal(t, "main db", readDB(t, cacheDir))
 		assert.True(t, dbPresent(cacheDir, "java-db", "trivy-java.db"))
-		assert.Equal(t, javaSource.manifestDigest, installedDigest(cacheDir, "java-db"))
-		assert.Equal(t, mainDB.manifestDigest, installedDigest(cacheDir, "db"))
+		assert.Equal(t, javaSource.manifestDigest, InstalledDigest(cacheDir, "java-db"))
+		assert.Equal(t, mainDB.manifestDigest, InstalledDigest(cacheDir, "db"))
 		assert.Equal(t, 1, javaResult.Metadata.Version)
 	})
 
@@ -409,7 +409,7 @@ func TestUpdate_InstallWriteError(t *testing.T) {
 	assert.True(t, result.NewerAvailable)
 	assert.False(t, result.Installed)
 	assert.Equal(t, "db v1", readDB(t, cacheDir), "the old DB is kept")
-	assert.Equal(t, v1.manifestDigest, installedDigest(cacheDir, "db"))
+	assert.Equal(t, v1.manifestDigest, InstalledDigest(cacheDir, "db"))
 	assert.Equal(t, versionsBefore, versionNames(t, cacheDir), "no partial directory")
 
 	// Once the disk has space again, the next run installs and clears the flag.

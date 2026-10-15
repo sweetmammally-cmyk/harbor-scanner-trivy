@@ -20,7 +20,10 @@ type Config struct {
 
 	// MongoURI may hold a password: never log it or put it in errors.
 	MongoURI string `env:"SCANNER_MONGO_URI"`
-	MongoDB  string `env:"SCANNER_MONGO_DB"`
+	// InstanceID names this scanner instance in db_state and db_checks.
+	// GetConfig sets it to the hostname when SCANNER_INSTANCE_ID is unset.
+	InstanceID string `env:"SCANNER_INSTANCE_ID"`
+	MongoDB    string `env:"SCANNER_MONGO_DB"`
 
 	MongoConnectTimeout         time.Duration `env:"SCANNER_MONGO_CONNECT_TIMEOUT" envDefault:"5s"`
 	MongoServerSelectionTimeout time.Duration `env:"SCANNER_MONGO_SERVER_SELECTION_TIMEOUT" envDefault:"5s"`
@@ -98,6 +101,13 @@ func GetConfig() (Config, error) {
 	cfg.DBAgeWarn, err = ParseDuration(ageWarn)
 	if err != nil || cfg.DBAgeWarn <= 0 {
 		return cfg, fmt.Errorf("SCANNER_DB_AGE_WARN: invalid duration %q", ageWarn)
+	}
+
+	if cfg.InstanceID == "" {
+		cfg.InstanceID, err = os.Hostname()
+		if err != nil {
+			return cfg, fmt.Errorf("SCANNER_INSTANCE_ID is unset and the hostname is unknown: %w", err)
+		}
 	}
 
 	retention := os.Getenv("SCANNER_DB_CHECKS_RETENTION")

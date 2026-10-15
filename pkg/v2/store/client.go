@@ -40,6 +40,8 @@ type Client struct {
 	checked bool
 	// lastSchemaError avoids logging the same schema error every ping.
 	lastSchemaError string
+	// onReady functions run each time MongoDB becomes ready.
+	onReady []func(ctx context.Context)
 }
 
 // NewClient creates the MongoDB client. It does no network I/O: the driver
@@ -141,6 +143,16 @@ func (c *Client) checkOnce(ctx context.Context) {
 	c.lastSchemaError = ""
 	c.schemaReady.Store(true)
 	slog.Info("MongoDB schema is ready", slog.Int("schema_version", SchemaVersion))
+	for _, f := range c.onReady {
+		f(ctx)
+	}
+}
+
+// OnReady registers f to run in Monitor each time MongoDB becomes ready (up with
+// the schema ready), for example to write state kept in memory while it was
+// down. Register before Monitor starts.
+func (c *Client) OnReady(f func(ctx context.Context)) {
+	c.onReady = append(c.onReady, f)
 }
 
 // Disconnect closes the client's connections.

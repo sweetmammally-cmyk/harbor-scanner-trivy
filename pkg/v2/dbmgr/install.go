@@ -97,9 +97,9 @@ func installDB(cacheDir, dbName, versionDir, manifestDigest string) error {
 	return nil
 }
 
-// installedDigest returns the manifest digest of the active DB, or "" when there
+// InstalledDigest returns the manifest digest of the active DB, or "" when there
 // is no DB or it has no recorded digest (for example the seed DB).
-func installedDigest(cacheDir, dbName string) string {
+func InstalledDigest(cacheDir, dbName string) string {
 	data, err := os.ReadFile(filepath.Join(cacheDir, dbName, manifestDigestFile))
 	if err != nil {
 		return ""

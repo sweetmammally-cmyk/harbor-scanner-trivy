@@ -49,7 +49,7 @@ func TestInstallDB(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, filepath.Join("db-versions", filepath.Base(v1)), target, "the symlink is relative")
 		assert.Equal(t, "db v1", readDB(t, cacheDir))
-		assert.Equal(t, "sha256:v1", installedDigest(cacheDir, "db"))
+		assert.Equal(t, "sha256:v1", InstalledDigest(cacheDir, "db"))
 	})
 
 	t.Run("updates keep the current and the previous version only", func(t *testing.T) {
@@ -67,7 +67,7 @@ func TestInstallDB(t *testing.T) {
 		require.NoError(t, installDB(cacheDir, "db", v3, "sha256:v3"))
 
 		assert.Equal(t, "db v3", readDB(t, cacheDir))
-		assert.Equal(t, "sha256:v3", installedDigest(cacheDir, "db"))
+		assert.Equal(t, "sha256:v3", InstalledDigest(cacheDir, "db"))
 		assert.ElementsMatch(t, []string{filepath.Base(v2), filepath.Base(v3)}, versionNames(t, cacheDir))
 		assert.NoDirExists(t, failed)
 		assert.NoFileExists(t, filepath.Join(cacheDir, "db.new"))
@@ -96,7 +96,7 @@ func TestInstallDB(t *testing.T) {
 		cacheDir := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, "db"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "db", "trivy.db"), []byte("seed db"), 0o644))
-		assert.Equal(t, "", installedDigest(cacheDir, "db"), "a seed DB has no recorded digest")
+		assert.Equal(t, "", InstalledDigest(cacheDir, "db"), "a seed DB has no recorded digest")
 
 		v1 := downloadedVersion(t, cacheDir, "db v1")
 		require.NoError(t, installDB(cacheDir, "db", v1, "sha256:v1"))
@@ -124,8 +124,8 @@ func TestInstallDB(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join(cacheDir, "java-db", "trivy-java.db"))
 		require.NoError(t, err)
 		assert.Equal(t, "java", string(data))
-		assert.Equal(t, "sha256:java", installedDigest(cacheDir, "java-db"))
-		assert.Equal(t, "", installedDigest(cacheDir, "db"))
+		assert.Equal(t, "sha256:java", InstalledDigest(cacheDir, "java-db"))
+		assert.Equal(t, "", InstalledDigest(cacheDir, "db"))
 	})
 }
 
@@ -149,7 +149,7 @@ func TestInstallSeed(t *testing.T) {
 		assert.True(t, installed)
 		assert.True(t, dbPresent(cacheDir, "db", "trivy.db"))
 		assert.Equal(t, "seed db", readDB(t, cacheDir))
-		assert.Equal(t, "", installedDigest(cacheDir, "db"), "the first upstream check must download")
+		assert.Equal(t, "", InstalledDigest(cacheDir, "db"), "the first upstream check must download")
 	})
 
 	t.Run("keeps an installed DB", func(t *testing.T) {
