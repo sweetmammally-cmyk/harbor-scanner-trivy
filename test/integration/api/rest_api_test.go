@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,6 +157,12 @@ func TestRestAPI(t *testing.T) {
 							Digest: "sha256:396c31837116ac290458afcb928f68b6cc1c7bdd6963fc72f52f365a2a89c1b5",
 							DiffID: "sha256:9fb3aa2f8b8023a4bebbf92aa567caf88e38e969ada9f0ac12643b2847391635",
 						},
+						VendorAttributes: map[string]any{
+							"Trivy": map[string]any{
+								"Target": imageRef.String() + " (alpine 3.10.9)",
+								"Type":   "alpine",
+							},
+						},
 					},
 					{
 						ID:          "CVE-2020-28928",
@@ -171,6 +178,12 @@ func TestRestAPI(t *testing.T) {
 						Layer: &harbor.Layer{
 							Digest: "sha256:396c31837116ac290458afcb928f68b6cc1c7bdd6963fc72f52f365a2a89c1b5",
 							DiffID: "sha256:9fb3aa2f8b8023a4bebbf92aa567caf88e38e969ada9f0ac12643b2847391635",
+						},
+						VendorAttributes: map[string]any{
+							"Trivy": map[string]any{
+								"Target": imageRef.String() + " (alpine 3.10.9)",
+								"Type":   "alpine",
+							},
 						},
 					},
 				},
@@ -319,6 +332,14 @@ func TestRestAPI(t *testing.T) {
 			err = json.NewDecoder(rs.Body).Decode(&got)
 			require.NoError(t, err)
 			got.GeneratedAt = time.Time{} // ignore generated_at
+
+			// Trivy reports the SBOM temp file path as the target, which changes on every run.
+			require.Len(t, got.Vulnerabilities, 1)
+			gotTrivy, ok := got.Vulnerabilities[0].VendorAttributes["Trivy"].(map[string]any)
+			require.True(t, ok)
+			assert.True(t, strings.HasSuffix(gotTrivy["Target"].(string), ".json (alpine 3.10.9)"))
+			gotTrivy["Target"] = "<sbom file> (alpine 3.10.9)"
+
 			want := harbor.ScanReport{
 				Artifact: harbor.Artifact{
 					Repository: "testimage",
@@ -347,6 +368,10 @@ func TestRestAPI(t *testing.T) {
 									"V3Score":  5.3,
 									"V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
 								},
+							},
+							"Trivy": map[string]any{
+								"Target": "<sbom file> (alpine 3.10.9)",
+								"Type":   "alpine",
 							},
 						},
 						Description: "OpenSSL 1.1.1 introduced a rewritten random number generator (RNG). This was intended to include protection in the event of a fork() system call in order to ensure that the parent and child processes did not share the same RNG state. However this protection was not being used in the default case. A partial mitigation for this issue is that the output from a high precision timer is mixed into the RNG state so the likelihood of a parent and child process sharing state is significantly reduced. If an application already calls OPENSSL_init_crypto() explicitly using OPENSSL_INIT_ATFORK then this problem does not occur at all. Fixed in OpenSSL 1.1.1d (Affected 1.1.1-1.1.1c).",

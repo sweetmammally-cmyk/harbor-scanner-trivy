@@ -25,6 +25,7 @@ var (
   "Results": [
     {
       "Target": "alpine:3.10.2",
+      "Type": "alpine",
       "Vulnerabilities": [
         {
           "VulnerabilityID": "CVE-2018-6543",
@@ -81,6 +82,8 @@ var (
 						V3Score:  lo.ToPtr[float32](5.5),
 					},
 				},
+				Target: "alpine:3.10.2",
+				Type:   "alpine",
 			},
 		},
 	}

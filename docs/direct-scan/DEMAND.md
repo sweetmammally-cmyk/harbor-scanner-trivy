@@ -306,7 +306,7 @@ All defaults can be overridden by env. Existing Trivy variables keep their curre
 8. Pre-check logs show source, route (direct/proxy/SOCKS5), TLS and HTTP/2 results, and no secrets.
 9. `GET /api/v2/health` reflects Mongo, DB age, queue and recent scan stats; readiness is false when Mongo is down.
 10. New platforms appear in the `platforms` collection on first discovery.
-11. Harbor adapter endpoints still pass their existing tests.
+11. Harbor adapter endpoints still pass their existing tests. Adapter output matches upstream except one documented addition: every vulnerability's `vendor_attributes` carries `Trivy: { Target, Type }` (the Trivy result target and type).
 12. A request with `platforms: ["npm"]` returns only npm findings, sets `has_more_platforms` when the image has other platform types, and still records those other types in the `platforms` collection.
 13. A request with a broader scope than the cached scan (extra platform or lower severity) triggers a new scan.
 14. Trivy never downloads a DB during a scan; all DB downloads go through our own module.

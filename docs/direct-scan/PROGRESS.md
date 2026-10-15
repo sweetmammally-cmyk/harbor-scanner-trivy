@@ -6,11 +6,10 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 1
-- Last completed task: P1-1
+- Last completed task: P0-6
 - In progress: none
-- Next task: P0-6 (make baseline green), then P1-2
-- Blockers / questions for the user:
-  - Baseline has 3 failing tests caused by commit `0c87038` (Harbor report now carries `vendor_attributes.Trivy`). Owner must choose: keep the change and update the tests, or revert it. Also: the INFO-level "FULL TRIVY REPORT" dump in `pkg/trivy/wrapper.go` looks like leftover debug code.
+- Next task: P1-2
+- Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -39,6 +38,7 @@ Newest changelog entries go at the top of the Changelog.
   - vet: `go vet ./...`
   - lint: `make lint` needs `./bin/golangci-lint` (not installed locally)
 - CI: `.github/workflows/build.yml` on push to main and PRs: yamllint, `make setup`, `make lint`, `make test`, `make test-integration`, `make test-component`, goreleaser snapshot. Changes only under `docs/**` or `*.md` skip CI.
+- Baseline after P0-6: `make test` and `make test-integration` pass (component tests and lint still not run). Files that `gofmt -l` already flagged before our work (`pkg/etc/config.go`, `pkg/etc/config_test.go`, `pkg/http/api/v1/handler.go`, `pkg/trivy/model.go`) are left alone.
 - Baseline test result before our changes (2026-10-15, HEAD `3d447af`, code same as `f917cc0`):
   - `go build ./...`: OK. `go vet ./...`: OK.
   - `make test`: **FAIL**. `TestWrapper_Scan` (pkg/trivy) and `TestTransformer_Transform` (pkg/scan) fail; everything else passes. Cause: commit `0c87038` added `Vulnerability.Target/Type` and the `Trivy` vendor attribute without updating tests. On upstream `2691434` all `./pkg/...` tests pass (checked in a temporary worktree).
@@ -56,7 +56,8 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - `SCANNER_DB_SOURCES=repo|route,repo|route`, route = `direct`, `http://host:port` or `socks5://host:port`. Sources form an ordered pool mixing public registries and our mirrors. `SCANNER_JAVA_DB_SOURCES` is optional, same format and flow.
   - Every download is gated by the pre-check; a failed source is never downloaded from. After a passed pre-check: stall timeout `SCANNER_DB_DOWNLOAD_STALL_TIMEOUT` (30s) and overall cap `SCANNER_DB_DOWNLOAD_TIMEOUT` (15m, safety net only).
   - The FULL TRIVY REPORT debug log stays until v2 logging exists (task P10-5).
-  - Baseline must be green before P1-2 (task P0-6). The `vendor_attributes.Trivy` keep/revert choice is still open.
+  - Baseline must be green before P1-2 (task P0-6).
+  - `vendor_attributes.Trivy`: KEEP. Tests updated; AC11 reworded to "adapter output matches upstream except the documented vendor attribute" (DEMAND section 13).
 - 2026-10-15 (P0-3): package layout confirmed as in PLAN.md: `pkg/v2/config`, `pkg/v2/dbmgr`, `pkg/v2/registry`, `pkg/v2/store`, `pkg/v2/runner`, `pkg/v2/queue`, `pkg/v2/api`, `pkg/v2/health`. Reason: no clashes with existing packages (`pkg/queue` vs `pkg/v2/queue` differ by path; import with an alias where both are used). Wiring: `cmd/scanner-trivy/main.go` is the one upstream file we must touch. When `SCANNER_V2_API_ENABLED=true` it wraps the existing v1 handler in a small `http.ServeMux` that sends `/api/v2/` to the v2 handler and everything else to the v1 handler, so `pkg/http/api/v1` stays unchanged. The v2 router uses gorilla/mux like v1. Readiness for Mongo and DB (P10-2) will need a touch to `/probe/ready` in `pkg/http/api/v1/handler.go`; decide the smallest hook when we get there.
 - 2026-10-15 (P0-4): libraries and Mongo test strategy.
   - Mongo driver: official `go.mongodb.org/mongo-driver/v2` (includes GridFS). The only new module dependency for Mongo.
@@ -92,6 +93,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P0-6  Baseline green
+- Status: done
+- What changed: updated tests for the `vendor_attributes.Trivy` addition from `0c87038` (owner chose KEEP). Unit fixture now has `"Type": "alpine"`, so Target and Type copying is actually tested. Integration test checks the exact image target; for the SBOM it checks the suffix only, because the target is a random temp file path. AC11 reworded in DEMAND and CHECKLIST.
+- Files: `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go`, `docs/direct-scan/*`
+- Tests run: `make test` -> ok (all packages); `go test -count=1 -tags=integration ./test/integration/...` -> ok; `go vet ./...` and with integration tag -> ok. Component tests and lint not run.
+- Decisions / surprises: test-only change; no production code touched.
+- Next: P1-2
 
 ### 2026-10-15  DECISIONS  Owner answers on settings and DB download
 - Status: done

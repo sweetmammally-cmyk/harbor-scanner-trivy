@@ -9,7 +9,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P0-3 Confirm or adjust the package layout (`pkg/v2/...`); record decision
 - [x] P0-4 Decide Mongo test strategy and libraries (Mongo driver, SOCKS5); record decision
 - [x] P0-5 Fill the Commands section of `CLAUDE.md`
-- [ ] P0-6 Make the baseline green (failing tests from commit `0c87038`, per the owner's `vendor_attributes.Trivy` decision); own commit, before P1-2
+- [x] P0-6 Make the baseline green (failing tests from commit `0c87038`, per the owner's `vendor_attributes.Trivy` decision); own commit, before P1-2
 
 ## Phase 1: Config and skeleton
 - [x] P1-1 Feature flag `SCANNER_V2_API_ENABLED`; v2 wiring off by default
@@ -112,7 +112,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] AC8 Pre-check logs show source, route, TLS and HTTP/2 results, no secrets
 - [ ] AC9 `/api/v2/health` reflects Mongo, DB age, queue and scan stats; readiness false when Mongo is down
 - [ ] AC10 New platforms appear in the `platforms` collection on first discovery
-- [ ] AC11 Harbor adapter endpoints still pass their existing tests
+- [ ] AC11 Harbor adapter endpoints still pass their existing tests; output matches upstream except the documented `vendor_attributes.Trivy`
 - [ ] AC12 `platforms: ["npm"]` returns only npm findings, sets `has_more_platforms`, still records other types
 - [ ] AC13 A broader request than the cached scan triggers a new scan
 - [ ] AC14 Trivy never downloads a DB during a scan
