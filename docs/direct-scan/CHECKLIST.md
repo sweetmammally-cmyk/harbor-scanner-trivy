@@ -15,7 +15,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P1-1 Feature flag `SCANNER_V2_API_ENABLED`; v2 wiring off by default
 - [x] P1-2 Config struct and env parsing for all variables in DEMAND section 11
 - [x] P1-3 Duration parser with `d` support; unset or invalid check interval falls back to 3h with a WARN log
-- [x] P1-4 `SCANNER_DB_SOURCES` and `SCANNER_JAVA_DB_SOURCES` parser (ordered; route direct, HTTP proxy or SOCKS5), validation, redacted printing
+- [x] P1-4 (follow-up: duplicate sources rejected) `SCANNER_DB_SOURCES` and `SCANNER_JAVA_DB_SOURCES` parser (ordered; route direct, HTTP proxy or SOCKS5), validation, redacted printing
 - [x] P1-5 Unit tests for config
 
 ## Phase 2: DB pre-check module
@@ -62,13 +62,13 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P6-3 Tests with a fake registry: token flow and expiry refresh, index vs plain manifest, missing digest header, 404, 401/403, endless challenge, redirect, timeouts, invalid names, redaction
 
 ## Phase 7: Scan runner
-- [ ] P7-1 Run Trivy with DB updates disabled and JSON output; credentials via env, never argv; timeout and kill; scan `registry/repository/name@digest`, never the tag
-- [ ] P7-2 Parse output; keep only requested result types and severities
+- [ ] P7-1 Run Trivy (flags of DEMAND 6.2) on `registry/repository/name@digest`: env allowlist, credentials via `TRIVY_USERNAME`/`TRIVY_PASSWORD`; private 0600 output file; Trivy `--timeout` below `SCANNER_SCAN_TIMEOUT` plus a process-group kill; `SCANNER_SCAN_MAX_OUTPUT`; last 8 KiB of stderr, redacted; failure classes; per-worker cache dir with DB symlinks to the version directory, pinned while scanning
+- [ ] P7-2 Stream-parse the output; validate platform and severity strings; keep the requested result types (case-insensitive) and severities
 - [ ] P7-3 Summary counts for all severities of the requested result types
-- [ ] P7-4 Platform discovery from all result types; upsert `platforms`; set `has_more_platforms`
-- [ ] P7-5 Store the result inline or in GridFS
-- [ ] P7-6 Log "triggering scan" and "scan done" with duration; store timings
-- [ ] P7-7 Tests with canned Trivy JSON fixtures; one manual run on a real image
+- [ ] P7-4 Platform discovery from all result types; `platforms_requested`/`found`/`not_found`; upsert `platforms`; set `has_more_platforms`
+- [ ] P7-5 Stored finding shape (DEMAND 6.2), `SCANNER_SCAN_MAX_FINDINGS` with `truncated`; store inline or in GridFS
+- [ ] P7-6 Log "triggering scan" and "scan done" (no findings); store timings, Trivy version, DB version; `trivy --version` at startup, readiness false without the binary
+- [ ] P7-7 Tests: canned Trivy JSON fixtures; fake trivy executable (env allowlist without SCANNER_* secrets, timeout kill including children, huge output, exit codes, stderr redaction); DB swap during a scan; two concurrent Trivy processes; one manual real-image run (`manual` tag)
 
 ## Phase 8: Queue
 - [ ] P8-1 Enqueue into `scans` (state queued); dedupe on digest plus options

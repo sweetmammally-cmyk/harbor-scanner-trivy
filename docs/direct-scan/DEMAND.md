@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.14 (db_checks ids, db_state retention, registry client, 2026-10-15)
+Status: DRAFT v0.15 (scan runner, duplicate DB sources, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -179,6 +179,18 @@ Notes:
 - Errors: 404 -> `image_not_found` (HTTP 404); 401/403 -> `registry_auth_failed` (HTTP 502); timeout or 5xx -> `registry_unavailable` (HTTP 503 with a retry hint).
 - `http://` registry URLs are allowed, with one WARN at startup. Credentials and tokens are never logged.
 
+### 6.2 Scan runner (Trivy)
+
+- Trivy runs once per scan on `registry/repository/name@digest` with `image --scanners vuln --format json --output <file> --list-all-pkgs=false --skip-db-update --skip-java-db-update --skip-version-check --image-src remote --cache-dir <worker dir> --timeout <slightly below SCANNER_SCAN_TIMEOUT>`, and `--insecure` for an `http://` registry. No `--severity` flag: Trivy reports every severity and we filter. `--image-src remote` makes Trivy pull from the registry, never from a local Docker daemon; `--skip-version-check` makes no other network call.
+- The child environment comes from an allowlist (`PATH`, `HOME`, `TMPDIR`, `TRIVY_*`, proxy variables), never the full environment. Registry credentials go in `TRIVY_USERNAME` / `TRIVY_PASSWORD`, never on the command line.
+- Each worker has its own Trivy cache directory. At scan start its `db` (and `java-db`) symlink points at the concrete version directory of the installed DB; that version's `UpdatedAt` and manifest digest are stored with the scan, and the version is pinned while the scan runs (pruning skips pinned versions).
+- The JSON goes to a private (0600) temporary file, which is stream-parsed and then deleted. Output above `SCANNER_SCAN_MAX_OUTPUT` fails the scan. Only the last 8 KiB of stderr is kept, redacted.
+- Failure classes: `trivy_timeout`, `trivy_exit_error`, `output_too_large`, `output_invalid`, `db_missing` (no vulnerability DB installed; Trivy is not started), `java_db_missing` (the image has `.jar` files and no Java DB is installed: Trivy 0.71.2 stops with "Unable to initialize the Java DB"; Trivy has no clean way to skip jar analysis, so this is a clear failure).
+- Requested platforms are matched against the result `Type`, case-insensitively. Platform strings: lowercase letters, digits, `-` and `_`, with a maximum count; severities: uppercase, from the fixed set UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL. Counts cover all severities of the requested platforms; details only the requested severities. Results carry `platforms_requested`, `platforms_found` and `platforms_not_found`: a requested platform that is not in the image must never look like a clean result. `has_more_platforms` is true when the image has other types. Every type found is upserted into `platforms`.
+- A stored finding has: id, package, installed version, fixed version, severity, title, primary URL, status, target, type. Descriptions, references and package lists are dropped. At most `SCANNER_SCAN_MAX_FINDINGS` are stored, with `truncated: true` beyond it.
+- Logging: "triggering scan" (scan_id, digest, customer ids, platforms, severities, Trivy version, db_updated_at) and "scan done" (durations, counts); findings are never logged. `trivy --version` runs at startup; the version is stored with each scan; readiness is false while the Trivy binary is missing.
+- Measured with Trivy 0.71.2: a result type with no findings still appears in the output with `--list-all-pkgs=false` (checked for an OS type and a language type), so package lists are not needed to discover types.
+
 ### 7.1 Always have a DB
 
 - DB lives on a persistent volume; a seed DB is baked into the image so a fresh pod can start.
@@ -252,6 +264,7 @@ Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format
 
 - The scanner downloads the Trivy DB itself as an OCI artifact (manifest, then the DB layer, which is extracted to Trivy's DB directory with `trivy.db` and `metadata.json`).
 - Because we own the download path, the same route (direct, HTTP proxy, SOCKS5) is used for pre-checks and for the download. There is no second code path that can behave differently.
+- The OCI client shared with the registry client sends each request without a token first and answers the 401 challenge with a cached token: one extra round trip per request (no extra token fetch). This is a known, accepted cost.
 - Trivy is then run with its own DB update disabled, so it never tries to download anything during a scan.
 - The module verifies content digests, writes to a temp directory and swaps atomically (see 7.1).
 
@@ -329,7 +342,7 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | `SCANNER_REGISTRY_TIMEOUT` | Timeout of each registry request. Default 15s |
 | `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret). Harbor robot names contain `$`, which needs escaping in compose files and shells |
 | `SCANNER_DB_CHECK_INTERVAL` | `1h`, `3h`, `1d`... fallback `3h` |
-| `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Example: `mirror.local/aquasec/trivy-db:2\|direct\|allow-http1,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
+| `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). The same repository and route listed twice is a startup error (also in `SCANNER_JAVA_DB_SOURCES`). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Example: `mirror.local/aquasec/trivy-db:2\|direct\|allow-http1,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
 | `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB. Empty means no Java DB at all: nothing is downloaded and the Java seed is not installed |
 | `SCANNER_PRECHECK_TIMEOUT_DNS`, `_CONNECT`, `_TLS`, `_HTTP`, `_MANIFEST`, `_TOTAL` | Pre-check timeouts per stage and overall. Defaults 5s, 5s, 5s, 10s, 10s, 30s |
 | `SCANNER_DB_SEED_DIR`, `SCANNER_JAVA_DB_SEED_DIR` | Seed DB baked into the image, installed when no DB exists yet (with no digest, so the first update downloads). Defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing directory means no seed; the service is then not ready until the first download succeeds |
@@ -342,7 +355,9 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | `SCANNER_ONDEMAND_REFRESH_WAIT` | How long a scan waits for an on-demand DB refresh before it proceeds with the old DB. Default 60s |
 | `SCANNER_ONDEMAND_REFRESH_MIN_GAP` | An update run that finished within this gap is reused instead of starting an on-demand refresh. Default 60s |
 | `SCANNER_QUEUE_WORKERS`, `SCANNER_QUEUE_MAX_LENGTH` | Queue settings. Defaults 1 and 100 |
-| `SCANNER_SCAN_TIMEOUT` | Per-scan timeout. Default 10m |
+| `SCANNER_SCAN_TIMEOUT` | Per-scan timeout; Trivy gets a slightly shorter `--timeout`, then the whole process group is killed. Default 10m |
+| `SCANNER_SCAN_MAX_OUTPUT` | Largest Trivy JSON output read; above it the scan fails with `output_too_large`. Default 256 MiB |
+| `SCANNER_SCAN_MAX_FINDINGS` | Most findings stored per scan; above it the scan is marked `truncated: true` and the counts stay complete. Default 10000 |
 
 All defaults can be overridden by env. Existing Trivy variables keep their current behavior.
 

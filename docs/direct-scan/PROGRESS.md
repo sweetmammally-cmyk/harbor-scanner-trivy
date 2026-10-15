@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 6 done; Phase 7 (scan runner) next
 - Last completed task: P6-3
 - In progress: none
-- Next task: P7-1 (run Trivy on `registry/repository/name@digest` with DB updates disabled and JSON output; credentials via env, never argv; timeout and kill)
+- Next task: P1-4 follow-up (duplicate sources), then P7-1 to P7-7
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,15 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, thirteenth round): DEMAND v0.15 (6.2, 7.5, 11).
+  - A duplicate source in `SCANNER_DB_SOURCES` / `SCANNER_JAVA_DB_SOURCES` is rejected at parse time. The extra 401 per request of the shared OCI client is a known, accepted cost.
+  - Scan runner rules (DEMAND 6.2): env allowlist; credentials in `TRIVY_USERNAME`/`TRIVY_PASSWORD`; per-worker cache dir with symlinks to the pinned version directory; version UpdatedAt and digest stored with the scan; one Trivy run with `--scanners vuln`, no `--severity`, JSON to a private 0600 file, `--timeout` below `SCANNER_SCAN_TIMEOUT` plus a process-group kill; `SCANNER_SCAN_MAX_OUTPUT` 256 MiB; last 8 KiB of stderr, redacted; failure classes `trivy_timeout`, `trivy_exit_error`, `output_too_large`, `output_invalid`, `db_missing`, `java_db_missing`; platform and severity validation; `platforms_requested`/`found`/`not_found`; stored finding fields; `SCANNER_SCAN_MAX_FINDINGS` 10000 with `truncated`; logging without findings; `trivy --version` at startup and readiness.
+  - Checked with the local Trivy 0.71.2 before coding (scratchpad experiments):
+    - `--username`/`--password` bind to `TRIVY_USERNAME`/`TRIVY_PASSWORD` (the help says to use `TRIVY_PASSWORD` for security). For an `http://` registry, upstream passes `--insecure` (`pkg/trivy/wrapper.go`); the help shows `--insecure` ("allow insecure server connections"). Not run against a real plain-http registry here: go-containerregistry allows http to localhost anyway, so a local test proves nothing; to verify in the compose end-to-end (P11-1).
+    - `--image-src` defaults to `docker,containerd,podman,remote`: the runner passes `--image-src remote`, so the scanned image is always the registry's digest. Trivy also makes a version-check call unless `--skip-version-check`.
+    - Result types without findings still appear in the JSON with `--list-all-pkgs=false` (alpine:3.22 with 0 vulnerabilities; a `pip` result with 0 vulnerabilities), so the runner uses `--list-all-pkgs=false` (smaller output; the default is true).
+    - A `.jar` (log4j-core 2.14.1 metadata) with no Java DB: `trivy rootfs`/`image` stops with exit 1, "The first run cannot skip downloading Java DB" / "Unable to initialize the Java DB". There is no clean skip (only `--skip-files "**/*.jar"`, which hides findings and is analyzer-level restriction, deferred), so it is classified `java_db_missing`. `trivy fs` does not analyse jars at all.
+  - Version mismatch to raise with the owner: the Dockerfile pins Trivy 0.74.0, the owner's message says 0.71.2 (the local binary).
 - 2026-10-15 (owner, twelfth round): DEMAND v0.14 (5.1, 6.1, 10, 11).
   - `db_checks` rows get a deterministic `_id` "<instance>:<kind>:<run_started_at>:<source>" and are upserted, so a repeated flush never duplicates them.
   - `SCANNER_INSTANCE_ID` falling back to the hostname logs a WARN. New `SCANNER_DB_STATE_RETENTION` (7d): TTL on `db_state.updated_at`, `collMod` on change; startup fails if it is shorter than twice `SCANNER_DB_CHECK_INTERVAL`.
