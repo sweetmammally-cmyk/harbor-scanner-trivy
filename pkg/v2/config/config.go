@@ -25,6 +25,8 @@ type Config struct {
 	MongoConnectTimeout         time.Duration `env:"SCANNER_MONGO_CONNECT_TIMEOUT" envDefault:"5s"`
 	MongoServerSelectionTimeout time.Duration `env:"SCANNER_MONGO_SERVER_SELECTION_TIMEOUT" envDefault:"5s"`
 	MongoOperationTimeout       time.Duration `env:"SCANNER_MONGO_OPERATION_TIMEOUT" envDefault:"10s"`
+	// DBChecksRetention is read from SCANNER_DB_CHECKS_RETENTION by GetConfig ("30d" style).
+	DBChecksRetention time.Duration
 
 	RegistryURL      string `env:"SCANNER_REGISTRY_URL"`
 	RegistryUsername string `env:"SCANNER_REGISTRY_USERNAME"`
@@ -96,6 +98,15 @@ func GetConfig() (Config, error) {
 	cfg.DBAgeWarn, err = ParseDuration(ageWarn)
 	if err != nil || cfg.DBAgeWarn <= 0 {
 		return cfg, fmt.Errorf("SCANNER_DB_AGE_WARN: invalid duration %q", ageWarn)
+	}
+
+	retention := os.Getenv("SCANNER_DB_CHECKS_RETENTION")
+	if retention == "" {
+		retention = "30d"
+	}
+	cfg.DBChecksRetention, err = ParseDuration(retention)
+	if err != nil || cfg.DBChecksRetention < time.Second {
+		return cfg, fmt.Errorf("SCANNER_DB_CHECKS_RETENTION: invalid duration %q", retention)
 	}
 
 	cfg.DBSources, err = ParseDBSources(os.Getenv("SCANNER_DB_SOURCES"))

@@ -1,0 +1,231 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+)
+
+// SchemaVersion is the data plane schema version this code expects.
+const SchemaVersion = 1
+
+// CollectionSchemaVersion holds one document, _id "schema", with the stored version.
+const CollectionSchemaVersion = "schema_version"
+
+// dbChecksTTLIndex is the TTL index on db_checks.at.
+const dbChecksTTLIndex = "at_ttl"
+
+// MongoDB error codes for an index that exists with other options or keys.
+const (
+	codeIndexOptionsConflict  = 85
+	codeIndexKeySpecsConflict = 86
+	codeNamespaceNotFound     = 26
+)
+
+type schemaVersionDocument struct {
+	ID        string    `bson:"_id"`
+	Version   int       `bson:"version"`
+	CreatedAt time.Time `bson:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at"`
+}
+
+// index is an index we create, with its name for clear errors.
+type index struct {
+	collection string
+	name       string
+	keys       bson.D
+	options    *options.IndexOptionsBuilder
+}
+
+// scansIndexes are the indexes of the scans collection (DEMAND section 10).
+// The queue-claim index is added with the queue (P8).
+func scansIndexes() []index {
+	return []index{
+		{
+			collection: CollectionScans,
+			name:       "request_id_unique",
+			keys:       bson.D{{Key: "request_id", Value: 1}},
+			// Partial: scans without a request_id do not collide.
+			options: options.Index().SetUnique(true).
+				SetPartialFilterExpression(bson.D{{Key: "request_id", Value: bson.D{{Key: "$type", Value: "string"}}}}),
+		},
+		{
+			collection: CollectionScans,
+			name:       "image_digest_state_finished_at",
+			keys:       bson.D{{Key: "image.digest", Value: 1}, {Key: "state", Value: 1}, {Key: "finished_at", Value: 1}},
+			options:    options.Index(),
+		},
+		{
+			collection: CollectionScans,
+			name:       "customer_ids_finished_at",
+			keys:       bson.D{{Key: "customer_ids", Value: 1}, {Key: "finished_at", Value: 1}},
+			options:    options.Index(),
+		},
+		{
+			collection: CollectionScans,
+			name:       "state_queued_at",
+			keys:       bson.D{{Key: "state", Value: 1}, {Key: "queued_at", Value: 1}},
+			options:    options.Index(),
+		},
+	}
+}
+
+// EnsureSchema prepares the database (DEMAND section 10): it checks the stored
+// schema version, runs migrations when it is older (none yet), creates the
+// indexes and the db_checks TTL index, and records the version. It is safe to
+// run again and from several replicas at once. It never drops an index.
+func (c *Client) EnsureSchema(ctx context.Context) error {
+	stored, err := c.storedSchemaVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if stored > SchemaVersion {
+		return fmt.Errorf("stored schema version %d is newer than this scanner's %d: run a newer scanner", stored, SchemaVersion)
+	}
+	// Migrations from older versions go here. There are none yet.
+
+	for _, ix := range scansIndexes() {
+		if err = c.createIndex(ctx, ix); err != nil {
+			return err
+		}
+	}
+	if err = c.ensureDBChecksTTL(ctx); err != nil {
+		return err
+	}
+
+	if stored < SchemaVersion {
+		opCtx, cancel := c.OperationContext(ctx)
+		defer cancel()
+		_, err = c.db.Collection(CollectionSchemaVersion).UpdateOne(opCtx,
+			bson.D{{Key: "_id", Value: "schema"}, {Key: "version", Value: stored}},
+			bson.D{{Key: "$set", Value: bson.D{{Key: "version", Value: SchemaVersion}, {Key: "updated_at", Value: time.Now()}}}})
+		if err != nil {
+			return fmt.Errorf("setting schema version: %w", err)
+		}
+	}
+	return nil
+}
+
+// storedSchemaVersion creates the schema_version document if it is missing
+// (upsert with $setOnInsert, so concurrent replicas cannot collide) and returns
+// the stored version.
+func (c *Client) storedSchemaVersion(ctx context.Context) (int, error) {
+	collection := c.db.Collection(CollectionSchemaVersion)
+
+	opCtx, cancel := c.OperationContext(ctx)
+	defer cancel()
+	now := time.Now()
+	_, err := collection.UpdateOne(opCtx,
+		bson.D{{Key: "_id", Value: "schema"}},
+		bson.D{{Key: "$setOnInsert", Value: bson.D{
+			{Key: "version", Value: SchemaVersion}, {Key: "created_at", Value: now}, {Key: "updated_at", Value: now},
+		}}},
+		options.UpdateOne().SetUpsert(true))
+	// Two replicas inserting at the same moment: one gets a duplicate key error, and
+	// the document exists either way.
+	if err != nil && !mongo.IsDuplicateKeyError(err) {
+		return 0, fmt.Errorf("creating schema_version: %w", err)
+	}
+
+	var document schemaVersionDocument
+	if err = collection.FindOne(opCtx, bson.D{{Key: "_id", Value: "schema"}}).Decode(&document); err != nil {
+		return 0, fmt.Errorf("reading schema_version: %w", err)
+	}
+	return document.Version, nil
+}
+
+func (c *Client) createIndex(ctx context.Context, ix index) error {
+	opCtx, cancel := c.OperationContext(ctx)
+	defer cancel()
+	_, err := c.db.Collection(ix.collection).Indexes().CreateOne(opCtx,
+		mongo.IndexModel{Keys: ix.keys, Options: ix.options.SetName(ix.name)})
+	if isIndexConflict(err) {
+		return fmt.Errorf("index %s.%s conflicts with an existing index; it is never dropped automatically, "+
+			"fix or drop it by hand: %w", ix.collection, ix.name, err)
+	}
+	if err != nil {
+		return fmt.Errorf("creating index %s.%s: %w", ix.collection, ix.name, err)
+	}
+	return nil
+}
+
+func isIndexConflict(err error) bool {
+	var serverError mongo.ServerError
+	return errors.As(err, &serverError) &&
+		(serverError.HasErrorCode(codeIndexOptionsConflict) || serverError.HasErrorCode(codeIndexKeySpecsConflict))
+}
+
+// ensureDBChecksTTL creates the TTL index on db_checks.at, or updates its
+// expireAfterSeconds with collMod when the retention changed.
+func (c *Client) ensureDBChecksTTL(ctx context.Context) error {
+	want := int64(c.dbChecksRetention / time.Second)
+
+	current, found, err := c.ttlSeconds(ctx)
+	if err != nil {
+		return err
+	}
+	if found && current == want {
+		return nil
+	}
+	if found {
+		opCtx, cancel := c.OperationContext(ctx)
+		defer cancel()
+		err = c.db.RunCommand(opCtx, bson.D{
+			{Key: "collMod", Value: CollectionDBChecks},
+			{Key: "index", Value: bson.D{{Key: "name", Value: dbChecksTTLIndex}, {Key: "expireAfterSeconds", Value: want}}},
+		}).Err()
+		if err != nil {
+			return fmt.Errorf("updating index %s.%s with collMod: %w", CollectionDBChecks, dbChecksTTLIndex, err)
+		}
+		slog.Info("updated the db_checks retention", slog.Int64("from_seconds", current), slog.Int64("to_seconds", want))
+		return nil
+	}
+
+	return c.createIndex(ctx, index{
+		collection: CollectionDBChecks,
+		name:       dbChecksTTLIndex,
+		keys:       bson.D{{Key: "at", Value: 1}},
+		options:    options.Index().SetExpireAfterSeconds(int32(want)),
+	})
+}
+
+// ttlSeconds returns the expireAfterSeconds of the db_checks TTL index, if it exists.
+func (c *Client) ttlSeconds(ctx context.Context) (int64, bool, error) {
+	opCtx, cancel := c.OperationContext(ctx)
+	defer cancel()
+	cursor, err := c.db.Collection(CollectionDBChecks).Indexes().List(opCtx)
+	var serverError mongo.ServerError
+	if errors.As(err, &serverError) && serverError.HasErrorCode(codeNamespaceNotFound) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("listing indexes of %s: %w", CollectionDBChecks, err)
+	}
+	var indexes []bson.M
+	if err = cursor.All(opCtx, &indexes); err != nil {
+		return 0, false, fmt.Errorf("listing indexes of %s: %w", CollectionDBChecks, err)
+	}
+
+	for _, ix := range indexes {
+		if ix["name"] != dbChecksTTLIndex {
+			continue
+		}
+		switch seconds := ix["expireAfterSeconds"].(type) {
+		case int32:
+			return int64(seconds), true, nil
+		case int64:
+			return seconds, true, nil
+		case float64:
+			return int64(seconds), true, nil
+		}
+		// An index with our name but no TTL: createIndexes reports the conflict.
+		return 0, false, nil
+	}
+	return 0, false, nil
+}

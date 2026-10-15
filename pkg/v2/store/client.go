@@ -24,17 +24,22 @@ const PingInterval = 5 * time.Second
 // service: Up reports false, readiness is false and the API answers 503, while
 // the driver keeps reconnecting on its own.
 type Client struct {
-	client    *mongo.Client
-	db        *mongo.Database
-	opTimeout time.Duration
+	client            *mongo.Client
+	db                *mongo.Database
+	opTimeout         time.Duration
+	dbChecksRetention time.Duration
 	// uri is kept only to remove it from error messages.
 	uri string
 
-	up atomic.Bool
-	// ping checks MongoDB. Tests replace it.
-	ping func(ctx context.Context) error
+	up          atomic.Bool
+	schemaReady atomic.Bool
+	// ping and ensureSchema talk to MongoDB. Tests replace them.
+	ping         func(ctx context.Context) error
+	ensureSchema func(ctx context.Context) error
 	// checked is false until the first ping, so the first failure is logged.
 	checked bool
+	// lastSchemaError avoids logging the same schema error every ping.
+	lastSchemaError string
 }
 
 // NewClient creates the MongoDB client. It does no network I/O: the driver
@@ -51,14 +56,16 @@ func NewClient(cfg config.Config) (*Client, error) {
 	}
 
 	c := &Client{
-		client:    client,
-		db:        client.Database(cfg.MongoDB),
-		opTimeout: cfg.MongoOperationTimeout,
-		uri:       cfg.MongoURI,
+		client:            client,
+		db:                client.Database(cfg.MongoDB),
+		opTimeout:         cfg.MongoOperationTimeout,
+		dbChecksRetention: cfg.DBChecksRetention,
+		uri:               cfg.MongoURI,
 	}
 	c.ping = func(ctx context.Context) error {
 		return client.Ping(ctx, nil)
 	}
+	c.ensureSchema = c.EnsureSchema
 	return c, nil
 }
 
@@ -73,14 +80,21 @@ func (c *Client) OperationContext(ctx context.Context) (context.Context, context
 	return context.WithTimeout(ctx, c.opTimeout)
 }
 
-// Up reports the result of the last background ping. Readiness and the
-// mongo_up gauge read it; they never call MongoDB themselves.
+// Up reports the result of the last background ping. The mongo_up gauge reads
+// it; nothing outside Monitor calls MongoDB to answer it.
 func (c *Client) Up() bool {
 	return c.up.Load()
 }
 
+// Ready reports whether MongoDB is up and its schema is ready. Readiness reads it.
+func (c *Client) Ready() bool {
+	return c.up.Load() && c.schemaReady.Load()
+}
+
 // Monitor pings MongoDB at once and then every interval until ctx ends, and
-// keeps Up up to date. It logs only changes (and the first failure).
+// keeps Up up to date. While MongoDB is up and the schema is not ready, it runs
+// EnsureSchema, so the schema is ensured at startup and after every time MongoDB
+// comes back, and retried until it succeeds. It logs only changes.
 func (c *Client) Monitor(ctx context.Context, interval time.Duration) {
 	for {
 		c.checkOnce(ctx)
@@ -98,14 +112,35 @@ func (c *Client) checkOnce(ctx context.Context) {
 	cancel()
 
 	wasUp := c.up.Swap(err == nil)
-	switch {
-	case err != nil && (wasUp || !c.checked):
-		slog.Error("MongoDB is unreachable, the service is not ready",
-			slog.String("error", redactURI(err, c.uri).Error()))
-	case err == nil && !wasUp:
+	firstCheck := !c.checked
+	c.checked = true
+	if err != nil {
+		// Run the schema step again when MongoDB comes back.
+		c.schemaReady.Store(false)
+		if wasUp || firstCheck {
+			slog.Error("MongoDB is unreachable, the service is not ready",
+				slog.String("error", redactURI(err, c.uri).Error()))
+		}
+		return
+	}
+	if !wasUp {
 		slog.Info("MongoDB is reachable")
 	}
-	c.checked = true
+
+	if c.schemaReady.Load() {
+		return
+	}
+	if err = c.ensureSchema(ctx); err != nil {
+		if err.Error() != c.lastSchemaError {
+			slog.Error("MongoDB schema is not ready, the service is not ready",
+				slog.String("error", redactURI(err, c.uri).Error()))
+			c.lastSchemaError = err.Error()
+		}
+		return
+	}
+	c.lastSchemaError = ""
+	c.schemaReady.Store(true)
+	slog.Info("MongoDB schema is ready", slog.Int("schema_version", SchemaVersion))
 }
 
 // Disconnect closes the client's connections.

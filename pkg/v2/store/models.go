@@ -27,8 +27,10 @@ const (
 // Scan is a document of the scans collection. It is also the queue's job record.
 // Times that are not known yet are nil, so they are absent from the document.
 type Scan struct {
-	ID           string         `bson:"_id"`
-	RequestID    string         `bson:"request_id"`
+	ID string `bson:"_id"`
+	// RequestID is omitted when empty, so scans without one do not collide on the
+	// partial unique index.
+	RequestID    string         `bson:"request_id,omitempty"`
 	RequestedAt  time.Time      `bson:"requested_at"`
 	CustomerIDs  []string       `bson:"customer_ids"`
 	CustomerData map[string]any `bson:"customer_data,omitempty"`

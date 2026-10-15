@@ -86,11 +86,12 @@ func TestScan_BSON(t *testing.T) {
 	})
 
 	t.Run("a queued scan has no times that are not known yet", func(t *testing.T) {
-		queued := Scan{ID: "scan-2", RequestID: "req-2", State: ScanQueued, QueuedAt: at}
+		queued := Scan{ID: "scan-2", State: ScanQueued, QueuedAt: at}
 
 		keys := keysOf(t, queued)
 
-		for _, absent := range []string{"started_at", "finished_at", "lease_until", "worker", "error", "report", "report_gridfs_id"} {
+		// No request_id field either: an empty string would collide on the unique index.
+		for _, absent := range []string{"request_id", "started_at", "finished_at", "lease_until", "worker", "error", "report", "report_gridfs_id"} {
 			assert.NotContains(t, keys, absent)
 		}
 		assert.Contains(t, keys, "queued_at")

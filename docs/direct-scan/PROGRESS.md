@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 5 (MongoDB data plane)
-- Last completed task: P5-2
+- Last completed task: P5-3
 - In progress: none
-- Next task: P5-3, then P5-4 and P5-5
+- Next task: P5-4 (repositories behind interfaces, with fakes), then P5-5
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -155,6 +155,34 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-3  Schema setup and indexes
+- Status: done
+- What changed:
+  - `pkg/v2/store/schema.go`: `Client.EnsureSchema(ctx)`:
+    1. Upserts `schema_version` (`_id` "schema") with `$setOnInsert`; a duplicate-key error from a concurrent insert counts as "exists".
+    2. Reads the version and refuses a newer stored version.
+    3. Runs migrations if older (none yet).
+    4. Creates each index with its own `createIndexes` call: `request_id_unique` (unique, partial on `{request_id: {$type: "string"}}`), `image_digest_state_finished_at`, `customer_ids_finished_at`, `state_queued_at`.
+    5. Creates the `at_ttl` TTL index on `db_checks.at` or, if it exists with another `expireAfterSeconds`, updates it with `collMod`.
+    6. Sets the version when it was older.
+    - An index conflict (codes 85 and 86) gives an error naming `<collection>.<index>`; nothing is ever dropped.
+  - `client.go`: `Monitor` runs `EnsureSchema` while Mongo is up and the schema is not ready, so at startup, after every up transition, and on every ping until it succeeds. "Schema ready" is reset when Mongo goes down. `Ready()` = up and schema ready. A schema ERROR is logged only when its message changes.
+  - `Scan.RequestID` is now `omitempty`.
+  - New config `DBChecksRetention` (`SCANNER_DB_CHECKS_RETENTION`, default `30d`, at least 1s, otherwise a startup error).
+- Files: `pkg/v2/store/schema.go`, `pkg/v2/store/client.go`, `pkg/v2/store/models.go`, `pkg/v2/store/client_test.go`, `pkg/v2/store/models_test.go`, `test/integration/store/schema_test.go`, `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/...` -> ok; `make test` -> ok; `go test -tags=integration ./test/integration/...` -> ok.
+  - Unit: up but schema failing is not ready, retried each check and logged once; success makes it ready and it is not re-run while up; going down and up runs it again; schema errors do not log the URI; a scan without request id has no `request_id` field.
+  - Integration (`mongo:7`):
+    - two clients run `EnsureSchema` at the same time on a fresh DB, 5 rounds, no errors;
+    - a second run leaves the indexes and the `schema_version` document identical;
+    - two scans without `request_id` insert, a duplicate `request_id` is rejected, and the partial filter is as specified;
+    - TTL `expireAfterSeconds` is 2592000 and becomes 604800 through `collMod` when the retention changes;
+    - a pre-existing `state_queued_at` index with other keys gives the error naming it, the replica stays not ready, and the index is untouched;
+    - a stored version 99 gives the "newer" error, not ready, and the version is untouched;
+    - Mongo down at startup (forwarder off): not ready, then ready with indexes after the forwarder starts.
+- Decisions / surprises: `Scan.RequestID` had to become `omitempty` (an empty string is a string and would collide on the partial unique index). The TTL `expireAfterSeconds` is an int32 in MongoDB (about 68 years maximum), far above any sensible retention.
+- Next: P5-4
 
 ### 2026-10-15  P5-2  MongoDB models and collections
 - Status: done

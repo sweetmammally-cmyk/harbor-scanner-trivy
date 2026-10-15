@@ -15,6 +15,7 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	DBChecksRetention:           30 * 24 * time.Hour,
 	MongoConnectTimeout:         5 * time.Second,
 	MongoServerSelectionTimeout: 5 * time.Second,
 	MongoOperationTimeout:       10 * time.Second,
@@ -115,6 +116,20 @@ func TestGetConfig(t *testing.T) {
 			expectedError: `SCANNER_DB_AGE_WARN: invalid duration "0d"`,
 		},
 		{
+			name: "Should return error when SCANNER_DB_CHECKS_RETENTION is invalid",
+			envs: Envs{
+				"SCANNER_DB_CHECKS_RETENTION": "forever",
+			},
+			expectedError: `SCANNER_DB_CHECKS_RETENTION: invalid duration "forever"`,
+		},
+		{
+			name: "Should return error when SCANNER_DB_CHECKS_RETENTION is under a second",
+			envs: Envs{
+				"SCANNER_DB_CHECKS_RETENTION": "500ms",
+			},
+			expectedError: `SCANNER_DB_CHECKS_RETENTION: invalid duration "500ms"`,
+		},
+		{
 			name: "Should return error when a duration is invalid",
 			envs: Envs{
 				"SCANNER_SCAN_TIMEOUT": "ten minutes",
@@ -145,6 +160,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_MONGO_CONNECT_TIMEOUT":          "1s",
 				"SCANNER_MONGO_SERVER_SELECTION_TIMEOUT": "2s",
 				"SCANNER_MONGO_OPERATION_TIMEOUT":        "3s",
+				"SCANNER_DB_CHECKS_RETENTION":            "7d",
 				"SCANNER_REGISTRY_URL":                   "https://harbor.local",
 				"SCANNER_REGISTRY_USERNAME":              "robot$scanner",
 				"SCANNER_REGISTRY_PASSWORD":              "s3cret",
@@ -179,6 +195,7 @@ func TestGetConfig(t *testing.T) {
 				MongoConnectTimeout:         1 * time.Second,
 				MongoServerSelectionTimeout: 2 * time.Second,
 				MongoOperationTimeout:       3 * time.Second,
+				DBChecksRetention:           7 * 24 * time.Hour,
 				RegistryURL:                 "https://harbor.local",
 				RegistryUsername:            "robot$scanner",
 				RegistryPassword:            "s3cret",
