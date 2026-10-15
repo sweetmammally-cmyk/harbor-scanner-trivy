@@ -18,7 +18,7 @@ import (
 func unreachableStore(t *testing.T) *DBStateStore {
 	client, err := NewClient(testConfig("mongodb://127.0.0.1:1/?directConnection=true"))
 	require.NoError(t, err)
-	return NewDBStateStore(client, "scanner-1")
+	return NewDBStateStore(client, "scanner-1", t.TempDir())
 }
 
 // runState is a DB state as after a run with one source per minute in minutes.

@@ -24,7 +24,9 @@ const MaxBufferedDBChecks = 1000
 type DBStateStore struct {
 	client     *Client
 	instanceID string
-	checks     DBCheckRepository
+	// cacheDir is Trivy's cache directory, for the digest check of Load.
+	cacheDir string
+	checks   DBCheckRepository
 	// maxChecks bounds the buffer; tests make it small.
 	maxChecks int
 
@@ -36,21 +38,51 @@ type DBStateStore struct {
 	unwritten map[string]bool
 	buffer    []DBCheck
 	dropped   int
+	// saved is set by the first Save (an update run completed since boot);
+	// loaded is set once the stored state was loaded or no longer needed.
+	saved  bool
+	loaded bool
 }
 
-// NewDBStateStore returns the state store of this instance and registers its
-// Flush to run each time MongoDB becomes ready.
-func NewDBStateStore(client *Client, instanceID string) *DBStateStore {
+// NewDBStateStore returns the state store of this instance and registers it to
+// run each time MongoDB becomes ready (see onReady).
+func NewDBStateStore(client *Client, instanceID, cacheDir string) *DBStateStore {
 	s := &DBStateStore{
 		client:     client,
 		instanceID: instanceID,
+		cacheDir:   cacheDir,
 		checks:     NewMongoDBChecks(client),
 		maxChecks:  MaxBufferedDBChecks,
 		states:     map[string]dbmgr.DBState{},
 		unwritten:  map[string]bool{},
 	}
-	client.OnReady(s.Flush)
+	client.OnReady(s.onReady)
 	return s
+}
+
+// onReady runs each time MongoDB becomes ready. The first time after boot, if no
+// update run has completed yet, it loads this instance's stored state before
+// writing, so the stored state is not lost; if a run has completed, the memory
+// state is the newer one and is written. Then it flushes.
+func (s *DBStateStore) onReady(ctx context.Context) {
+	s.mu.Lock()
+	load := !s.loaded && !s.saved
+	if s.saved {
+		s.loaded = true
+	}
+	s.mu.Unlock()
+
+	if load {
+		if err := s.Load(ctx); err != nil {
+			// Retried the next time MongoDB becomes ready, unless a run saves first.
+			slog.Error("loading the stored DB state failed", slog.String("error", err.Error()))
+		} else {
+			s.mu.Lock()
+			s.loaded = true
+			s.mu.Unlock()
+		}
+	}
+	s.Flush(ctx)
 }
 
 // Get returns the state from memory.
@@ -67,6 +99,7 @@ func (s *DBStateStore) Save(ctx context.Context, db string, state dbmgr.DBState)
 	s.mu.Lock()
 	s.states[db] = state
 	s.unwritten[db] = true
+	s.saved = true
 	// The run started with the pre-check of its first source.
 	var runStartedAt time.Time
 	if len(state.LastSources) > 0 {
@@ -171,11 +204,12 @@ func (s *DBStateStore) writeState(ctx context.Context, db string, state dbmgr.DB
 	return nil
 }
 
-// Load reads this instance's stored states at startup (before the updater runs).
-// When a stored digest differs from the digest installed on disk, the stored
+// Load reads this instance's stored states. onReady calls it the first time
+// MongoDB is ready after boot, when no update run has completed yet. When a
+// stored digest differs from the digest installed on disk, the stored
 // confirmation (last_confirmed_current_at, newer_available) is ignored: the disk
 // is the source of truth. States already in memory are kept.
-func (s *DBStateStore) Load(ctx context.Context, cacheDir string) error {
+func (s *DBStateStore) Load(ctx context.Context) error {
 	ctx, cancel := s.client.OperationContext(ctx)
 	defer cancel()
 	cursor, err := s.client.Database().Collection(CollectionDBState).Find(ctx, bson.D{{Key: "instance_id", Value: s.instanceID}})
@@ -194,7 +228,7 @@ func (s *DBStateStore) Load(ctx context.Context, cacheDir string) error {
 			continue
 		}
 		state := document.DBState
-		onDisk := dbmgr.InstalledDigest(cacheDir, document.DB)
+		onDisk := dbmgr.InstalledDigest(s.cacheDir, document.DB)
 		if state.ManifestDigest != onDisk {
 			slog.Warn("stored DB state does not match the DB on disk, ignoring its confirmation",
 				slog.String("db", document.DB), slog.String("stored_digest", state.ManifestDigest),

@@ -67,7 +67,7 @@ func TestDBStateStore(t *testing.T) {
 		var reader *store.Client
 		for _, instance := range []string{"scanner-a", "scanner-b"} {
 			client := newClient(t, schemaConfig(mongoAddr, name, 24*time.Hour))
-			stores[instance] = store.NewDBStateStore(client, instance)
+			stores[instance] = store.NewDBStateStore(client, instance, t.TempDir())
 			monitor(t, client)
 			require.Eventually(t, client.Ready, 15*time.Second, 50*time.Millisecond)
 			reader = client
@@ -100,7 +100,7 @@ func TestDBStateStore(t *testing.T) {
 		name := fmt.Sprintf("dbstate_%d", databaseCounter.Add(1))
 		proxy := newForwarder(t, mongoAddr)
 		client := newClient(t, schemaConfig(proxy.addr, name, 24*time.Hour))
-		s := store.NewDBStateStore(client, "scanner-1")
+		s := store.NewDBStateStore(client, "scanner-1", t.TempDir())
 		monitor(t, client)
 		direct := newClient(t, schemaConfig(mongoAddr, name, 24*time.Hour))
 
@@ -118,10 +118,66 @@ func TestDBStateStore(t *testing.T) {
 		require.Eventually(t, func() bool { return countChecks(t, direct, "scanner-1") == 1 }, 10*time.Second, 100*time.Millisecond)
 	})
 
+	// bootWithStoredState stores a confirmed state for scanner-1:db (digest on
+	// disk equal), then starts a store whose MongoDB is unreachable.
+	bootWithStoredState := func(t *testing.T) (*forwarder, *store.DBStateStore, *store.Client, time.Time) {
+		name := fmt.Sprintf("dbstate_%d", databaseCounter.Add(1))
+		direct := newClient(t, schemaConfig(mongoAddr, name, 24*time.Hour))
+		require.NoError(t, direct.EnsureSchema(context.Background()))
+		confirmed := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
+		require.NoError(t, insert(t, direct, store.CollectionDBState, store.DBStateDocument{
+			ID: "scanner-1:db", InstanceID: "scanner-1", DB: "db", UpdatedAt: confirmed,
+			DBState: dbmgr.DBState{Mode: dbmgr.ModeNormal, ManifestDigest: "sha256:stored", LastConfirmedCurrentAt: confirmed},
+		}))
+		cacheDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, "db"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "db", "manifest-digest"), []byte("sha256:stored"), 0o644))
+
+		proxy := newForwarder(t, mongoAddr)
+		client := newClient(t, schemaConfig(proxy.addr, name, 24*time.Hour))
+		s := store.NewDBStateStore(client, "scanner-1", cacheDir)
+		monitor(t, client)
+		return proxy, s, direct, confirmed
+	}
+
+	t.Run("first ready after boot without a completed run: the stored state is loaded, not overwritten", func(t *testing.T) {
+		proxy, s, direct, confirmed := bootWithStoredState(t)
+		time.Sleep(500 * time.Millisecond)
+
+		proxy.start(t)
+
+		require.Eventually(t, func() bool {
+			state, _ := s.Get(context.Background(), "db")
+			return state.ManifestDigest == "sha256:stored"
+		}, 30*time.Second, 100*time.Millisecond)
+		state, err := s.Get(context.Background(), "db")
+		require.NoError(t, err)
+		assert.Equal(t, confirmed, state.LastConfirmedCurrentAt.UTC(), "digest matches the disk: confirmation kept")
+		document, found := storedState(t, direct, "scanner-1:db")
+		require.True(t, found)
+		assert.Equal(t, "sha256:stored", document.ManifestDigest, "not overwritten by an empty state")
+	})
+
+	t.Run("first ready after boot with a completed run: the memory state is written", func(t *testing.T) {
+		proxy, s, direct, _ := bootWithStoredState(t)
+		require.NoError(t, s.Save(context.Background(), "db", stateWithSource(dbmgr.ModeDegraded, "sha256:from-run", time.Now())))
+
+		proxy.start(t)
+
+		require.Eventually(t, func() bool {
+			document, found := storedState(t, direct, "scanner-1:db")
+			return found && document.ManifestDigest == "sha256:from-run"
+		}, 30*time.Second, 100*time.Millisecond)
+		state, err := s.Get(context.Background(), "db")
+		require.NoError(t, err)
+		assert.Equal(t, "sha256:from-run", state.ManifestDigest, "the stored state did not replace the newer memory state")
+		assert.Equal(t, dbmgr.ModeDegraded, state.Mode)
+	})
+
 	t.Run("an updater run reaches db_state and db_checks end to end", func(t *testing.T) {
 		name := fmt.Sprintf("dbstate_%d", databaseCounter.Add(1))
 		client := newClient(t, schemaConfig(mongoAddr, name, 24*time.Hour))
-		s := store.NewDBStateStore(client, "scanner-1")
+		s := store.NewDBStateStore(client, "scanner-1", t.TempDir())
 		monitor(t, client)
 		require.Eventually(t, client.Ready, 15*time.Second, 50*time.Millisecond)
 
@@ -173,9 +229,9 @@ func TestDBStateStore(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, db), 0o755))
 			require.NoError(t, os.WriteFile(filepath.Join(cacheDir, db, "manifest-digest"), []byte(digest), 0o644))
 		}
-		s := store.NewDBStateStore(client, "scanner-1")
+		s := store.NewDBStateStore(client, "scanner-1", cacheDir)
 
-		require.NoError(t, s.Load(context.Background(), cacheDir))
+		require.NoError(t, s.Load(context.Background()))
 
 		state, err := s.Get(context.Background(), "db")
 		require.NoError(t, err)

@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 5 done; Phase 6 (registry client) next
 - Last completed task: P5-7
 - In progress: none
-- Next task: P5-6 follow-ups (db_checks ids, instance WARN and db_state retention, first-reconnect load), then P6-1 to P6-3
+- Next task: P6-1 (move the Phase 3 OCI request and token code to `pkg/v2/oci`, then the registry client), P6-2, P6-3
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -165,6 +165,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-6  Follow-up: first ready after boot
+- Status: done
+- What changed: `NewDBStateStore(client, instanceID, cacheDir)` registers `onReady` instead of `Flush`. The first time MongoDB is ready after boot: if no `Save` happened yet (no update run completed), `Load` the stored state first (with the disk-digest check); a failed load is retried on the next ready transition unless a run saves first. If a run already saved, the memory state is written. Then `Flush`. `Load(ctx)` now uses the store's cache directory; the startup wiring (P9-1) no longer needs a separate `Load` call.
+- Files: `pkg/v2/store/dbstate.go`, `pkg/v2/store/dbstate_test.go`, `test/integration/store/dbstate_test.go`
+- Tests run: `go test -short -race -count=2 ./pkg/v2/...` -> ok; `make test` -> ok; `go test -tags=integration ./test/integration/...` -> ok. New integration cases, both booting with MongoDB unreachable over a stored confirmed state: without a run, MongoDB comes back and the stored state (confirmation kept, digest matches the disk) appears in memory while the stored document stays as it was; with a run saved first, the memory state replaces the stored document and stays in memory.
+- Decisions / surprises: none.
+- Next: P6-1
 
 ### 2026-10-15  P5-6  Follow-up: db_state retention, instance id warning
 - Status: done
