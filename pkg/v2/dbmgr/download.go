@@ -80,7 +80,7 @@ func downloadDB(ctx context.Context, client *registryClient, layer ociDescriptor
 		if header.Typeflag != tar.TypeReg || !slices.Contains(wantFiles, name) {
 			continue
 		}
-		file, err := os.OpenFile(filepath.Join(destDir, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		file, err := createFile(filepath.Join(destDir, name))
 		if err != nil {
 			return fmt.Errorf("%w: extracting %s: %w", errLocalDisk, name, err)
 		}
@@ -120,6 +120,23 @@ func downloadDB(ctx context.Context, client *registryClient, layer ociDescriptor
 		}
 	}
 	return nil
+}
+
+// extractedFile is what downloadDB writes an extracted file to.
+type extractedFile interface {
+	io.Writer
+	Sync() error
+	Close() error
+}
+
+// createFile creates a new file for extraction. Tests replace it to inject
+// write errors such as a full disk.
+var createFile = func(path string) (extractedFile, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	return file, nil
 }
 
 // errLocalDisk marks download errors caused by our own disk (for example a full

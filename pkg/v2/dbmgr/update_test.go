@@ -388,28 +388,23 @@ func TestUpdate_JavaDBDownloadTimeout(t *testing.T) {
 	assert.Contains(t, result.Sources[0].Error, "download exceeded the overall limit")
 }
 
-// TestUpdate_InstallWriteError: a write error on our disk (for example a full disk)
+// TestUpdate_InstallWriteError: a write error on our disk (here a full disk, injected)
 // fails as install_error, keeps the old DB, leaves no partial directory, and gives
 // degraded with newer_available.
 func TestUpdate_InstallWriteError(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory permissions")
-	}
 	now := time.Now()
 	cacheDir := t.TempDir()
 	v1 := startFakeOCIRegistry(t, dbLayer(t, "db v1", now))
 	require.True(t, update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{v1.source(t, "direct")}).Installed)
 	versionsBefore := versionNames(t, cacheDir)
-
-	versionsDir := filepath.Join(cacheDir, "db-versions")
-	require.NoError(t, os.Chmod(versionsDir, 0o500))
-	t.Cleanup(func() { _ = os.Chmod(versionsDir, 0o755) })
-	v2 := startFakeOCIRegistry(t, dbLayer(t, "db v2", now))
+	v2 := startFakeOCIRegistry(t, dbLayer(t, strings.Repeat("db v2 ", 1000), now))
+	realCreateFile := createFile
+	fakeFullDisk(t, 100)
 
 	result := update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{v2.source(t, "direct")})
 
 	assert.Equal(t, []string{"install_error"}, sourceClasses(result))
-	assert.Contains(t, result.Sources[0].Error, "permission denied")
+	assert.Contains(t, result.Sources[0].Error, "no space left on device")
 	assert.Equal(t, ModeDegraded, result.Mode)
 	assert.True(t, result.NewerAvailable)
 	assert.False(t, result.Installed)
@@ -417,10 +412,10 @@ func TestUpdate_InstallWriteError(t *testing.T) {
 	assert.Equal(t, v1.manifestDigest, installedDigest(cacheDir, "db"))
 	assert.Equal(t, versionsBefore, versionNames(t, cacheDir), "no partial directory")
 
-	// Once the disk is writable again, the next run installs and clears the flag.
-	require.NoError(t, os.Chmod(versionsDir, 0o755))
+	// Once the disk has space again, the next run installs and clears the flag.
+	createFile = realCreateFile
 	fixed := update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{v2.source(t, "direct")})
 	assert.True(t, fixed.Installed)
 	assert.False(t, fixed.NewerAvailable)
-	assert.Equal(t, "db v2", readDB(t, cacheDir))
+	assert.Equal(t, strings.Repeat("db v2 ", 1000), readDB(t, cacheDir))
 }

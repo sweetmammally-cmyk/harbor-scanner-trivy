@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 4 (updater and freshness)
 - Last completed task: P4-2
 - In progress: none
-- Next task: P4-2 follow-up (injected write failure, digest-on-disk test), then P4-3, P4-4, P4-5
+- Next task: P4-3, then P4-4, P4-5
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -137,6 +137,17 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P4-2  Follow-up: injected write failures, digest read from disk
+- Status: done
+- What changed:
+  - `downloadDB` creates extracted files through the package variable `createFile` (returns `extractedFile`: Write, Sync, Close). In tests, `fakeFullDisk(t, n)` returns a real file that fails with `ENOSPC` (a `*fs.PathError`) after n bytes, like a full disk mid-write.
+  - The two read-only-directory tests are replaced by injected-failure tests: no `Chmod`, no root skip, so they work as root.
+  - New `TestUpdater_InstalledDigestFromDisk`: install with one updater, then a new updater with a new empty state store over the same cache directory does not download (one blob request in total), confirms the DB current, and saves state `normal` with the right digest. The installed digest comes from the `manifest-digest` file in the version directory (`installedDigest`), never from the state store.
+- Files: `pkg/v2/dbmgr/download.go`, `pkg/v2/dbmgr/download_test.go`, `pkg/v2/dbmgr/update_test.go`, `pkg/v2/dbmgr/updater_test.go`
+- Tests run: `go test -short -race -count=5 ./pkg/v2/...` -> ok. `TestUpdate_InstallWriteError` asserts the same as before (`install_error` with "no space left on device", degraded, `newer_available`, old DB and digest kept, no partial directory, next run installs and clears the flag). `TestDownloadDB_LocalWriteError` checks `errors.Is` for both `errLocalDisk` and `ENOSPC`.
+- Decisions / surprises: the fake does not embed `*os.File`, because `io.Copy` would use the embedded `ReadFrom` and bypass the failing `Write`.
+- Next: P4-3
 
 ### 2026-10-15  P4-2  DB state store
 - Status: done

@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -215,20 +217,49 @@ func TestDownloadDB(t *testing.T) {
 	})
 }
 
-func TestDownloadDB_LocalWriteError(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory permissions")
+// fullDiskFile is a real file that fails with ENOSPC once `left` bytes are written,
+// like a full disk. It does not embed *os.File, so io.Copy cannot bypass Write.
+type fullDiskFile struct {
+	file *os.File
+	left int
+}
+
+func (f *fullDiskFile) Write(p []byte) (int, error) {
+	if len(p) <= f.left {
+		f.left -= len(p)
+		return f.file.Write(p)
 	}
-	f := startFakeOCIRegistry(t, makeLayer(t, "trivy.db", "db", "metadata.json", "{}"))
+	n, _ := f.file.Write(p[:f.left])
+	f.left = 0
+	return n, &fs.PathError{Op: "write", Path: f.file.Name(), Err: syscall.ENOSPC}
+}
+
+func (f *fullDiskFile) Sync() error  { return f.file.Sync() }
+func (f *fullDiskFile) Close() error { return f.file.Close() }
+
+// fakeFullDisk makes every extracted file fail after `left` bytes, for the rest of the test.
+func fakeFullDisk(t *testing.T, left int) {
+	previous := createFile
+	createFile = func(path string) (extractedFile, error) {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			return nil, err
+		}
+		return &fullDiskFile{file: file, left: left}, nil
+	}
+	t.Cleanup(func() { createFile = previous })
+}
+
+func TestDownloadDB_LocalWriteError(t *testing.T) {
+	f := startFakeOCIRegistry(t, makeLayer(t, "trivy.db", strings.Repeat("db ", 1000), "metadata.json", "{}"))
 	client, err := newRegistryClient(f.source(t, "direct"))
 	require.NoError(t, err)
-	dest := t.TempDir()
-	require.NoError(t, os.Chmod(dest, 0o500))
-	t.Cleanup(func() { _ = os.Chmod(dest, 0o755) })
+	fakeFullDisk(t, 100)
 
-	err = downloadDB(testContext(t), client, ociDescriptor{Digest: f.layerDigest, Size: int64(len(f.layer))}, dest, time.Second, dbFiles)
+	err = downloadDB(testContext(t), client, ociDescriptor{Digest: f.layerDigest, Size: int64(len(f.layer))}, t.TempDir(), time.Second, dbFiles)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errLocalDisk, "a write error on our disk is not the source's fault")
+	assert.ErrorIs(t, err, syscall.ENOSPC)
 	assert.Contains(t, err.Error(), "local disk error: extracting trivy.db")
 }

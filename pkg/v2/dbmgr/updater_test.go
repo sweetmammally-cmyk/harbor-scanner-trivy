@@ -242,3 +242,30 @@ func TestUpdater_UpdateNow(t *testing.T) {
 		assert.True(t, results.Degraded())
 	})
 }
+
+// TestUpdater_InstalledDigestFromDisk: the installed digest is read from disk, so a
+// new updater with empty state over an existing install does not download again.
+func TestUpdater_InstalledDigestFromDisk(t *testing.T) {
+	cacheDir := t.TempDir()
+	f := startFakeOCIRegistry(t, dbLayer(t, "db", time.Now()))
+	_, blobs := countRequests(f)
+	cfg := updateConfig
+	cfg.DBSources = []config.DBSource{f.source(t, "direct")}
+
+	first, err := NewUpdater(context.Background(), cfg, cacheDir, NewMemoryStateStore()).UpdateNow(context.Background())
+	require.NoError(t, err)
+	require.True(t, first.DB.Installed)
+
+	// A restart: new updater, new empty state store, same cache directory.
+	store := NewMemoryStateStore()
+	second, err := NewUpdater(context.Background(), cfg, cacheDir, store).UpdateNow(context.Background())
+	require.NoError(t, err)
+
+	assert.False(t, second.DB.Installed)
+	assert.Equal(t, int32(1), blobs.Load(), "no second download")
+	assert.False(t, second.DB.ConfirmedCurrentAt.IsZero(), "the equal digest confirms the DB")
+	state, err := store.Get(context.Background(), "db")
+	require.NoError(t, err)
+	assert.Equal(t, ModeNormal, state.Mode)
+	assert.Equal(t, f.manifestDigest, state.ManifestDigest)
+}
