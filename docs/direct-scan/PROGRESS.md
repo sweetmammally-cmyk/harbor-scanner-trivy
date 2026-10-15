@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 2 (DB pre-check module)
-- Last completed task: P2-3
+- Last completed task: P2-4
 - In progress: none
-- Next task: P2-4 (httptrace first-byte timing for the http and manifest stages)
+- Next task: P2-5 (log effective source, route and each stage result, redacted)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -100,6 +100,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P2-4  Pre-check timings
+- Status: done
+- What changed: `StageResult.FirstByte` holds the time to the first response byte for the http and manifest stages, measured with `httptrace.GotFirstResponseByte` (`withFirstByteTrace`). DNS, connect and TLS timings are the durations of those stages, and the total is `CheckResult.Duration`, so DEMAND 7.3 item 4 is covered without duplicating fields.
+- Files: `pkg/v2/dbmgr/precheck.go`, `pkg/v2/dbmgr/precheck_stages_test.go`
+- Tests run: `go test -short -race -count=5 ./pkg/v2/dbmgr/` -> ok (no data races); `go vet` -> ok. New checks: every stage has a duration, and first byte is set only on http and manifest and is not longer than the stage. A registry that delays the manifest by 100ms shows it in the manifest first byte only.
+- Decisions / surprises: with the token flow, the manifest first byte is the first response of the stage (the 401), not the final manifest response. That matches "time until the registry answers".
+- Next: P2-5
 
 ### 2026-10-15  P2-3  Pre-check stages
 - Status: done

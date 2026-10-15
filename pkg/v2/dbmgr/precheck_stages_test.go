@@ -114,6 +114,33 @@ func TestPrecheck_Direct(t *testing.T) {
 		assert.Equal(t, "protocol=HTTP/2.0 status=200", result.Stages[3].Detail)
 		assert.Equal(t, "protocol=HTTP/2.0 status=200 digest="+testManifestDigest, result.Stages[4].Detail)
 		assert.Greater(t, result.Duration, time.Duration(0))
+
+		// Timings: every stage has a duration; http and manifest also have first byte.
+		for _, stage := range result.Stages {
+			assert.Greater(t, stage.Duration, time.Duration(0), stage.Stage)
+		}
+		assert.Zero(t, result.Stages[2].FirstByte)
+		assert.Greater(t, result.Stages[3].FirstByte, time.Duration(0))
+		assert.LessOrEqual(t, result.Stages[3].FirstByte, result.Stages[3].Duration)
+		assert.Greater(t, result.Stages[4].FirstByte, time.Duration(0))
+		assert.LessOrEqual(t, result.Stages[4].FirstByte, result.Stages[4].Duration)
+	})
+
+	t.Run("slow registry response shows in first byte", func(t *testing.T) {
+		server := startFakeRegistry(t, true, false)
+		slow := server.Config.Handler
+		server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v2/aquasec/trivy-db/manifests/2" {
+				time.Sleep(100 * time.Millisecond)
+			}
+			slow.ServeHTTP(w, r)
+		})
+
+		result := Precheck(context.Background(), registrySource(t, server, "direct"), testConfig)
+
+		require.True(t, result.OK, "%+v", result)
+		assert.GreaterOrEqual(t, result.Stages[4].FirstByte, 100*time.Millisecond)
+		assert.Less(t, result.Stages[3].FirstByte, 100*time.Millisecond)
 	})
 
 	t.Run("HTTP/2 registry with anonymous token", func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"time"
 
@@ -19,6 +20,9 @@ type StageResult struct {
 	OK       bool          `json:"ok"`
 	Skipped  bool          `json:"skipped,omitempty"`
 	Duration time.Duration `json:"duration"`
+	// FirstByte is the time from the stage start to the first response byte
+	// (http and manifest stages only).
+	FirstByte time.Duration `json:"first_byte,omitempty"`
 	// Detail holds what the stage found (for example the TLS version) or why it failed.
 	// It must never contain credentials.
 	Detail string `json:"detail,omitempty"`
@@ -171,7 +175,9 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 	client := &http.Client{Transport: transport}
 
 	protocol := tlsConn.ConnectionState().NegotiatedProtocol
+	var firstByte time.Duration
 	ok = runStage(ctx, &result, "http", cfg.PrecheckTimeoutHTTP, func(ctx context.Context) (string, error) {
+		ctx = withFirstByteTrace(ctx, &firstByte)
 		if protocol != "h2" && !source.AllowHTTP1 {
 			_ = tlsConn.Close()
 			return "", fmt.Errorf("server did not negotiate HTTP/2 (alpn=%q); add the %s option to this source to accept HTTP/1.1",
@@ -195,11 +201,14 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 		}
 		return fmt.Sprintf("protocol=%s status=%d", resp.Proto, resp.StatusCode), nil
 	})
+	result.Stages[len(result.Stages)-1].FirstByte = firstByte
 	if !ok {
 		return result
 	}
 
+	firstByte = 0
 	ok = runStage(ctx, &result, "manifest", cfg.PrecheckTimeoutManifest, func(ctx context.Context) (string, error) {
+		ctx = withFirstByteTrace(ctx, &firstByte)
 		resp, err := getManifest(ctx, client, ref)
 		if err != nil {
 			return "", err
@@ -213,10 +222,24 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 		return fmt.Sprintf("protocol=%s status=%d digest=%s", resp.Proto, resp.StatusCode,
 			resp.Header.Get("Docker-Content-Digest")), nil
 	})
+	result.Stages[len(result.Stages)-1].FirstByte = firstByte
 	if !ok {
 		return result
 	}
 
 	result.OK = true
 	return result
+}
+
+// withFirstByteTrace returns ctx with an httptrace hook that stores in firstByte
+// the time from now to the first response byte of the first request made with ctx.
+func withFirstByteTrace(ctx context.Context, firstByte *time.Duration) context.Context {
+	start := time.Now()
+	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotFirstResponseByte: func() {
+			if *firstByte == 0 {
+				*firstByte = time.Since(start)
+			}
+		},
+	})
 }
