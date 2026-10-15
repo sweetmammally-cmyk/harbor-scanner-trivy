@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 5 (MongoDB data plane)
-- Last completed task: P5-6
+- Phase: 5 done; Phase 6 (registry client) next
+- Last completed task: P5-7
 - In progress: none
-- Next task: P5-7 (integration tests against real Mongo: review coverage, run the suite)
+- Next task: P6-1 (registry client with the robot account from config; resolve `repository/name:tag` to a digest with a manifest HEAD)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -160,6 +160,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-7  MongoDB integration tests
+- Status: done
+- What changed: the MongoDB integration tests were written with each task (P5-1 to P5-6) in `test/integration/store/` (`mongo_test.go`, `schema_test.go`, `repositories_test.go`, `dbstate_test.go`, one `mongo:7` container per test function). Added for P5-7: an end-to-end test where a real `dbmgr.Updater` run (one source with a closed port) goes through `DBStateStore` into `db_state` (degraded, `tcp_refused`) and `db_checks` (instance id, class, per-stage results); and the older-schema-version path (stored 0 is migrated and set to 1).
+- Files: `test/integration/store/dbstate_test.go`, `test/integration/store/schema_test.go`
+- Tests run: `make test-integration` -> ok (Harbor adapter API, Redis store, MongoDB store); `go test -count=2 -tags=integration ./test/integration/...` -> ok (earlier, P5-6); `make test` -> ok. Coverage of `pkg/v2/store`: integration tests alone 71.6%, unit tests alone 52.6%, merged 93.2%. The remaining gaps are error branches (a failed GridFS delete after a failed save, a missing `db_checks` collection when listing its indexes, the hostname error).
+- Decisions / surprises: `make test-integration` needs Docker and pulls `mongo:7` on first use (about 60s); CI (`build.yml`) already runs it.
+- Next: P6-1
 
 ### 2026-10-15  P5-6  DB state in MongoDB, per instance
 - Status: done

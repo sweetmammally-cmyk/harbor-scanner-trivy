@@ -183,6 +183,16 @@ func TestSchema(t *testing.T) {
 		assert.EqualValues(t, 99, schemaVersion(t, client)["version"], "the stored version is not touched")
 	})
 
+	t.Run("an older stored schema version is migrated, then set to the current one", func(t *testing.T) {
+		client := newClient(t, schemaConfig(mongoAddr, "older", retention))
+		require.NoError(t, insert(t, client, store.CollectionSchemaVersion, bson.M{"_id": "schema", "version": 0}))
+
+		require.NoError(t, client.EnsureSchema(context.Background()))
+
+		assert.EqualValues(t, store.SchemaVersion, schemaVersion(t, client)["version"])
+		assert.Contains(t, indexes(t, client, "scans"), "request_id_unique")
+	})
+
 	t.Run("Mongo down at startup: indexes are created after it comes back", func(t *testing.T) {
 		proxy := newForwarder(t, mongoAddr)
 		client := newClient(t, schemaConfig(proxy.addr, "late", retention))

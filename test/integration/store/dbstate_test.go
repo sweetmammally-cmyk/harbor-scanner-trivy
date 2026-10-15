@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
@@ -111,6 +113,42 @@ func TestDBStateStore(t *testing.T) {
 			return found && document.ManifestDigest == "sha256:while-down"
 		}, 30*time.Second, 100*time.Millisecond)
 		require.Eventually(t, func() bool { return countChecks(t, direct, "scanner-1") == 1 }, 10*time.Second, 100*time.Millisecond)
+	})
+
+	t.Run("an updater run reaches db_state and db_checks end to end", func(t *testing.T) {
+		name := fmt.Sprintf("dbstate_%d", databaseCounter.Add(1))
+		client := newClient(t, schemaConfig(mongoAddr, name, 24*time.Hour))
+		s := store.NewDBStateStore(client, "scanner-1")
+		monitor(t, client)
+		require.Eventually(t, client.Ready, 15*time.Second, 50*time.Millisecond)
+
+		// One source whose port is closed: its pre-check fails with tcp_refused.
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		closed := listener.Addr().String()
+		require.NoError(t, listener.Close())
+		sources, err := config.ParseDBSources(closed + "/aquasec/trivy-db:2|direct")
+		require.NoError(t, err)
+		cfg := mongoConfig(mongoAddr)
+		cfg.DBSources = sources
+		cfg.PrecheckTimeoutDNS, cfg.PrecheckTimeoutConnect = time.Second, time.Second
+		cfg.PrecheckTimeoutTotal = 5 * time.Second
+
+		_, err = dbmgr.NewUpdater(context.Background(), cfg, t.TempDir(), s).UpdateNow(context.Background())
+		require.NoError(t, err)
+
+		document, found := storedState(t, client, "scanner-1:db")
+		require.True(t, found)
+		assert.Equal(t, dbmgr.ModeDegraded, document.Mode)
+		require.Len(t, document.LastSources, 1)
+		assert.Equal(t, "tcp_refused", document.LastSources[0].FailureClass)
+
+		checks, err := store.NewMongoDBChecks(client).Recent(context.Background(), "db", 10)
+		require.NoError(t, err)
+		require.Len(t, checks, 1)
+		assert.Equal(t, "scanner-1", checks[0].InstanceID)
+		assert.Equal(t, "tcp_refused", checks[0].FailureClass)
+		assert.Equal(t, "dns", checks[0].Precheck.Stages[0].Stage, "per-stage results are stored")
 	})
 
 	t.Run("startup load ignores the stored confirmation when the disk has another DB", func(t *testing.T) {

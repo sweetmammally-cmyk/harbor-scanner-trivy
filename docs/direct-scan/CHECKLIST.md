@@ -54,7 +54,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P5-4 Repositories behind interfaces, with fakes for unit tests
 - [x] P5-5 (follow-up: upload first, delete the file when the scan save fails, delete the previous file on retry, metadata `scan_id` and `uploaded_at`) GridFS for reports above the size threshold
 - [x] P5-6 Persist DB state and checks in Mongo: `db_state` per instance and kind (`<instance_id>:<kind>`, `SCANNER_INSTANCE_ID` default hostname), `db_checks` with `instance_id`; memory first, updater keeps running while Mongo is down; flush on every Mongo up transition; load at startup but ignore stored confirmation when the stored digest differs from disk; bounded `db_checks` buffer drops oldest and logs the count
-- [ ] P5-7 Integration tests against real Mongo
+- [x] P5-7 Integration tests against real Mongo
 
 ## Phase 6: Registry client
 - [ ] P6-1 Registry client using the robot account from config; resolve `repository/name:tag` to a digest (manifest HEAD)
