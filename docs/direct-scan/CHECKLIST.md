@@ -50,7 +50,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 ## Phase 5: MongoDB data plane
 - [x] P5-1 Mongo client, connect, ping; hard-dependency behaviour (not ready, 503, no exit when unreachable); connect / server selection / operation timeouts; background ping every 5s sets the readiness flag; URI redaction test; integration tests: unreachable at startup, then comes back
 - [x] P5-2 Models and collections: `scans`, `platforms`, `db_state`, `db_checks`
-- [ ] P5-3 Indexes (scans.request_id unique; image.digest+state+finished_at; customer_ids+finished_at; state+queued_at) and TTL on `db_checks`; created idempotently at startup (safe with several replicas); `schema_version` document
+- [ ] P5-3 Ensure schema on every Mongo up transition (retried; readiness needs schema ready): indexes via createIndexes only (scans.request_id unique partial; image.digest+state+finished_at; customer_ids+finished_at; state+queued_at; TTL on `db_checks.at` from `SCANNER_DB_CHECKS_RETENTION` 30d, collMod on change); conflicting index = ERROR + not ready, never dropped; `schema_version` via upsert + $setOnInsert, newer stored = not ready, older = migrate then set
 - [ ] P5-4 Repositories behind interfaces, with fakes for unit tests
 - [ ] P5-5 GridFS for reports above the size threshold
 - [ ] P5-6 Persist DB state and checks in Mongo (replace the in-memory implementation); the DB updater keeps running while Mongo is down, state stays in memory and is written when Mongo is back; not ready while Mongo is down
@@ -72,7 +72,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 
 ## Phase 8: Queue
 - [ ] P8-1 Enqueue into `scans` (state queued); dedupe on digest plus options
-- [ ] P8-2 Worker pool with atomic claim, lease and heartbeat; call the on-demand refresh (P4-4) before each scan
+- [ ] P8-2 Worker pool with atomic claim, lease and heartbeat (add the queue-claim index); call the on-demand refresh (P4-4) before each scan
 - [ ] P8-3 Recovery of expired leases
 - [ ] P8-4 Max queue length (429), per-scan timeout, graceful shutdown
 - [ ] P8-5 Reserve the optional `priority` field (unused)

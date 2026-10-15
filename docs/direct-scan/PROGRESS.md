@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 5 (MongoDB data plane)
 - Last completed task: P5-2
 - In progress: none
-- Next task: P5-3 (indexes, idempotent at startup, TTL on `db_checks`, `schema_version` document)
+- Next task: P5-3, then P5-4 and P5-5
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,10 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, tenth round): DEMAND v0.12, sections 10 and 11.
+  - Reconnection: rely on the driver's own reconnection, no custom backoff loop. DEMAND section 11 now says "the driver reconnects automatically".
+  - Ensure schema (P5-3): run at startup if Mongo is up and on every up transition, retried until it succeeds; readiness needs "schema ready" too. `createIndexes` is the only index mechanism. `schema_version` uses an upsert with `$setOnInsert`; stored newer than code means not ready with an ERROR; stored older means migrations (none yet), then set the version. `request_id` unique index is partial (`{request_id: {$type: "string"}}`). TTL on `db_checks.at` from `SCANNER_DB_CHECKS_RETENTION` (30d), updated with `collMod`. An existing index with the same name but other options: ERROR naming it, not ready, never dropped. The queue-claim index belongs to P8.
+  - Consequence found while planning P5-3: `Scan.RequestID` must be `omitempty`, otherwise scans without a request id store `""` (a string) and collide on the partial unique index.
 - 2026-10-15 (owner, ninth round): MongoDB client (DEMAND v0.11, section 11).
   - Missing `SCANNER_MONGO_URI` / `SCANNER_MONGO_DB` stays a startup config error. Mongo only unreachable: no exit, readiness false, v2 API 503, DB updater keeps running, the client reconnects.
   - Timeouts: `SCANNER_MONGO_CONNECT_TIMEOUT` 5s, `SCANNER_MONGO_SERVER_SELECTION_TIMEOUT` 5s, `SCANNER_MONGO_OPERATION_TIMEOUT` 10s; every Mongo call takes a context with a deadline.
@@ -72,7 +76,7 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The connection string is never logged or put in errors; redaction test includes driver errors that quote the URI.
   - P5-3: indexes are created idempotently at startup (safe with several replicas at once), plus a `schema_version` document.
   - Tests: unit tests with a fake; integration tests with `mongo:7`, including "unreachable at startup: readiness false, no exit" and "Mongo comes back: readiness true".
-  - Implementation note on "reconnects with exponential backoff": the Go driver connects lazily and reconnects by itself (its server monitor keeps probing), so the client is created once and never recreated; the 5s ping only drives readiness. To confirm with the owner whether more is wanted.
+  - Implementation note on "reconnects with exponential backoff": the Go driver connects lazily and reconnects by itself (its server monitor keeps probing), so the client is created once and never recreated; the 5s ping only drives readiness. (Confirmed by the owner in the tenth round.)
 - 2026-10-15 (owner, eighth round): DEMAND v0.10, 7.4 and 11.
   - Write-failure tests use an injected writer (they must work as root); same assertions.
   - The installed digest must be readable from disk; it already is (`manifest-digest` file per version directory, read by `installedDigest`); a test proves a new updater with empty state does not download when the digest is equal.

@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.11 (MongoDB client behaviour, 2026-10-15)
+Status: DRAFT v0.12 (schema setup and indexes, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -286,7 +286,18 @@ Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format
 
 `db_checks`: history of pre-checks and downloads (source, route, per-stage timings, result, at). TTL index to expire old rows.
 
-Indexes (draft): `scans.request_id` (unique), `scans(image.digest, state, finished_at)`, `scans(customer_ids, finished_at)`, `scans(state, queued_at)`.
+Schema setup ("ensure schema"):
+
+- Runs at startup when MongoDB is up, and again every time the MongoDB up flag goes from false to true; it is retried until it succeeds. Readiness requires "schema ready" in addition to MongoDB being up.
+- `createIndexes` is the only index mechanism (idempotent, safe with several replicas starting at once). Indexes are never dropped or recreated automatically: an existing index with the same name or keys but different options logs an ERROR naming the index, and the replica stays not ready.
+- A `schema_version` document is created with an upsert and `$setOnInsert`, so concurrent replicas cannot collide. If the stored version is higher than the code's, the replica stays not ready with a clear ERROR. If it is lower, migrations run (none yet) and the version is then set.
+
+Indexes:
+
+- `scans.request_id`: unique, partial (`partialFilterExpression: {request_id: {$type: "string"}}`), so scans without a `request_id` do not collide. A scan without `request_id` stores no `request_id` field.
+- `scans(image.digest, state, finished_at)`, `scans(customer_ids, finished_at)`, `scans(state, queued_at)`.
+- `db_checks.at`: TTL index (`at` is a BSON date), `expireAfterSeconds` from `SCANNER_DB_CHECKS_RETENTION`. When the retention changes, the index is updated with `collMod`, never dropped.
+- The queue-claim index is added with the queue (P8).
 
 Large reports: summary plus report inline; move the full report to GridFS above a size threshold (16 MB BSON limit).
 
@@ -296,8 +307,9 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 |---|---|
 | `SCANNER_V2_API_ENABLED` | Feature flag for the new API |
 | `SCANNER_V2_AUTH_TOKEN` | Service token for the new API |
-| `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error (config error). If MongoDB is only unreachable, the service does not exit: it keeps running with readiness false and the v2 API returning 503, the DB updater keeps running, and the client reconnects. Write and read concern come from the connection string (no separate settings). The connection string is never logged or included in errors. No multi-document transactions are used. |
+| `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error (config error). If MongoDB is only unreachable, the service does not exit: it keeps running with readiness false and the v2 API returning 503, the DB updater keeps running, and the driver reconnects automatically (no custom backoff loop). Write and read concern come from the connection string (no separate settings). The connection string is never logged or included in errors. No multi-document transactions are used. |
 | `SCANNER_MONGO_CONNECT_TIMEOUT` | Connect timeout. Default 5s |
+| `SCANNER_DB_CHECKS_RETENTION` | How long `db_checks` documents are kept (TTL index). Default 30d (the `d` suffix is supported) |
 | `SCANNER_MONGO_SERVER_SELECTION_TIMEOUT` | Server selection timeout. Default 5s |
 | `SCANNER_MONGO_OPERATION_TIMEOUT` | Deadline of every MongoDB call. Default 10s |
 | `SCANNER_REGISTRY_URL` | Harbor URL used to resolve digests and pull images |
