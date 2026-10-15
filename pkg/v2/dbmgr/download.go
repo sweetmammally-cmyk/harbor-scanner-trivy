@@ -84,6 +84,10 @@ func downloadDB(ctx context.Context, client *registryClient, layer ociDescriptor
 			return fmt.Errorf("extracting %s: %w", name, err)
 		}
 		_, err = io.Copy(file, archive)
+		if err == nil {
+			// Flush to disk before the version can be activated.
+			err = file.Sync()
+		}
 		closeErr := file.Close()
 		if err != nil {
 			return downloadError(ctx, fmt.Errorf("extracting %s: %w", name, err))

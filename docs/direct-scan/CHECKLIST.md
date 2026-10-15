@@ -32,7 +32,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P3-1 OCI client over our transport (token auth if needed, manifest, blob); record raw-HTTP vs library decision
 - [x] P3-2 Upstream check: compare remote manifest digest with the stored one
 - [x] P3-3 Download DB layer only after the pre-check passed, with stall timeout and overall cap, verify digest, extract `trivy.db` and `metadata.json` to a temp dir
-- [ ] P3-4 Atomic swap; in-flight scans keep the old copy (record mechanism)
+- [x] P3-4 Atomic swap; in-flight scans keep the old copy (record mechanism)
 - [ ] P3-5 Seed DB support; service not ready until a DB exists
 - [ ] P3-6 (startup check for empty `SCANNER_DB_SOURCES` already done) Source fallback loop; all failed means degraded mode, ERROR log, old DB kept
 - [ ] P3-7 Java DB through the same flow
