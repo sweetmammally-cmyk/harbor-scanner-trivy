@@ -5,11 +5,13 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 0 done; Phase 1 next
-- Last completed task: P0-5
+- Phase: 1
+- Last completed task: P1-1
 - In progress: none
-- Next task: P1-1
-- Blockers / questions for the user: baseline has 3 failing tests caused by commit `0c87038` (Harbor report now carries `vendor_attributes.Trivy`). Owner must choose: keep the change and update the tests, or revert it. Also: the INFO-level "FULL TRIVY REPORT" dump in `pkg/trivy/wrapper.go` looks like leftover debug code.
+- Next task: P1-2 (waiting on owner: env var names and defaults not in DEMAND section 11, see Blockers)
+- Blockers / questions for the user:
+  - P1-2 / P1-4: DEMAND section 11 gives no defaults (workers, queue length, scan timeout, download timeout, max DB age, Mongo DB name), no names for the `SCANNER_PRECHECK_TIMEOUT_*` variables, and no format for `SCANNER_DB_SOURCES`. Need the owner's answers before coding.
+  - Baseline has 3 failing tests caused by commit `0c87038` (Harbor report now carries `vendor_attributes.Trivy`). Owner must choose: keep the change and update the tests, or revert it. Also: the INFO-level "FULL TRIVY REPORT" dump in `pkg/trivy/wrapper.go` looks like leftover debug code.
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -84,6 +86,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P1-1  v2 feature flag
+- Status: done
+- What changed: new package `pkg/v2/config` with `Config.Enabled` (`SCANNER_V2_API_ENABLED`, default false) and `GetConfig()`, same `caarlos0/env` pattern as `pkg/etc`.
+- Files: `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`
+- Tests run: `go test -short -race ./pkg/v2/...` -> ok; `go vet ./pkg/v2/...` -> ok; `go build ./...` -> ok
+- Decisions / surprises: `main.go` is not touched yet. Nothing exists to wire, so the flag is read in `main.go` together with the `/api/v2` mount in P9-1. Until then v2 is off in every case, which satisfies "off by default".
+- Next: P1-2
 
 ### 2026-10-15  P0-5  Commands in CLAUDE.md
 - Status: done
