@@ -50,6 +50,8 @@ func ParseDBSources(value string) ([]DBSource, error) {
 		return sources, nil
 	}
 
+	// seen maps "repository|route" to the 1-based position of its first entry.
+	seen := map[string]int{}
 	for i, item := range strings.Split(value, ",") {
 		parts := strings.Split(strings.TrimSpace(item), "|")
 		if len(parts) != 2 && len(parts) != 3 {
@@ -80,6 +82,13 @@ func ParseDBSources(value string) ([]DBSource, error) {
 				source.AllowHTTP1 = true
 			}
 		}
+
+		// The same repository through the same route twice is a config mistake.
+		key := source.Repository + "|" + route
+		if first, found := seen[key]; found {
+			return nil, fmt.Errorf("source %d: same repository and route as source %d", i+1, first)
+		}
+		seen[key] = i + 1
 
 		sources = append(sources, source)
 	}

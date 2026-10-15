@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 6 done; Phase 7 (scan runner) next
 - Last completed task: P6-3
 - In progress: none
-- Next task: P1-4 follow-up (duplicate sources), then P7-1 to P7-7
+- Next task: P7-1 (scan runner core)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -174,6 +174,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P1-4  Follow-up: duplicate DB sources
+- Status: done
+- What changed: `ParseDBSources` returns "source N: same repository and route as source M" when an entry repeats the repository and route of an earlier one (options do not count). The same repository through a different route is allowed (a fallback). The error never contains the route, which may hold proxy credentials. This also removes the duplicate `db_checks` id case noted in P5-6.
+- Files: `pkg/v2/config/sources.go`, `pkg/v2/config/sources_test.go`
+- Tests run: `go test -short -race -cover ./pkg/v2/...` -> ok (config 98.9%). Cases: a repeat with a different option is rejected, a repeated proxy route is rejected without its credentials in the error, the same repository through two routes is accepted.
+- Decisions / surprises: none.
+- Next: P7-1
 
 ### 2026-10-15  P6-3  Registry client tests
 - Status: done (Phase 6 complete)

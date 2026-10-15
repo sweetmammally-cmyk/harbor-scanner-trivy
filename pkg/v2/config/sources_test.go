@@ -58,6 +58,24 @@ func TestParseDBSources(t *testing.T) {
 			expectedError: `source 1: unknown option "", known options: allow-http1`,
 		},
 		{
+			name:          "the same repository and route twice",
+			value:         "mirror.local/trivy-db:2|direct,ghcr.io/aquasecurity/trivy-db:2|direct,mirror.local/trivy-db:2|direct|allow-http1",
+			expectedError: "source 3: same repository and route as source 1",
+		},
+		{
+			name:          "the same proxy route twice, without its credentials in the error",
+			value:         "ghcr.io/aquasecurity/trivy-db:2|socks5://user:s3cret@proxy:1080,ghcr.io/aquasecurity/trivy-db:2|socks5://user:s3cret@proxy:1080",
+			expectedError: "source 2: same repository and route as source 1",
+		},
+		{
+			name:  "the same repository through different routes is a fallback, not a duplicate",
+			value: "ghcr.io/aquasecurity/trivy-db:2|direct,ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080",
+			expectedSources: []string{
+				"ghcr.io/aquasecurity/trivy-db:2|direct",
+				"ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080",
+			},
+		},
+		{
 			name:          "missing route",
 			value:         "mirror.local/aquasec/trivy-db:2",
 			expectedError: "source 1: expected repository|route or repository|route|options",
