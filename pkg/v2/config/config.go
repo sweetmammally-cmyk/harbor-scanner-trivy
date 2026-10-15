@@ -18,8 +18,13 @@ type Config struct {
 	Enabled   bool   `env:"SCANNER_V2_API_ENABLED" envDefault:"false"`
 	AuthToken string `env:"SCANNER_V2_AUTH_TOKEN"`
 
+	// MongoURI may hold a password: never log it or put it in errors.
 	MongoURI string `env:"SCANNER_MONGO_URI"`
 	MongoDB  string `env:"SCANNER_MONGO_DB"`
+
+	MongoConnectTimeout         time.Duration `env:"SCANNER_MONGO_CONNECT_TIMEOUT" envDefault:"5s"`
+	MongoServerSelectionTimeout time.Duration `env:"SCANNER_MONGO_SERVER_SELECTION_TIMEOUT" envDefault:"5s"`
+	MongoOperationTimeout       time.Duration `env:"SCANNER_MONGO_OPERATION_TIMEOUT" envDefault:"10s"`
 
 	RegistryURL      string `env:"SCANNER_REGISTRY_URL"`
 	RegistryUsername string `env:"SCANNER_REGISTRY_USERNAME"`

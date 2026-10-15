@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 4 done; Phase 5 (MongoDB data plane) next
-- Last completed task: P4-5
+- Phase: 5 (MongoDB data plane)
+- Last completed task: P5-1
 - In progress: none
-- Next task: P5-1 (Mongo client, connect, ping; not ready and 503 while Mongo is down; the DB updater keeps running without Mongo, see Decisions)
+- Next task: P5-2 (models and collections: `scans`, `platforms`, `db_state`, `db_checks`)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -133,6 +133,11 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - `pkg/scan/transformer.go`: Harbor `vendor_attributes` gets a `Trivy: {Target, Type}` entry for every vulnerability.
 - `Vagrantfile`: trailing whitespace only.
 
+Touched by this plan:
+
+- `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` (P0-6): test expectations for `vendor_attributes.Trivy` (owner chose KEEP). Test-only. (Correction: missing from this list until P5-1.)
+- `go.mod`, `go.sum` (P5-1): new dependency `go.mongodb.org/mongo-driver/v2 v2.9.1` and its indirect modules; minimum-version bumps it requires: `golang.org/x/crypto` 0.51.0 -> 0.53.0, `golang.org/x/sync` 0.20.0 -> 0.21.0, `golang.org/x/sys` 0.45.0 -> 0.46.0, `golang.org/x/text` 0.37.0 -> 0.39.0, `github.com/klauspost/compress` 1.17.4 -> 1.19.2 (all indirect). Upstream unit and integration tests pass with them.
+
 ## Changelog
 
 ### Entry template (copy for each task)
@@ -146,6 +151,29 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-1  MongoDB client
+- Status: done
+- What changed: new package `pkg/v2/store`, `client.go`:
+  - `NewClient(cfg)` creates the driver client with `SCANNER_MONGO_CONNECT_TIMEOUT` and `SCANNER_MONGO_SERVER_SELECTION_TIMEOUT`. It does no network I/O, so an unreachable Mongo is not a startup error; only a bad URI is.
+  - `OperationContext(ctx)` adds the `SCANNER_MONGO_OPERATION_TIMEOUT` deadline; every Mongo call must use it.
+  - `Monitor(ctx, interval)` pings at once and then every interval (`store.PingInterval` = 5s in production), sets the `Up()` flag, and logs only changes (plus the first failure). Readiness and the future `mongo_up` gauge read `Up()` and never call Mongo.
+  - `Disconnect`.
+  - `redactURI(err, uri)` removes the URI, its user info, the password and the decoded password from a message, and returns a new error that does not wrap the original. It is used for client-creation errors and logged ping errors.
+  - New config: `MongoConnectTimeout` (5s), `MongoServerSelectionTimeout` (5s), `MongoOperationTimeout` (10s).
+  - New dependency `go.mongodb.org/mongo-driver/v2 v2.9.1` (v2.9.2 was only 9 days old).
+- Files: `pkg/v2/store/client.go`, `pkg/v2/store/client_test.go`, `test/integration/store/mongo_test.go`, `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`, `go.mod`, `go.sum`
+- Tests run:
+  - `go test -short -race -count=3 ./pkg/v2/...` -> ok; `make test` -> ok.
+  - `go test -tags=integration ./test/integration/...` -> ok (Harbor adapter, Redis and the new Mongo tests).
+  - Unit, with a fake ping: unreachable is not an error and does no I/O; ping has a deadline; first failure logged once, repeated failures not logged, recovery and going down logged; Monitor pings and stops on cancel; operation deadline.
+  - Redaction: malformed URIs through the driver; a crafted error that quotes the full URI, the user info and the decoded password; a ping failure against a URI with credentials.
+  - Integration with `mongo:7`, connected through a local TCP forwarder the test switches off and on: reachable (up, insert and find with a deadline); unreachable at startup (not up after 3s, no error, no exit); the forwarder starts (up); it stops and closes its connections (not up); it starts again (up).
+- Decisions / surprises:
+  - The driver v2.9.1 does not quote the URI in any of its parse errors that were tried (checked by printing the raw errors), so the crafted-error test is what really checks the redaction; the driver cases guard future versions.
+  - Reconnecting is done by the driver: the client is created once and never recreated, and recovery took a few seconds in the integration test. No extra backoff loop was added (see the ninth-round Decisions).
+  - Wiring (`main.go`, readiness probe, 503) comes in P9-1 and P10-2.
+- Next: P5-2
 
 ### 2026-10-15  P4-5  Fake-clock tests
 - Status: done
