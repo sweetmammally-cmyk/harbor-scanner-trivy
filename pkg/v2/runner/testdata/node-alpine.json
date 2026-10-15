@@ -1,10 +1,10 @@
 {
   "SchemaVersion": 2,
   "Trivy": {
-    "Version": "0.71.2"
+    "Version": "0.74.0"
   },
-  "ReportID": "01a13f91-699c-7cca-bd42-0b926d931492",
-  "CreatedAt": "2026-10-15T16:07:36.796839968+03:30",
+  "ReportID": "01a13fb3-000f-7cf4-bb61-804c6a287402",
+  "CreatedAt": "2026-10-15T16:44:17.999850207+03:30",
   "ArtifactID": "sha256:38b9ae73c3db910ed6d6f06b00c52d6dbac02ad2e0ec676742061ad7c2f6135f",
   "ArtifactName": "node:22-alpine3.20",
   "ArtifactType": "container_image",
@@ -327,7 +327,7 @@
             "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-22795",
             "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-22796",
             "https://errata.almalinux.org/9/ALSA-2026-1473.html",
-            "https://errata.rockylinux.org/RLSA-2026:1472",
+            "https://errata.rockylinux.org/RLSA-2026:1473",
             "https://github.com/advisories/GHSA-wvhq-3h88-rf6g",
             "https://github.com/guiimoraes/CVE-2025-15467",
             "https://github.com/openssl/openssl/commit/2c8f0e5fa9b6ee5508a0349e4572ddb74db5a703",
@@ -344,7 +344,7 @@
             "https://www.cve.org/CVERecord?id=CVE-2025-15467"
           ],
           "PublishedDate": "2026-01-27T16:16:14.257Z",
-          "LastModifiedDate": "2026-09-07T13:17:27.74Z"
+          "LastModifiedDate": "2026-10-15T02:17:23.44Z"
         },
         {
           "VulnerabilityID": "CVE-2025-69421",
@@ -403,7 +403,6 @@
             }
           },
           "References": [
-            "https://access.redhat.com/errata/RHSA-2026:1472",
             "https://access.redhat.com/errata/RHSA-2026:1473",
             "https://access.redhat.com/security/cve/CVE-2025-69421",
             "https://bugzilla.redhat.com/2430375",
@@ -445,7 +444,7 @@
             "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-22795",
             "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-22796",
             "https://errata.almalinux.org/9/ALSA-2026-1473.html",
-            "https://errata.rockylinux.org/RLSA-2026:1472",
+            "https://errata.rockylinux.org/RLSA-2026:1473",
             "https://github.com/advisories/GHSA-w9rv-xc8m-cmqp",
             "https://github.com/openssl/openssl/commit/3524a29271f8191b8fd8a5257eb05173982a097b",
             "https://github.com/openssl/openssl/commit/36ecb4960872a4ce04bf6f1e1f4e78d75ec0c0c7",
@@ -566,9 +565,9 @@
       "Type": "node-pkg",
       "Vulnerabilities": [
         {
-          "VulnerabilityID": "CVE-2026-13149",
+          "VulnerabilityID": "CVE-2026-102276",
           "VendorIDs": [
-            "GHSA-3jxr-9vmj-r5cp"
+            "GHSA-6j4f-fj2g-mc7p"
           ],
           "PkgID": "brace-expansion@2.0.1",
           "PkgName": "brace-expansion",
@@ -578,41 +577,35 @@
             "UID": "becc2016f5337669"
           },
           "InstalledVersion": "2.0.1",
-          "FixedVersion": "5.0.7, 1.1.16, 2.1.2",
+          "FixedVersion": "5.0.10, 3.0.7, 2.1.5, 1.1.19",
           "Status": "fixed",
           "Layer": {
             "Digest": "sha256:ba4caef5715cce5e7de0253509b9ce257994ec6f40fd8e86f0d3846296ea3675",
             "DiffID": "sha256:a3d1dc4b0cd43dda3ea1bb617f4df9fde6e7c3f47557a08b21b6a5031cbb2a13"
           },
           "SeveritySource": "ghsa",
-          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-13149",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-102276",
           "DataSource": {
             "ID": "ghsa",
             "Name": "GitHub Security Advisory npm",
             "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Anpm"
           },
-          "Fingerprint": "sha256:3579aef26b053f2d5fa1f3e3fa794be6f7adf035d91736b59ac87b54fe8b210e",
-          "Title": "brace-expansion: Brace-expansion: Denial of Service due to exponential-time complexity",
-          "Description": "brace-expansion through 5.0.6 is vulnerable to denial of service. The expand() function exhibits exponential-time complexity in the number of consecutive non-expanding '{}' brace groups. An attacker who passes a crafted string to expand(), directly or transitively, can cause significant CPU consumption and event-loop blocking. The max option does not mitigate this, as it bounds the output size rather than the recursion work.",
+          "Fingerprint": "sha256:930e1a1ad6ccc75190d6b1463db342d6a03ea6d4271c7726732bffe52b90af6f",
+          "Title": "brace-expansion: brace-expansion: Denial of Service via stack exhaustion from crafted brace patterns",
+          "Description": "The brace-expansion library generates arbitrary strings containing a common prefix and suffix. Prior to 1.1.19, 2.1.5, 3.0.7, and 5.0.10, crafted brace patterns can exhaust the native stack in parseCommaParts because parseCommaParts recursively processes the remainder once per brace group and uses push.apply to pass every element of a very large comma-part array as a function argument. Patterns containing many comma-separated brace groups trigger the recursive path, while the large array triggers the argument-array path without deep recursion. These paths cause recursive and argument-array native stack exhaustion before max or maxLength can limit output, potentially terminating the Node.js process in a process-terminating denial of service. This issue is fixed in versions 1.1.19, 2.1.5, 3.0.7, and 5.0.10.",
           "Severity": "HIGH",
           "CweIDs": [
             "CWE-400",
-            "CWE-407"
+            "CWE-674"
           ],
           "VendorSeverity": {
-            "alma": 3,
-            "amazon": 3,
             "ghsa": 3,
-            "oracle-oval": 3,
-            "redhat": 3,
-            "rocky": 3
+            "redhat": 3
           },
           "CVSS": {
             "ghsa": {
-              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
-              "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N/E:P/S:N/AU:Y/R:U/V:D/RE:M/U:Amber",
-              "V3Score": 5.3,
-              "V40Score": 7.7
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
             },
             "redhat": {
               "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
@@ -620,39 +613,19 @@
             }
           },
           "References": [
-            "https://access.redhat.com/errata/RHSA-2026:47058",
-            "https://access.redhat.com/errata/RHSA-2026:48034",
-            "https://access.redhat.com/security/cve/CVE-2026-13149",
-            "https://bugzilla.redhat.com/2494813",
-            "https://bugzilla.redhat.com/2498116",
-            "https://bugzilla.redhat.com/2498120",
-            "https://bugzilla.redhat.com/show_bug.cgi?id=2494813",
-            "https://bugzilla.redhat.com/show_bug.cgi?id=2498116",
-            "https://bugzilla.redhat.com/show_bug.cgi?id=2498120",
-            "https://creativecommons.org/licenses/by/4.0/",
-            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-13149",
-            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-59873",
-            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-59874",
-            "https://errata.almalinux.org/9/ALSA-2026-47058.html",
-            "https://errata.rockylinux.org/RLSA-2026:48034",
+            "https://access.redhat.com/security/cve/CVE-2026-102276",
+            "https://advisory.echohq.com/cve/CVE-2026-102276",
             "https://github.com/juliangruber/brace-expansion",
-            "https://github.com/juliangruber/brace-expansion/commit/835d6be91201122d9adffb0c0c8c094189ace265",
-            "https://github.com/juliangruber/brace-expansion/commit/c7e33ec13ac1a684c116720843ce24e208611754",
-            "https://github.com/juliangruber/brace-expansion/commit/d74e63030c012e3b7ae81657b8d665619cd51b95",
-            "https://github.com/juliangruber/brace-expansion/pull/122",
-            "https://github.com/juliangruber/brace-expansion/pull/123",
-            "https://github.com/juliangruber/brace-expansion/releases/tag/v1.1.16",
-            "https://github.com/juliangruber/brace-expansion/releases/tag/v2.1.2",
-            "https://github.com/juliangruber/brace-expansion/releases/tag/v5.0.7",
-            "https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-3jxr-9vmj-r5cp",
-            "https://linux.oracle.com/cve/CVE-2026-13149.html",
-            "https://linux.oracle.com/errata/ELSA-2026-48034.html",
-            "https://nvd.nist.gov/vuln/detail/CVE-2026-13149",
-            "https://www.cve.org/CVERecord?id=CVE-2026-13149",
-            "https://www.npmjs.com/package/brace-expansion"
+            "https://github.com/juliangruber/brace-expansion/commit/0bcbfc0a5928c3073d48f42999d1ce4fc1c42fbc",
+            "https://github.com/juliangruber/brace-expansion/commit/316359e6019c39b3254c8ba8e25dc586a480652c",
+            "https://github.com/juliangruber/brace-expansion/commit/5171e681c0922b7ae8bfaf9a331e309107be6edc",
+            "https://github.com/juliangruber/brace-expansion/commit/6735c94873ca570bcdd6a0690033bdd3126379d3",
+            "https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-6j4f-fj2g-mc7p",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-102276",
+            "https://www.cve.org/CVERecord?id=CVE-2026-102276"
           ],
-          "PublishedDate": "2026-06-30T10:16:34.56Z",
-          "LastModifiedDate": "2026-07-08T12:17:20.087Z"
+          "PublishedDate": "2026-09-28T21:17:16.033Z",
+          "LastModifiedDate": "2026-09-30T19:57:08.043Z"
         },
         {
           "VulnerabilityID": "CVE-2026-48758",
@@ -769,7 +742,9 @@
           },
           "References": [
             "https://access.redhat.com/security/cve/CVE-2025-5889",
+            "https://advisory.echohq.com/cve/CVE-2025-5889",
             "https://gist.github.com/mmmsssttt404/37a40ce7d6e5ca604858fe30814d9466",
+            "https://github.com/advisories/GHSA-v6h2-p8h4-qcjw",
             "https://github.com/juliangruber/brace-expansion",
             "https://github.com/juliangruber/brace-expansion/commit/0b6a9781e18e9d2769bb2931f4856d1360243ed2",
             "https://github.com/juliangruber/brace-expansion/commit/15f9b3c75ebf5988198241fecaebdc45eff28a9f",

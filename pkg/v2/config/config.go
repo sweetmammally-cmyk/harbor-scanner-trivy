@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -74,11 +75,16 @@ type Config struct {
 	QueueWorkers   int           `env:"SCANNER_QUEUE_WORKERS" envDefault:"1"`
 	QueueMaxLength int           `env:"SCANNER_QUEUE_MAX_LENGTH" envDefault:"100"`
 	ScanTimeout    time.Duration `env:"SCANNER_SCAN_TIMEOUT" envDefault:"10m"`
+	// ScanPlatform is the platform scanned in a multi-platform image (Trivy --platform).
+	ScanPlatform string `env:"SCANNER_SCAN_PLATFORM" envDefault:"linux/amd64"`
 	// ScanMaxOutput is the largest Trivy JSON output read, in bytes (256 MiB).
 	ScanMaxOutput int64 `env:"SCANNER_SCAN_MAX_OUTPUT" envDefault:"268435456"`
 	// ScanMaxFindings is the most findings stored per scan.
 	ScanMaxFindings int `env:"SCANNER_SCAN_MAX_FINDINGS" envDefault:"10000"`
 }
+
+// scanPlatformPattern is os/arch or os/arch/variant, for example linux/arm64/v8.
+var scanPlatformPattern = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9_]+(/[a-z0-9]+)?$`)
 
 // FallbackDBCheckInterval is used when SCANNER_DB_CHECK_INTERVAL is unset or invalid.
 const FallbackDBCheckInterval = 3 * time.Hour
@@ -142,6 +148,10 @@ func GetConfig() (Config, error) {
 	if cfg.DBStateRetention < 2*cfg.DBCheckInterval {
 		return cfg, fmt.Errorf("SCANNER_DB_STATE_RETENTION (%s) must be at least twice SCANNER_DB_CHECK_INTERVAL (%s)",
 			cfg.DBStateRetention, cfg.DBCheckInterval)
+	}
+
+	if !scanPlatformPattern.MatchString(cfg.ScanPlatform) {
+		return cfg, fmt.Errorf("SCANNER_SCAN_PLATFORM %q must look like os/arch or os/arch/variant", cfg.ScanPlatform)
 	}
 
 	cfg.DBSources, err = ParseDBSources(os.Getenv("SCANNER_DB_SOURCES"))

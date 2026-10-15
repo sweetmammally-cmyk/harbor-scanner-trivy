@@ -16,6 +16,7 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	ScanPlatform:                "linux/amd64",
 	ScanMaxOutput:               256 << 20,
 	ScanMaxFindings:             10000,
 	RegistryTimeout:             15 * time.Second,
@@ -151,6 +152,13 @@ func TestGetConfig(t *testing.T) {
 			expectedError: "SCANNER_DB_STATE_RETENTION (36h0m0s) must be at least twice SCANNER_DB_CHECK_INTERVAL (24h0m0s)",
 		},
 		{
+			name: "Should return error when SCANNER_SCAN_PLATFORM is not os/arch",
+			envs: Envs{
+				"SCANNER_SCAN_PLATFORM": "amd64",
+			},
+			expectedError: `SCANNER_SCAN_PLATFORM "amd64" must look like os/arch or os/arch/variant`,
+		},
+		{
 			name: "Should return error when a duration is invalid",
 			envs: Envs{
 				"SCANNER_SCAN_TIMEOUT": "ten minutes",
@@ -210,6 +218,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_QUEUE_WORKERS":                  "4",
 				"SCANNER_QUEUE_MAX_LENGTH":               "50",
 				"SCANNER_SCAN_TIMEOUT":                   "20m",
+				"SCANNER_SCAN_PLATFORM":                  "linux/arm64/v8",
 				"SCANNER_SCAN_MAX_OUTPUT":                "1048576",
 				"SCANNER_SCAN_MAX_FINDINGS":              "500",
 			},
@@ -255,6 +264,7 @@ func TestGetConfig(t *testing.T) {
 				QueueWorkers:            4,
 				QueueMaxLength:          50,
 				ScanTimeout:             20 * time.Minute,
+				ScanPlatform:            "linux/arm64/v8",
 				ScanMaxOutput:           1 << 20,
 				ScanMaxFindings:         500,
 			},

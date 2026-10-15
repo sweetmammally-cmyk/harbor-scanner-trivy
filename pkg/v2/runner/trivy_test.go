@@ -25,7 +25,7 @@ import (
 const fakeTrivy = `#!/bin/sh
 if [ "$1" = "--version" ]; then
   [ "$TRIVY_FAKE_MODE" = "badversion" ] && { echo "boom" >&2; exit 1; }
-  printf 'Version: 0.71.2\nVulnerability DB:\n  Version: 2\n'
+  printf 'Version: 0.74.0\nVulnerability DB:\n  Version: 2\n'
   exit 0
 fi
 out=""
@@ -58,6 +58,7 @@ case "$TRIVY_FAKE_MODE" in
   exit) echo "pulling as $TRIVY_USERNAME with password $TRIVY_PASSWORD failed" >&2; exit 2 ;;
   java) echo "FATAL Fatal error: post analysis error: Unable to initialize the Java DB: Java DB update failed" >&2; exit 1 ;;
   trivytimeout) echo "FATAL Fatal error: scan error: context deadline exceeded" >&2; exit 1 ;;
+  platform) printf 'FATAL Fatal error: unable to find the specified image in ["remote"]: 1 error occurred:\n\t* remote error: no child with platform linux/amd64 in index x\n' >&2; exit 1 ;;
 esac
 `
 
@@ -91,6 +92,7 @@ func newTestRunner(t *testing.T) (*Runner, string) {
 		RegistryPassword: robotPassword,
 		ScanTimeout:      10 * time.Second,
 		ScanMaxOutput:    1 << 20,
+		ScanPlatform:     "linux/amd64",
 	}
 	return NewRunner(cfg, trivy, cacheDir, t.TempDir(), store.NewMemoryPlatforms()), cacheDir
 }
@@ -120,7 +122,7 @@ func TestRunTrivy_Success(t *testing.T) {
 	assert.Equal(t, []string{
 		"image", "--scanners", "vuln", "--format", "json", "--output", output,
 		"--list-all-pkgs=false", "--skip-db-update", "--skip-java-db-update", "--skip-version-check",
-		"--image-src", "remote", "--cache-dir", filepath.Join(r.workDir, "worker-1"),
+		"--image-src", "remote", "--platform", "linux/amd64", "--cache-dir", filepath.Join(r.workDir, "worker-1"),
 		"--timeout", "9s", "--quiet", reference,
 	}, strings.Split(strings.TrimSpace(string(args)), "\n"), "no --severity, scan by digest")
 }
@@ -242,6 +244,16 @@ func TestRunTrivy_Failures(t *testing.T) {
 
 		assertClass(t, err, FailureJavaDBMissing)
 		assert.Contains(t, err.Error(), "SCANNER_JAVA_DB_SOURCES")
+	})
+
+	t.Run("no manifest for the scan platform", func(t *testing.T) {
+		r, _ := newTestRunner(t)
+		t.Setenv("TRIVY_FAKE_MODE", "platform")
+
+		_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
+
+		assertClass(t, err, FailurePlatformNotFound)
+		assert.Contains(t, err.Error(), "SCANNER_SCAN_PLATFORM")
 	})
 
 	t.Run("no DB installed: Trivy is not started", func(t *testing.T) {

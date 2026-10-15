@@ -57,7 +57,7 @@ func TestScan(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, store.TrivyInfo{
-		Version:          "0.71.2",
+		Version:          "0.74.0",
 		DBUpdatedAt:      time.Date(2026, 10, 15, 7, 10, 8, 0, time.UTC),
 		DBManifestDigest: "sha256:db-v1",
 	}, store.TrivyInfo{Version: scan.Trivy.Version, DBUpdatedAt: scan.Trivy.DBUpdatedAt.UTC(), DBManifestDigest: scan.Trivy.DBManifestDigest})
@@ -67,6 +67,7 @@ func TestScan(t *testing.T) {
 	assert.True(t, scan.HasMorePlatforms)
 	assert.Equal(t, map[string]int{"critical": 1, "high": 2, "medium": 1, "low": 1, "unknown": 0}, scan.Summary)
 	assert.False(t, scan.Truncated)
+	assert.Equal(t, "linux/amd64", scan.ScannedPlatform)
 	assert.Greater(t, scan.ScanMS, int64(-1))
 	findings := report["findings"].([]Finding)
 	assert.Len(t, findings, 3)
@@ -79,7 +80,7 @@ func TestScan(t *testing.T) {
 	}
 	assertNoOutputLeft(t, r)
 
-	assert.Contains(t, logs.String(), `"msg":"triggering scan","scan_id":"scan-1","digest":"sha256:1111","customer_ids":["cust-123"],"platforms":["alpine","npm"],"severities":["HIGH","CRITICAL"],"trivy_version":"0.71.2","db_updated_at":"2026-10-15T07:10:08Z"`)
+	assert.Contains(t, logs.String(), `"msg":"triggering scan","scan_id":"scan-1","digest":"sha256:1111","customer_ids":["cust-123"],"platforms":["alpine","npm"],"severities":["HIGH","CRITICAL"],"trivy_version":"0.74.0","db_updated_at":"2026-10-15T07:10:08Z"`)
 	assert.Contains(t, logs.String(), `"msg":"scan done"`)
 	assert.Contains(t, logs.String(), `"findings_stored":3`)
 	assert.Contains(t, logs.String(), `"platforms_not_found":["npm"]`)
@@ -151,7 +152,7 @@ func TestCheckTrivy(t *testing.T) {
 
 		require.NoError(t, r.CheckTrivy(context.Background()))
 
-		assert.Equal(t, "0.71.2", r.Version())
+		assert.Equal(t, "0.74.0", r.Version())
 		assert.True(t, r.Ready())
 	})
 

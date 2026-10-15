@@ -48,15 +48,16 @@ func TestScan_BSON(t *testing.T) {
 	finished := at.Add(5 * time.Second)
 	gridFSID := bson.NewObjectID()
 	done := Scan{
-		ID:           "scan-1",
-		RequestID:    "req-1",
-		RequestedAt:  at,
-		CustomerIDs:  []string{"cust-123"},
-		CustomerData: map[string]any{"app_id": "app-9", "env": "prod"},
-		Image:        Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:abc", MediaType: "application/vnd.oci.image.index.v1+json"},
-		Options:      ScanOptions{Platforms: []string{"npm", "jar"}, Severity: []string{"HIGH", "CRITICAL"}},
-		State:        ScanDone,
-		Trivy:        TrivyInfo{Version: "0.74.0", DBUpdatedAt: at.Add(-time.Hour), DBManifestDigest: "sha256:db"},
+		ID:              "scan-1",
+		RequestID:       "req-1",
+		RequestedAt:     at,
+		CustomerIDs:     []string{"cust-123"},
+		CustomerData:    map[string]any{"app_id": "app-9", "env": "prod"},
+		Image:           Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:abc", MediaType: "application/vnd.oci.image.index.v1+json"},
+		Options:         ScanOptions{Platforms: []string{"npm", "jar"}, Severity: []string{"HIGH", "CRITICAL"}},
+		ScannedPlatform: "linux/amd64",
+		State:           ScanDone,
+		Trivy:           TrivyInfo{Version: "0.74.0", DBUpdatedAt: at.Add(-time.Hour), DBManifestDigest: "sha256:db"},
 
 		Platforms:         []string{"npm", "debian"},
 		PlatformsFound:    []string{"npm"},
@@ -80,7 +81,7 @@ func TestScan_BSON(t *testing.T) {
 
 	t.Run("field names follow DEMAND section 10", func(t *testing.T) {
 		assert.Equal(t, sorted("_id", "request_id", "requested_at", "customer_ids", "customer_data", "image",
-			"options", "state", "trivy", "platforms", "platforms_found", "platforms_not_found", "has_more_platforms", "truncated", "summary", "report", "report_gridfs_id",
+			"options", "scanned_platform", "state", "trivy", "platforms", "platforms_found", "platforms_not_found", "has_more_platforms", "truncated", "summary", "report", "report_gridfs_id",
 			"queued_at", "started_at", "finished_at", "queue_wait_ms", "scan_ms", "total_ms", "worker", "lease_until"),
 			keysOf(t, done))
 		assert.Equal(t, sorted("repository", "name", "tag", "digest", "media_type"), keysOf(t, done.Image))

@@ -99,6 +99,7 @@ func (r *Runner) Scan(ctx context.Context, worker string, scan store.Scan, refer
 	}
 
 	scan.Trivy = store.TrivyInfo{Version: r.Version(), DBUpdatedAt: db.UpdatedAt, DBManifestDigest: db.ManifestDigest}
+	scan.ScannedPlatform = r.cfg.ScanPlatform
 	scan.Platforms = result.ImagePlatforms
 	scan.PlatformsFound = result.PlatformsFound
 	scan.PlatformsNotFound = result.PlatformsNotFound

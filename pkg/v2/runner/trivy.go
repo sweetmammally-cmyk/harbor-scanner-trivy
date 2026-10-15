@@ -28,6 +28,8 @@ const (
 	FailureOutputInvalid  = "output_invalid"
 	FailureDBMissing      = "db_missing"
 	FailureJavaDBMissing  = "java_db_missing"
+	// FailurePlatformNotFound: the image index has no manifest for SCANNER_SCAN_PLATFORM.
+	FailurePlatformNotFound = "platform_not_found"
 )
 
 // stderrTail is how much of Trivy's stderr is kept for a failed scan.
@@ -161,6 +163,7 @@ func (r *Runner) exec(ctx context.Context, cacheDir, outputPath, reference strin
 		"--skip-java-db-update",
 		"--skip-version-check",
 		"--image-src", "remote",
+		"--platform", r.cfg.ScanPlatform,
 		"--cache-dir", cacheDir,
 		"--timeout", trivyTimeout(r.cfg.ScanTimeout).String(),
 		"--quiet",
@@ -193,6 +196,9 @@ func (r *Runner) exec(ctx context.Context, cacheDir, outputPath, reference strin
 	case strings.Contains(tail, "context deadline exceeded"):
 		// Trivy stopped at its own --timeout.
 		return &ScanError{Class: FailureTimeout, Detail: "Trivy timed out; stderr: " + tail}
+	case strings.Contains(tail, "no child with platform"):
+		return &ScanError{Class: FailurePlatformNotFound,
+			Detail: fmt.Sprintf("the image has no manifest for %s (SCANNER_SCAN_PLATFORM); stderr: %s", r.cfg.ScanPlatform, tail)}
 	case strings.Contains(tail, "Unable to initialize the Java DB"):
 		return &ScanError{Class: FailureJavaDBMissing,
 			Detail: "the image has Java archives and no Java DB is installed (set SCANNER_JAVA_DB_SOURCES); stderr: " + tail}

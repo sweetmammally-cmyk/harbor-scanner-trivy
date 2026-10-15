@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 7 done; Phase 8 (queue) next
-- Last completed task: P7-7
+- Last completed task: P7-8
 - In progress: none
-- Next task: P7-8 (Trivy 0.74.0 checks, `SCANNER_SCAN_PLATFORM`), then P8-1 to P8-6
+- Next task: P8-1 (enqueue, dedupe with `active_key`, idempotency, queue full)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -29,7 +29,7 @@ Newest changelog entries go at the top of the Changelog.
   - `test/integration` (build tag `integration`, testcontainers: Redis, registry), `test/component` (build tag `component`, docker-compose).
 - Logger and config pattern: standard library `log/slog` with a JSON handler on stdout, set as default in `main.go`; level from `SCANNER_LOG_LEVEL` (`etc.LogLevel`). Code calls `slog.Info/Debug/...` with `slog.String(...)` attrs. Config is one struct per area with `env:"..." envDefault:"..."` tags parsed by `github.com/caarlos0/env/v6` (`etc.GetConfig`), then validated by `etc.Check`. Errors are wrapped with `fmt.Errorf("...: %w", err)` or `xerrors.Errorf`.
 - How Trivy is invoked today: `pkg/trivy/wrapper.go` `prepareScanCmd` builds `exec.Command("trivy", "image"|"sbom", ...)` with `--no-progress --severity --vuln-type --format --output <tmp file> --cache-dir --timeout` and optional flags (`--skip-db-update`, `--skip-java-db-update`, `--offline-scan`, `--db-repository`, ...). The env comes from `ambassador.Environ()`; registry credentials go in as env vars `TRIVY_USERNAME`/`TRIVY_PASSWORD` or `TRIVY_REGISTRY_TOKEN`, never argv. It runs through `ambassador.RunCmd` (`cmd.CombinedOutput`), with no Go-side context or kill; only Trivy's own `--timeout` (`SCANNER_TRIVY_TIMEOUT`, default 5m) limits it. The JSON report is read from the temp file.
-- Trivy version pinned: `TRIVY_VERSION=0.74.0` in `Dockerfile` and in `make setup`. The local dev machine has trivy 0.71.2 on PATH.
+- Trivy version pinned: `TRIVY_VERSION=0.74.0` in `Dockerfile` and in `make setup`; this is the target (owner, fourteenth round). The local dev machine has trivy 0.71.2 on PATH; 0.74.0 checks used the binary copied from `aquasec/trivy:0.74.0`.
 - Build / test / lint commands:
   - build: `go build ./...` (binary: `make build`)
   - unit tests: `make test` (= `go test -v -short -race -coverprofile=coverage.txt -covermode=atomic ./...`)
@@ -178,6 +178,21 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P7-8  Trivy 0.74.0 and the scan platform
+- Status: done
+- What changed:
+  - Trivy 0.74.0 (the Dockerfile pin) is the target. Checked with the binary copied out of `aquasec/trivy:0.74.0`, against a DB installed by `TestManualUpdate`:
+    - The help still has `--image-src` (default `docker,containerd,podman,remote`), `--skip-version-check`, `--list-all-pkgs` (default true), `--platform`, `--insecure` and `TRIVY_PASSWORD`.
+    - node:22-alpine3.20 scans fine. A `pip` result without findings still appears with `--list-all-pkgs=false`.
+    - eclipse-temurin:21-jre-alpine without a Java DB still fails with "Unable to initialize the Java DB: Java DB update failed: '--skip-java-db-update' cannot be specified on the first run".
+    - A missing platform gives "remote error: no child with platform windows/amd64 in index alpine:3.22"; a missing image gives "MANIFEST_UNKNOWN" instead, so the platform case can be told apart.
+  - The fixture `testdata/node-alpine.json` was regenerated from 0.74.0 output (same trimming). Its top-level, result and vulnerability fields are identical to the 0.71.2 fixture, and the same severities were picked.
+  - Config `ScanPlatform` (`SCANNER_SCAN_PLATFORM`, default `linux/amd64`, must be `os/arch[/variant]`, else a startup error). The runner passes `--platform`, classifies "no child with platform" as `platform_not_found`, and sets `store.Scan.ScannedPlatform` (`scanned_platform`). The fake trivy reports 0.74.0.
+- Files: `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`, `pkg/v2/runner/trivy.go`, `pkg/v2/runner/scan.go`, `pkg/v2/runner/*_test.go`, `pkg/v2/runner/testdata/node-alpine.json`, `pkg/v2/store/models.go`, `pkg/v2/store/models_test.go`
+- Tests run: `go test -short -race -count=2 ./pkg/v2/...` -> ok; `make test` -> ok; integration `./test/integration/store/` -> ok. New cases: `--platform linux/amd64` in the argument list, `platform_not_found` from the fake trivy, `scanned_platform` on the scan, bad `SCANNER_SCAN_PLATFORM`. Manual run with 0.74.0 through our runner: node:22-alpine3.20 in 11.0s with the same result as 0.71.2 (critical 5, high 53, 58 findings, `jar` not found); eclipse-temurin `java_db_missing` in 12.2s.
+- Decisions / surprises: none; 0.74.0 behaves like 0.71.2 for everything we use. The cache rule (a different Trivy version is a cache miss) is applied in the cache decision (P9-3) and the dedupe key (P8-1).
+- Next: P8-1
 
 ### 2026-10-15  P7-7  Scan runner tests and a real-image run
 - Status: done (Phase 7 complete)

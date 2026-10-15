@@ -36,8 +36,11 @@ type Scan struct {
 	CustomerData map[string]any `bson:"customer_data,omitempty"`
 	Image        Image          `bson:"image"`
 	Options      ScanOptions    `bson:"options"`
-	State        string         `bson:"state"`
-	Trivy        TrivyInfo      `bson:"trivy"`
+	// ScannedPlatform is the platform scanned in a multi-platform image
+	// (SCANNER_SCAN_PLATFORM); part of the cache and dedupe keys.
+	ScannedPlatform string    `bson:"scanned_platform"`
+	State           string    `bson:"state"`
+	Trivy           TrivyInfo `bson:"trivy"`
 
 	// Platforms are all result types found in the image. PlatformsFound and
 	// PlatformsNotFound split the requested ones (Options.Platforms) by whether the

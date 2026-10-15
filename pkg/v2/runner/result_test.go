@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The fixture is real Trivy 0.71.2 output for node:22-alpine3.20, trimmed: alpine
+// The fixture is real Trivy 0.74.0 output for node:22-alpine3.20, trimmed: alpine
 // (CRITICAL, HIGH, HIGH, MEDIUM, LOW), node-pkg (HIGH, MEDIUM, LOW), and a pip
 // result without findings.
 const fixture = "testdata/node-alpine.json"

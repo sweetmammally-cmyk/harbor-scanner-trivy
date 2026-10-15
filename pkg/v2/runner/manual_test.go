@@ -41,7 +41,7 @@ func TestManualScan(t *testing.T) {
 	repository, name, _ := strings.Cut(path, "/")
 
 	cfg := config.Config{RegistryURL: registryURL, RegistryTimeout: 30 * time.Second,
-		ScanTimeout: 15 * time.Minute, ScanMaxOutput: 256 << 20, ScanMaxFindings: 10000}
+		ScanTimeout: 15 * time.Minute, ScanMaxOutput: 256 << 20, ScanMaxFindings: 10000, ScanPlatform: "linux/amd64"}
 	client, err := registry.NewClient(cfg)
 	require.NoError(t, err)
 	resolved, err := client.Resolve(context.Background(), registry.Image{Repository: repository, Name: name, Tag: tag})
