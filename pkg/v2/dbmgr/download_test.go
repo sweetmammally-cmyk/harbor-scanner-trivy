@@ -105,7 +105,7 @@ func TestDownloadDB(t *testing.T) {
 		return client
 	}
 	layerOf := func(f *fakeOCIRegistry) ociDescriptor {
-		return ociDescriptor{MediaType: dbLayerMediaType, Digest: f.layerDigest, Size: int64(len(f.layer))}
+		return ociDescriptor{MediaType: trivyDB.MediaType, Digest: f.layerDigest, Size: int64(len(f.layer))}
 	}
 
 	t.Run("success extracts only the wanted files", func(t *testing.T) {

@@ -48,6 +48,8 @@ type Config struct {
 	DBDownloadStallTimeout time.Duration `env:"SCANNER_DB_DOWNLOAD_STALL_TIMEOUT" envDefault:"30s"`
 	DBDownloadTimeout      time.Duration `env:"SCANNER_DB_DOWNLOAD_TIMEOUT" envDefault:"15m"`
 	DBMaxAgeDefault        time.Duration `env:"SCANNER_DB_MAX_AGE_DEFAULT" envDefault:"6h"`
+	// DBAgeWarn is read from SCANNER_DB_AGE_WARN by GetConfig, because it accepts days ("7d").
+	DBAgeWarn time.Duration
 
 	QueueWorkers   int           `env:"SCANNER_QUEUE_WORKERS" envDefault:"1"`
 	QueueMaxLength int           `env:"SCANNER_QUEUE_MAX_LENGTH" envDefault:"100"`
@@ -75,6 +77,15 @@ func GetConfig() (Config, error) {
 		interval = FallbackDBCheckInterval
 	}
 	cfg.DBCheckInterval = interval
+
+	ageWarn := os.Getenv("SCANNER_DB_AGE_WARN")
+	if ageWarn == "" {
+		ageWarn = "7d"
+	}
+	cfg.DBAgeWarn, err = ParseDuration(ageWarn)
+	if err != nil || cfg.DBAgeWarn <= 0 {
+		return cfg, fmt.Errorf("SCANNER_DB_AGE_WARN: invalid duration %q", ageWarn)
+	}
 
 	cfg.DBSources, err = ParseDBSources(os.Getenv("SCANNER_DB_SOURCES"))
 	if err != nil {

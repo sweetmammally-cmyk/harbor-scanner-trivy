@@ -15,6 +15,7 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	DBAgeWarn:               7 * 24 * time.Hour,
 	DBSeedDir:               "/home/scanner/seed/db",
 	JavaDBSeedDir:           "/home/scanner/seed/java-db",
 	DBCheckInterval:         3 * time.Hour,
@@ -93,6 +94,20 @@ func TestGetConfig(t *testing.T) {
 			expectedError: "SCANNER_DB_SOURCES is required when SCANNER_V2_API_ENABLED is true",
 		},
 		{
+			name: "Should return error when SCANNER_DB_AGE_WARN is invalid",
+			envs: Envs{
+				"SCANNER_DB_AGE_WARN": "a week",
+			},
+			expectedError: `SCANNER_DB_AGE_WARN: invalid duration "a week"`,
+		},
+		{
+			name: "Should return error when SCANNER_DB_AGE_WARN is zero",
+			envs: Envs{
+				"SCANNER_DB_AGE_WARN": "0d",
+			},
+			expectedError: `SCANNER_DB_AGE_WARN: invalid duration "0d"`,
+		},
+		{
 			name: "Should return error when a duration is invalid",
 			envs: Envs{
 				"SCANNER_SCAN_TIMEOUT": "ten minutes",
@@ -137,6 +152,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_DB_DOWNLOAD_STALL_TIMEOUT": "10s",
 				"SCANNER_DB_DOWNLOAD_TIMEOUT":       "5m",
 				"SCANNER_DB_MAX_AGE_DEFAULT":        "3h",
+				"SCANNER_DB_AGE_WARN":               "2d",
 				"SCANNER_QUEUE_WORKERS":             "4",
 				"SCANNER_QUEUE_MAX_LENGTH":          "50",
 				"SCANNER_SCAN_TIMEOUT":              "20m",
@@ -168,6 +184,7 @@ func TestGetConfig(t *testing.T) {
 				DBDownloadStallTimeout:  10 * time.Second,
 				DBDownloadTimeout:       5 * time.Minute,
 				DBMaxAgeDefault:         3 * time.Hour,
+				DBAgeWarn:               48 * time.Hour,
 				QueueWorkers:            4,
 				QueueMaxLength:          50,
 				ScanTimeout:             20 * time.Minute,

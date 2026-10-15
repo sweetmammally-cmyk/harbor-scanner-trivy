@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 3 (DB download module)
-- Last completed task: P3-8
+- Last completed task: P3-6
 - In progress: none
-- Next task: P3-6 (source loop, degraded mode, age WARN)
+- Next task: P3-7 (Java DB through the same flow: `javaDB` kind with `trivy-java.db` and the javadb layer media type)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -115,6 +115,24 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-6  Source update loop
+- Status: done
+- What changed: `update(ctx, cfg, cacheDir, kind, sources)` in `pkg/v2/dbmgr/update.go`, per source in order: `Precheck`, then `checkUpstream` (bounded by the manifest timeout), then, if the digest differs, `downloadDB` into a new version (bounded by `SCANNER_DB_DOWNLOAD_TIMEOUT` and the stall timeout), then `readMetadata`, then `installDB`.
+  - Stops on an equal digest or after an install. A failed source is recorded with its class (pre-check class, `upstream_error`, `download_error`, `install_error`) and the loop continues; failed downloads are removed.
+  - Returns `UpdateResult`: mode, active source, active manifest digest, installed flag, `UpstreamCheckedAt` (set when a source answered), metadata of the active DB, and per-source `SourceResult`s with the pre-check result.
+  - No source answered: mode `degraded`, one ERROR "all DB sources failed, scanning with existing DB" with each source's class, old DB kept.
+  - After each run: WARN "DB is older than SCANNER_DB_AGE_WARN" with `db_age`, `updated_at` and the active source.
+  - Logs "DB source selected", "DB is up to date" and "DB installed" (DEMAND 12 "DB source selection").
+  - `dbKind` describes a DB (directory name, files, layer media type); `trivyDB` is the first one.
+  - New config `DBAgeWarn` (`SCANNER_DB_AGE_WARN`, default `7d`; invalid or zero is a startup error).
+- Files: `pkg/v2/dbmgr/update.go`, `pkg/v2/dbmgr/update_test.go`, `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`; test helpers in `registry_test.go` (fake serves `/v2/`, CA pool shared by several fakes, media type taken from `trivyDB`)
+- Tests run: `go test -short -race -count=10 ./pkg/v2/...` -> ok; `make test` -> ok; coverage config 100%, dbmgr 87.9%; `go.mod` unchanged. Cases: install then up to date (the loop stops, second source not tried), pre-check fallback, download fallback (no leftover version), older mirror installed (no downgrade guard), all failed (degraded, exactly one ERROR, old DB kept, no `UpstreamCheckedAt`), a DB without UpdatedAt or with the wrong layer type is not installed, age WARN on a 10-day-old DB and none on a fresh one, no secrets in logs through SOCKS5 with a token.
+- Decisions / surprises:
+  - Edge case not covered by the owner's rule: a source answers with a different digest, but every download fails. The mode stays `normal` and `UpstreamCheckedAt` is set, because a source answered. A WARN "a newer DB was found but could not be installed" makes it visible. Freshness will say `ok` in that case; to raise with the owner.
+  - The metadata of a downloaded DB is checked before install, because the scan cache depends on `UpdatedAt`.
+  - Not yet run against the real ghcr.io DB (about 70 MB compressed); planned for P3-9 or P11-1 with the manual test.
+- Next: P3-7
 
 ### 2026-10-15  P3-8  metadata.json
 - Status: done (done before P3-6, because the age WARN needs it)

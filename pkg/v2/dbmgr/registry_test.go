@@ -20,8 +20,6 @@ import (
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 )
 
-const dbLayerMediaType = "application/vnd.aquasec.trivy.db.layer.v1.tar+gzip"
-
 // fakeOCIRegistry serves aquasec/trivy-db:2 as an OCI artifact with one layer.
 // Blobs can be redirected to a second TLS server, like ghcr.io does with its CDN.
 type fakeOCIRegistry struct {
@@ -53,7 +51,7 @@ func startFakeOCIRegistry(t *testing.T, layer []byte) *fakeOCIRegistry {
 
 	manifest, err := json.Marshal(ociManifest{
 		MediaType: "application/vnd.oci.image.manifest.v1+json",
-		Layers:    []ociDescriptor{{MediaType: dbLayerMediaType, Digest: f.layerDigest, Size: int64(len(layer))}},
+		Layers:    []ociDescriptor{{MediaType: trivyDB.MediaType, Digest: f.layerDigest, Size: int64(len(layer))}},
 	})
 	require.NoError(t, err)
 	f.manifest = manifest
@@ -74,11 +72,15 @@ func startFakeOCIRegistry(t *testing.T, layer []byte) *fakeOCIRegistry {
 	f.registry.StartTLS()
 	t.Cleanup(f.registry.Close)
 
-	pool := x509.NewCertPool()
+	// Add to the pool, so a test can run several fake registries.
+	pool := rootCAs
+	if pool == nil {
+		pool = x509.NewCertPool()
+		t.Cleanup(func() { rootCAs = nil })
+	}
 	pool.AddCert(f.registry.Certificate())
 	pool.AddCert(f.cdn.Certificate())
 	rootCAs = pool
-	t.Cleanup(func() { rootCAs = nil })
 
 	return f
 }
@@ -100,6 +102,8 @@ func (f *fakeOCIRegistry) serveRegistry(w http.ResponseWriter, r *http.Request) 
 	}
 
 	switch r.URL.Path {
+	case "/v2/":
+		w.WriteHeader(http.StatusOK)
 	case "/v2/aquasec/trivy-db/manifests/2":
 		header := f.manifestDigest
 		if f.manifestHeader != "" {
@@ -142,7 +146,7 @@ func TestRegistryClient_GetManifest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, f.manifestDigest, digest)
 	require.Len(t, manifest.Layers, 1)
-	assert.Equal(t, dbLayerMediaType, manifest.Layers[0].MediaType)
+	assert.Equal(t, trivyDB.MediaType, manifest.Layers[0].MediaType)
 	assert.Equal(t, f.layerDigest, manifest.Layers[0].Digest)
 	assert.Equal(t, int64(len("db layer content")), manifest.Layers[0].Size)
 }
