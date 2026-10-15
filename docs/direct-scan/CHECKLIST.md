@@ -16,7 +16,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P1-2 Config struct and env parsing for all variables in DEMAND section 11
 - [x] P1-3 Duration parser with `d` support; unset or invalid check interval falls back to 3h with a WARN log
 - [x] P1-4 `SCANNER_DB_SOURCES` and `SCANNER_JAVA_DB_SOURCES` parser (ordered; route direct, HTTP proxy or SOCKS5), validation, redacted printing
-- [ ] P1-5 Unit tests for config
+- [x] P1-5 Unit tests for config
 
 ## Phase 2: DB pre-check module
 - [ ] P2-1 Route-aware dialer: direct, HTTP proxy (CONNECT), SOCKS5

@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 1
-- Last completed task: P1-4
+- Phase: 1 done; Phase 2 (DB pre-check module) next
+- Last completed task: P1-5
 - In progress: none
-- Next task: P1-5
-- Blockers / questions for the user: none
+- Next task: P2-1 (route-aware dialer: direct, HTTP proxy CONNECT, SOCKS5 via `golang.org/x/net/proxy`)
+- Blockers / questions for the user: none blocking. Open for later: should v2 refuse to start when `SCANNER_DB_SOURCES` is empty (P3-6)?
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -93,6 +93,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P1-5  Config unit tests
+- Status: done
+- What changed: no new code. The tests written with P1-1 to P1-4 already cover `pkg/v2/config` at 100% of statements: defaults, every env var, Mongo required only when enabled, bad bool and bad duration, `d` durations, fallback interval with WARN, source parsing, ordering, validation and redaction.
+- Files: `docs/direct-scan/CHECKLIST.md`, `docs/direct-scan/PROGRESS.md`
+- Tests run: `go test -short -cover ./pkg/v2/config/` -> ok, 100.0%; `make test` -> ok (all packages)
+- Decisions / surprises: Phase 1 exit met: config tests pass, and v2 disabled changes nothing (`main.go` is not touched yet).
+- Next: P2-1
 
 ### 2026-10-15  P1-4  DB sources parser
 - Status: done
