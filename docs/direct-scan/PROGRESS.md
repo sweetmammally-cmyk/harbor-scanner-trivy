@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 6 (registry client)
-- Last completed task: P6-2
+- Phase: 6 done; Phase 7 (scan runner) next
+- Last completed task: P6-3
 - In progress: none
-- Next task: P6-3 (remaining fake-registry tests: token expiry at the registry level, endless challenge, redirect, http WARN, redaction)
+- Next task: P7-1 (run Trivy on `registry/repository/name@digest` with DB updates disabled and JSON output; credentials via env, never argv; timeout and kill)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -165,6 +165,20 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P6-3  Registry client tests
+- Status: done (Phase 6 complete)
+- What changed: `pkg/v2/registry/auth_test.go` adds the remaining cases of the owner's list; the fake Harbor can now set `expires_in`. The other items were covered in P6-1 (index vs plain manifest, missing digest header, invalid names) and P6-2 (404, 401/403, timeouts).
+- Files: `pkg/v2/registry/auth_test.go`, `pkg/v2/registry/registry_test.go`
+- Tests run: `go test -short -race -count=3 -cover ./pkg/v2/...` -> ok (registry 95.2%, oci 91.2%, dbmgr 90.1%, config 98.9%); `make test` -> ok; `go test -tags=integration ./test/integration/...` -> ok. New cases:
+  - a token with `expires_in` 1 is reused within the second and fetched again after it;
+  - tokens Harbor stops accepting (a restart) are replaced;
+  - a registry that challenges forever gives `registry_auth_failed` after exactly `MaxChallenges+1` requests;
+  - a manifest redirect to another host resolves and that host receives no `Authorization`;
+  - `http://` gives exactly one WARN naming the host, https none;
+  - redaction: 500, 403, a hanging registry, a refused robot password and a missing tag. No error and no log line contains the password, a token, `Basic `, `Bearer ` or `Authorization`.
+- Decisions / surprises: none.
+- Next: P7-1
 
 ### 2026-10-15  P6-2  Registry error mapping and retry
 - Status: done

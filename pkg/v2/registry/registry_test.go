@@ -37,6 +37,8 @@ type fakeHarbor struct {
 	tokens    map[string]bool
 	// handle, when set, answers manifest requests instead of the normal logic.
 	handle http.HandlerFunc
+	// tokenLifetime is the expires_in of issued tokens, in seconds (1800 when 0).
+	tokenLifetime int
 
 	requests      atomic.Int32
 	tokenRequests atomic.Int32
@@ -66,8 +68,12 @@ func (f *fakeHarbor) serve(w http.ResponseWriter, r *http.Request) {
 		token := fmt.Sprintf("harbor-token-%d", f.tokenRequests.Load())
 		f.mu.Lock()
 		f.tokens[token] = true
+		lifetime := f.tokenLifetime
 		f.mu.Unlock()
-		_, _ = fmt.Fprintf(w, `{"token":%q,"expires_in":1800}`, token)
+		if lifetime == 0 {
+			lifetime = 1800
+		}
+		_, _ = fmt.Fprintf(w, `{"token":%q,"expires_in":%d}`, token, lifetime)
 		return
 	}
 
