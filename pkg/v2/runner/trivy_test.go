@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,11 +17,17 @@ import (
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
 
 // fakeTrivy is a stand-in for the trivy binary. TRIVY_FAKE_MODE picks what it
 // does; the TRIVY_FAKE_* variables pass Trivy's environment allowlist.
 const fakeTrivy = `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  [ "$TRIVY_FAKE_MODE" = "badversion" ] && { echo "boom" >&2; exit 1; }
+  printf 'Version: 0.71.2\nVulnerability DB:\n  Version: 2\n'
+  exit 0
+fi
 out=""
 cache=""
 prev=""
@@ -35,6 +42,7 @@ done
 [ -n "$TRIVY_FAKE_ENV_FILE" ] && env > "$TRIVY_FAKE_ENV_FILE"
 case "$TRIVY_FAKE_MODE" in
   ok) printf '{"SchemaVersion":2,"Results":[]}' > "$out" ;;
+  fixture) cat "$TRIVY_FAKE_FIXTURE" > "$out" ;;
   okslow) sleep 0.3; printf '%s' "$cache" > "$out" ;;
   slow)
     first=$(cat "$cache/db/trivy.db")
@@ -84,7 +92,7 @@ func newTestRunner(t *testing.T) (*Runner, string) {
 		ScanTimeout:      10 * time.Second,
 		ScanMaxOutput:    1 << 20,
 	}
-	return NewRunner(cfg, trivy, cacheDir, t.TempDir()), cacheDir
+	return NewRunner(cfg, trivy, cacheDir, t.TempDir(), store.NewMemoryPlatforms()), cacheDir
 }
 
 const reference = "harbor.local/project/app@sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -95,7 +103,7 @@ func TestRunTrivy_Success(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("TRIVY_FAKE_ARGS_FILE", argsFile)
 
-	output, db, err := r.runTrivy(context.Background(), "worker-1", reference)
+	output, db, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 	require.NoError(t, err)
 	data, err := os.ReadFile(output)
@@ -124,7 +132,7 @@ func TestRunTrivy_PlainHTTPRegistry(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("TRIVY_FAKE_ARGS_FILE", argsFile)
 
-	_, _, err := r.runTrivy(context.Background(), "worker-1", reference)
+	_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 	require.NoError(t, err)
 	args, err := os.ReadFile(argsFile)
@@ -147,7 +155,7 @@ func TestRunTrivy_Environment(t *testing.T) {
 	t.Setenv("TRIVY_PASSWORD", "stale")
 	t.Setenv("HTTPS_PROXY", "http://proxy:3128")
 
-	_, _, err := r.runTrivy(context.Background(), "worker-1", reference)
+	_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 	require.NoError(t, err)
 	envData, err := os.ReadFile(envFile)
@@ -178,7 +186,7 @@ func TestRunTrivy_Failures(t *testing.T) {
 		t.Setenv("TRIVY_FAKE_CHILD_PID", childFile)
 
 		start := time.Now()
-		_, _, err := r.runTrivy(context.Background(), "worker-1", reference)
+		_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 		assertClass(t, err, FailureTimeout)
 		assert.Less(t, time.Since(start), 3*time.Second)
@@ -195,7 +203,7 @@ func TestRunTrivy_Failures(t *testing.T) {
 		r, _ := newTestRunner(t)
 		t.Setenv("TRIVY_FAKE_MODE", "trivytimeout")
 
-		_, _, err := r.runTrivy(context.Background(), "worker-1", reference)
+		_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 		assertClass(t, err, FailureTimeout)
 	})
@@ -206,7 +214,7 @@ func TestRunTrivy_Failures(t *testing.T) {
 		t.Setenv("TRIVY_FAKE_MODE", "huge")
 		t.Setenv("TRIVY_FAKE_SIZE", "2000")
 
-		_, _, err := r.runTrivy(context.Background(), "worker-1", reference)
+		_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 		assertClass(t, err, FailureOutputTooLarge)
 		assert.Contains(t, err.Error(), "Trivy wrote 2000 bytes")
@@ -217,7 +225,7 @@ func TestRunTrivy_Failures(t *testing.T) {
 		r, _ := newTestRunner(t)
 		t.Setenv("TRIVY_FAKE_MODE", "exit")
 
-		_, _, err := r.runTrivy(context.Background(), "worker-1", reference)
+		_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 		assertClass(t, err, FailureExit)
 		assert.Contains(t, err.Error(), "exit status 2")
@@ -230,7 +238,7 @@ func TestRunTrivy_Failures(t *testing.T) {
 		r, _ := newTestRunner(t)
 		t.Setenv("TRIVY_FAKE_MODE", "java")
 
-		_, _, err := r.runTrivy(context.Background(), "worker-1", reference)
+		_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 		assertClass(t, err, FailureJavaDBMissing)
 		assert.Contains(t, err.Error(), "SCANNER_JAVA_DB_SOURCES")
@@ -243,7 +251,7 @@ func TestRunTrivy_Failures(t *testing.T) {
 		argsFile := filepath.Join(t.TempDir(), "args")
 		t.Setenv("TRIVY_FAKE_ARGS_FILE", argsFile)
 
-		_, _, err := r.runTrivy(context.Background(), "worker-1", reference)
+		_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 
 		assertClass(t, err, FailureDBMissing)
 		assert.NoFileExists(t, argsFile)
@@ -265,7 +273,7 @@ func TestRunTrivy_DBSwapDuringScan(t *testing.T) {
 	}
 	done := make(chan result)
 	go func() {
-		output, db, err := r.runTrivy(context.Background(), "worker-1", reference)
+		output, db, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
 		done <- result{output, db, err}
 	}()
 	require.Eventually(t, func() bool { _, err := os.Stat(started); return err == nil }, 5*time.Second, 10*time.Millisecond)
@@ -301,7 +309,7 @@ func TestRunTrivy_ConcurrentWorkers(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			outputs[i], _, errs[i] = r.runTrivy(context.Background(), "worker-"+strconv.Itoa(i), reference)
+			outputs[i], _, errs[i] = r.runTrivy(context.Background(), slog.Default(), "worker-"+strconv.Itoa(i), reference)
 		}()
 	}
 	wg.Wait()

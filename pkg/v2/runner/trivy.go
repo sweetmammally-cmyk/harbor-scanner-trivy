@@ -6,15 +6,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
 
 // Failure classes of a scan.
@@ -54,23 +57,31 @@ type Runner struct {
 	cacheDir  string
 	workDir   string
 	plainHTTP bool
+	platforms store.PlatformRepository
+
+	// version is Trivy's version from CheckTrivy; empty while Trivy is missing.
+	mu      sync.Mutex
+	version string
 }
 
-// NewRunner returns a runner for the Trivy binary at trivyPath.
-func NewRunner(cfg config.Config, trivyPath, cacheDir, workDir string) *Runner {
+// NewRunner returns a runner for the Trivy binary at trivyPath that records the
+// platforms it finds in platforms. Call CheckTrivy before scanning.
+func NewRunner(cfg config.Config, trivyPath, cacheDir, workDir string, platforms store.PlatformRepository) *Runner {
 	return &Runner{
 		cfg:       cfg,
 		trivy:     trivyPath,
 		cacheDir:  cacheDir,
 		workDir:   workDir,
 		plainHTTP: strings.HasPrefix(cfg.RegistryURL, "http://"),
+		platforms: platforms,
 	}
 }
 
 // runTrivy scans reference (host/repository/name@digest) with the worker's cache
 // directory and returns the path of Trivy's JSON output, which the caller must
 // remove, and the DB version used. The DB versions stay pinned during the run.
-func (r *Runner) runTrivy(ctx context.Context, worker, reference string) (string, DBInfo, error) {
+// It logs "triggering scan" with logger once the DB version is known.
+func (r *Runner) runTrivy(ctx context.Context, logger *slog.Logger, worker, reference string) (string, DBInfo, error) {
 	cacheDir := filepath.Join(r.workDir, worker)
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return "", DBInfo{}, fmt.Errorf("creating the worker cache directory: %w", err)
@@ -105,6 +116,7 @@ func (r *Runner) runTrivy(ctx context.Context, worker, reference string) (string
 		return "", DBInfo{}, &ScanError{Class: FailureDBMissing, Detail: err.Error()}
 	}
 	db := DBInfo{UpdatedAt: metadata.UpdatedAt, ManifestDigest: dbmgr.InstalledDigest(cacheDir, "db")}
+	logger.Info("triggering scan", slog.Time("db_updated_at", db.UpdatedAt), slog.String("db_manifest_digest", db.ManifestDigest))
 
 	// os.CreateTemp creates the file with mode 0600.
 	output, err := os.CreateTemp(cacheDir, "scan-*.json")

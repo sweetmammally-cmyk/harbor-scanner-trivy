@@ -39,9 +39,18 @@ type Scan struct {
 	State        string         `bson:"state"`
 	Trivy        TrivyInfo      `bson:"trivy"`
 
-	Platforms        []string       `bson:"platforms"`
-	HasMorePlatforms bool           `bson:"has_more_platforms"`
-	Summary          map[string]int `bson:"summary,omitempty"`
+	// Platforms are all result types found in the image. PlatformsFound and
+	// PlatformsNotFound split the requested ones (Options.Platforms) by whether the
+	// image has them: a requested platform that is not there is not a clean result.
+	Platforms         []string `bson:"platforms"`
+	PlatformsFound    []string `bson:"platforms_found,omitempty"`
+	PlatformsNotFound []string `bson:"platforms_not_found,omitempty"`
+	HasMorePlatforms  bool     `bson:"has_more_platforms"`
+	// Summary counts the findings of the requested platforms by lowercase severity.
+	Summary map[string]int `bson:"summary,omitempty"`
+	// Truncated is set when more findings were found than SCANNER_SCAN_MAX_FINDINGS;
+	// the summary counts stay complete.
+	Truncated bool `bson:"truncated,omitempty"`
 	// Report holds the stored findings; its shape is set by the scan runner (P7).
 	// It is empty when the report is too large and stored in GridFS instead.
 	Report         bson.M         `bson:"report,omitempty"`
@@ -57,6 +66,8 @@ type Scan struct {
 	Worker     string     `bson:"worker,omitempty"`
 	LeaseUntil *time.Time `bson:"lease_until,omitempty"`
 	Error      string     `bson:"error,omitempty"`
+	// FailureClass is set on a failed scan (for example trivy_timeout).
+	FailureClass string `bson:"failure_class,omitempty"`
 }
 
 // Image is the scanned image. Digest is the cache key.

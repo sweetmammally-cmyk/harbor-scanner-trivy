@@ -65,9 +65,9 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P7-1 Run Trivy (flags of DEMAND 6.2) on `registry/repository/name@digest`: env allowlist, credentials via `TRIVY_USERNAME`/`TRIVY_PASSWORD`; private 0600 output file; Trivy `--timeout` below `SCANNER_SCAN_TIMEOUT` plus a process-group kill; `SCANNER_SCAN_MAX_OUTPUT`; last 8 KiB of stderr, redacted; failure classes; per-worker cache dir with DB symlinks to the version directory, pinned while scanning
 - [x] P7-2 Stream-parse the output; validate platform and severity strings; keep the requested result types (case-insensitive) and severities
 - [x] P7-3 Summary counts for all severities of the requested result types
-- [~] P7-4 (discovery done; upsert into `platforms` comes with the scan orchestration in P7-5) Platform discovery from all result types; `platforms_requested`/`found`/`not_found`; upsert `platforms`; set `has_more_platforms`
-- [ ] P7-5 Stored finding shape (DEMAND 6.2), `SCANNER_SCAN_MAX_FINDINGS` with `truncated`; store inline or in GridFS
-- [ ] P7-6 Log "triggering scan" and "scan done" (no findings); store timings, Trivy version, DB version; `trivy --version` at startup, readiness false without the binary
+- [x] P7-4 Platform discovery from all result types; `platforms_requested`/`found`/`not_found`; upsert `platforms`; set `has_more_platforms`
+- [x] P7-5 Stored finding shape (DEMAND 6.2), `SCANNER_SCAN_MAX_FINDINGS` with `truncated`; store inline or in GridFS
+- [x] P7-6 Log "triggering scan" and "scan done" (no findings); store timings, Trivy version, DB version; `trivy --version` at startup, readiness false without the binary
 - [ ] P7-7 Tests: canned Trivy JSON fixtures; fake trivy executable (env allowlist without SCANNER_* secrets, timeout kill including children, huge output, exit codes, stderr redaction); DB swap during a scan; two concurrent Trivy processes; one manual real-image run (`manual` tag)
 
 ## Phase 8: Queue

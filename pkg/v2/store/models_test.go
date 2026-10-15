@@ -58,11 +58,14 @@ func TestScan_BSON(t *testing.T) {
 		State:        ScanDone,
 		Trivy:        TrivyInfo{Version: "0.74.0", DBUpdatedAt: at.Add(-time.Hour), DBManifestDigest: "sha256:db"},
 
-		Platforms:        []string{"npm"},
-		HasMorePlatforms: true,
-		Summary:          map[string]int{"critical": 1, "high": 2},
-		Report:           bson.M{"vulnerabilities": "stored by P7"},
-		ReportGridFSID:   &gridFSID,
+		Platforms:         []string{"npm", "debian"},
+		PlatformsFound:    []string{"npm"},
+		PlatformsNotFound: []string{"jar"},
+		HasMorePlatforms:  true,
+		Truncated:         true,
+		Summary:           map[string]int{"critical": 1, "high": 2},
+		Report:            bson.M{"vulnerabilities": "stored by P7"},
+		ReportGridFSID:    &gridFSID,
 
 		QueuedAt:    at,
 		StartedAt:   &started,
@@ -77,7 +80,7 @@ func TestScan_BSON(t *testing.T) {
 
 	t.Run("field names follow DEMAND section 10", func(t *testing.T) {
 		assert.Equal(t, sorted("_id", "request_id", "requested_at", "customer_ids", "customer_data", "image",
-			"options", "state", "trivy", "platforms", "has_more_platforms", "summary", "report", "report_gridfs_id",
+			"options", "state", "trivy", "platforms", "platforms_found", "platforms_not_found", "has_more_platforms", "truncated", "summary", "report", "report_gridfs_id",
 			"queued_at", "started_at", "finished_at", "queue_wait_ms", "scan_ms", "total_ms", "worker", "lease_until"),
 			keysOf(t, done))
 		assert.Equal(t, sorted("repository", "name", "tag", "digest", "media_type"), keysOf(t, done.Image))

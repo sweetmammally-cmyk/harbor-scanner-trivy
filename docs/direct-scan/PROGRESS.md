@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 7 (scan runner)
-- Last completed task: P7-3
-- In progress: P7-4 (`[~]`): platform discovery is done; the upsert into `platforms` is part of the scan orchestration
-- Next task: P7-5 (scan orchestration: run, parse, upsert platforms, report inline or GridFS), then P7-6, P7-7
+- Last completed task: P7-6
+- In progress: none
+- Next task: P7-7 (one manual real-image run under the `manual` tag; check the test list)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -174,6 +174,30 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P7-4, P7-5, P7-6  Scan orchestration
+- Status: done
+- What changed: `pkg/v2/runner/scan.go`:
+  - `Runner.Scan(ctx, worker, scan, reference)`:
+    1. Runs Trivy (`runTrivy`, which now logs "triggering scan" with scan_id, digest, customer_ids, platforms, severities, trivy_version, db_updated_at and db_manifest_digest once the DB version is pinned).
+    2. Parses and removes the output.
+    3. Records every image type with `PlatformRepository.Seen` (a failure there is logged, the scan goes on).
+    4. Fills `Trivy` (version, DB UpdatedAt, manifest digest), `Platforms`, `PlatformsFound`, `PlatformsNotFound`, `HasMorePlatforms`, `Summary`, `Truncated` and `ScanMS`.
+    5. Returns the report `{"findings": [...]}` for `store.SaveWithReport`.
+    6. Logs "scan done" (scan, trivy and parse ms, summary, findings stored, truncated, platforms found / not found; never the findings) or WARN "scan failed" with the failure class.
+  - `CheckTrivy` runs `trivy --version` (30s limit, same env allowlist) and keeps the version; `Version()` and `Ready()` (false while Trivy is missing or failing).
+  - `NewRunner` takes the `PlatformRepository`. `store.Scan` has `platforms_found`, `platforms_not_found`, `truncated` and `failure_class`.
+  - The queue sets the state and the other timings (P8).
+- Files: `pkg/v2/runner/scan.go`, `pkg/v2/runner/scan_test.go`, `pkg/v2/runner/trivy.go`, `pkg/v2/runner/trivy_test.go`, `pkg/v2/store/models.go`, `pkg/v2/store/models_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/...` -> ok; `make test` -> ok; integration `./test/integration/store/` -> ok. The fake trivy answers `--version` and can replay the fixture.
+  - Scan on the fixture: Trivy and DB info, platforms (npm requested and not in the image goes to `platforms_not_found`), summary, 3 findings, all 3 image types recorded with the digest, no output file left.
+  - Logs: the exact "triggering scan" fields, "scan done", no finding id, no password.
+  - The report through `SaveWithReport`: inline with the default limit, GridFS with a limit of 100, loaded back with the finding field names.
+  - A Trivy failure: classified, WARN "scan failed", nothing recorded.
+  - Invalid output: classified, file removed.
+  - `CheckTrivy`: version found, version command failing, binary missing.
+- Decisions / surprises: one commit for P7-4 (upsert), P7-5 and P7-6, because they are one function.
+- Next: P7-7
 
 ### 2026-10-15  P7-2, P7-3 (and the discovery part of P7-4)  Parsing Trivy output
 - Status: done (P7-4 partial: the upsert into `platforms` comes with P7-5)
