@@ -38,9 +38,10 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P3-7 Java DB through the same flow
 - [x] P3-8 Parse `metadata.json` (UpdatedAt, NextUpdate, Version, DownloadedAt)
 - [x] P3-9 Tests with a fake registry: success, wrong digest, truncated, hang mid-download, fallback to second source, all sources fail; plus a manual download of the real ghcr.io DB (about 70 MB) with duration, size and result recorded in PROGRESS
+- [ ] P3-10 Free disk space check before each download (layer size plus estimated extracted size plus margin); class `disk_space`, next source; test with a fake free-space function; `SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT` (45m) for the Java DB
 
 ## Phase 4: Updater and freshness
-- [ ] P4-1 Interval loop, first run at startup, single-flight; skip the Java DB when `SCANNER_JAVA_DB_SOURCES` is empty; `SCANNER_DB_RETRY_INTERVAL` while degraded (default to be decided by the owner)
+- [ ] P4-1 Interval loop, first run at startup, single-flight; skip the Java DB when `SCANNER_JAVA_DB_SOURCES` is empty; `SCANNER_DB_RETRY_INTERVAL` (15m) while degraded, back to the check interval after a success
 - [ ] P4-2 State behind an interface: last_upstream_check_at, last_confirmed_current_at, newer_available (kept when no source answered), mode, active source (in-memory first)
 - [ ] P4-3 (pure `Freshness` function already done in the P3-6 follow-up; wire it to the state) Freshness `ok|stale` from `last_confirmed_current_at` versus `max_db_age`; always `stale` while `newer_available`
 - [ ] P4-4 On-demand bounded refresh when a request's `max_db_age` is exceeded

@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 3 done; Phase 4 (updater and freshness) next
+- Phase: 3 (P3-10 added), then Phase 4
 - Last completed task: P3-9
 - In progress: none
-- Next task: P4-1 (interval loop, first run at startup, single-flight; seed install at startup; skip the Java DB without sources; `SCANNER_DB_RETRY_INTERVAL` while degraded once the owner gives its default)
-- Blockers / questions for the user: (1) default for `SCANNER_DB_RETRY_INTERVAL` (needed in P4-1); (2) the Java DB is 938 MiB compressed: is the 15m download cap right for it, or should the Java DB get its own cap?
+- Next task: P3-10 (Java DB download cap, disk space check), then P4-1
+- Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -64,6 +64,11 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, sixth round): DEMAND v0.8, 7.2, 7.3 and 11.
+  - `SCANNER_DB_RETRY_INTERVAL`, default 15m, used while degraded; back to `SCANNER_DB_CHECK_INTERVAL` after a success.
+  - `SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT`, default 45m, for the Java DB; the Trivy DB keeps `SCANNER_DB_DOWNLOAD_TIMEOUT` (15m); the 30s stall timeout applies to both. Empty `SCANNER_JAVA_DB_SOURCES` means no Java DB is downloaded.
+  - Free disk space check before each download, class `disk_space`, next source (task P3-10). Formula: layer size plus layer size times the extract ratio (13 for the Trivy DB, 2 for the Java DB, from the measured 12.1 and 1.6) plus 10%. The download streams into extraction, so the compressed size is never on disk; it is kept in the formula as headroom, as the owner asked.
+- Disk sizing notes for P11-4 (Dockerfile, volume, README): the Trivy DB needs about 5 GB in the cache volume (current 1.62 GB, previous 1.62 GB, one download in progress 1.62 GB, plus headroom); the Java DB about 3x 1.55 GB more when enabled; the seed DB adds 1.6 GB to the image (plus 1.55 GB if a Java seed is baked in).
 - 2026-10-15 (owner, fifth round): a source offered a different digest but nothing could be installed (DEMAND v0.7, 5.4, 7.2, 7.4).
   - Mode `degraded` (so the retry interval applies) and ONE ERROR "newer DB available but could not be installed" with each source's failure class. Replaces the WARN from P3-6.
   - Two timestamps: `last_upstream_check_at` (any source answered, diagnostic only) and `last_confirmed_current_at` (installed digest equals upstream, or just installed). Freshness (P4-3) uses `last_confirmed_current_at`.

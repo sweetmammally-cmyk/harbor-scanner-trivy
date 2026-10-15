@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.7 (newer-but-not-installed handling, two check timestamps, 2026-10-15)
+Status: DRAFT v0.8 (retry interval, Java DB download cap, disk space check, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -179,7 +179,7 @@ Notes:
 - `SCANNER_DB_CHECK_INTERVAL` (e.g. `1h`, `3h`, `1d`). The `d` suffix must be supported.
 - If unset or invalid, the **fallback interval is 3h** and a WARN log says "using fallback interval".
 - Each tick: cheap upstream check first (compare the upstream OCI manifest digest with the stored one). Download only if different.
-- While the mode is `degraded`, `SCANNER_DB_RETRY_INTERVAL` applies instead of the check interval (its default is still to be decided; see P4-1).
+- While the mode is `degraded`, `SCANNER_DB_RETRY_INTERVAL` (default `15m`) applies instead of the check interval. After a successful run the check interval applies again.
 
 ### 7.3 Pre-checks before any download (and before the upstream check)
 
@@ -210,7 +210,9 @@ If all stages pass, download with two limits:
 - Stall timeout (`SCANNER_DB_DOWNLOAD_STALL_TIMEOUT`, default 30s): abort if no bytes arrive for that long.
 - Overall cap per source (`SCANNER_DB_DOWNLOAD_TIMEOUT`, default 15m): a safety net only, because the pre-check has already proven the path works.
 
-On either limit the download is aborted and the next source is tried.
+On either limit the download is aborted and the next source is tried. The Java DB has its own cap (`SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT`, default 45m) because its layer is about 7 times larger; the stall timeout is the same for both.
+
+Before each download, free disk space in the cache directory is checked: the layer size from the manifest plus the estimated extracted size (layer size times 13 for the Trivy DB, times 2 for the Java DB, from measured ratios of 12.1 and 1.6), plus a 10% margin. If there is not enough, the source fails with class `disk_space` without starting the download, and the next source is tried.
 
 If a stage fails: log the failure with the stage and timings, store it, move to the next configured fallback source. Authorization headers and tokens never appear in logs.
 
@@ -295,11 +297,13 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 | `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret) |
 | `SCANNER_DB_CHECK_INTERVAL` | `1h`, `3h`, `1d`... fallback `3h` |
 | `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Example: `mirror.local/aquasec/trivy-db:2\|direct\|allow-http1,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
-| `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB |
+| `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB. Empty means no Java DB is downloaded |
 | `SCANNER_PRECHECK_TIMEOUT_DNS`, `_CONNECT`, `_TLS`, `_HTTP`, `_MANIFEST`, `_TOTAL` | Pre-check timeouts per stage and overall. Defaults 5s, 5s, 5s, 10s, 10s, 30s |
 | `SCANNER_DB_SEED_DIR`, `SCANNER_JAVA_DB_SEED_DIR` | Seed DB baked into the image, installed when no DB exists yet (with no digest, so the first update downloads). Defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing directory means no seed; the service is then not ready until the first download succeeds |
 | `SCANNER_DB_DOWNLOAD_STALL_TIMEOUT` | Abort a download when no bytes arrive for this long. Default 30s |
-| `SCANNER_DB_DOWNLOAD_TIMEOUT` | Overall cap per source per download (safety net). Default 15m |
+| `SCANNER_DB_DOWNLOAD_TIMEOUT` | Overall cap per source per download of the Trivy DB (safety net). Default 15m |
+| `SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT` | Same for the Java DB. Default 45m |
+| `SCANNER_DB_RETRY_INTERVAL` | Check interval while the mode is `degraded`. Default 15m |
 | `SCANNER_DB_AGE_WARN` | Log a WARN after a check when the installed DB's `UpdatedAt` is older than this. Visibility only. Default `7d` (the `d` suffix is supported) |
 | `SCANNER_DB_MAX_AGE_DEFAULT` | Default for `max_db_age`. Default 6h |
 | `SCANNER_QUEUE_WORKERS`, `SCANNER_QUEUE_MAX_LENGTH` | Queue settings. Defaults 1 and 100 |
