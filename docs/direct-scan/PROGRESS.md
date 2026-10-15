@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 5 (MongoDB data plane)
-- Last completed task: P5-3
+- Last completed task: P5-4
 - In progress: none
-- Next task: P5-4 (repositories behind interfaces, with fakes), then P5-5
+- Next task: P5-5 (GridFS for reports above the size threshold)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -155,6 +155,21 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-4  Repositories, fakes and contract tests
+- Status: done
+- What changed:
+  - `pkg/v2/store/repository.go`: interfaces and the sentinel errors `ErrNotFound` and `ErrDuplicateRequestID`.
+    - `ScanRepository`: `Create`, `Get`, `GetByRequestID`, `LastDone(digest)` (newest finished `done` scan, for the cache).
+    - `PlatformRepository`: `Seen(types, digest, at)`, an upsert with `$setOnInsert` for first_seen_at and example_digest, `$set` last_seen_at and `$inc` seen_count, repeated once on a duplicate key from a concurrent insert; plus `List`.
+    - `DBCheckRepository`: `Add`, `Recent(db, limit)`, newest first.
+  - `repositories_mongo.go`: the MongoDB implementations; every call uses the operation deadline. A duplicate key is `ErrDuplicateRequestID` only when it comes from `request_id_unique`.
+  - `memory.go`: in-memory fakes with the same behaviour, for the unit tests of later phases.
+  - `storetest/storetest.go`: contract tests run against both (memory in `memory_test.go`, MongoDB in `test/integration/store/repositories_test.go`).
+- Files: `pkg/v2/store/repository.go`, `pkg/v2/store/repositories_mongo.go`, `pkg/v2/store/memory.go`, `pkg/v2/store/memory_test.go`, `pkg/v2/store/storetest/storetest.go`, `test/integration/store/repositories_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/...` -> ok; `make test` -> ok; integration against `mongo:7` -> ok. Contract cases: create and get (also by request id), not found for all three reads, unique `request_id` with scans without one not colliding, the same scan id twice is an error but not `ErrDuplicateRequestID`, `LastDone` ignores failed, queued and other digests; platform first sighting creates and later sightings count with first_seen and example digest kept; empty list; DB checks per DB, newest first, limited, durations kept. MongoDB only: 10 concurrent first sightings of one platform give `seen_count` 10 and no errors.
+- Decisions / surprises: only the operations needed so far; queue claim and lease come in P8, list and filter queries in P9-5, the DB state store in P5-6.
+- Next: P5-5
 
 ### 2026-10-15  P5-3  Schema setup and indexes
 - Status: done
