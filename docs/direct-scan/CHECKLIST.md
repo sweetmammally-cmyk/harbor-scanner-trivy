@@ -42,7 +42,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 ## Phase 4: Updater and freshness
 - [ ] P4-1 Interval loop, first run at startup, single-flight; `SCANNER_DB_RETRY_INTERVAL` while degraded (default to be decided by the owner)
 - [ ] P4-2 State behind an interface: last_upstream_check_at, last_confirmed_current_at, newer_available (kept when no source answered), mode, active source (in-memory first)
-- [ ] P4-3 Freshness `ok|stale` from `last_confirmed_current_at` versus `max_db_age`; always `stale` while `newer_available`
+- [ ] P4-3 (pure `Freshness` function already done in the P3-6 follow-up; wire it to the state) Freshness `ok|stale` from `last_confirmed_current_at` versus `max_db_age`; always `stale` while `newer_available`
 - [ ] P4-4 On-demand bounded refresh when a request's `max_db_age` is exceeded
 - [ ] P4-5 Fake-clock tests (including the 3h fallback)
 

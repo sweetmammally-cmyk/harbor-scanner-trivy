@@ -77,6 +77,8 @@ func TestUpdate(t *testing.T) {
 		require.Len(t, again.Sources, 1, "the loop stops when the digest is unchanged")
 		assert.True(t, again.Sources[0].Answered)
 		assert.Equal(t, f.manifestDigest, again.ManifestDigest)
+		assert.False(t, again.ConfirmedCurrentAt.IsZero(), "same digest confirms the DB is current")
+		assert.False(t, again.NewerAvailable)
 	})
 
 	t.Run("failed pre-check falls back to the next source", func(t *testing.T) {
@@ -135,6 +137,8 @@ func TestUpdate(t *testing.T) {
 		assert.False(t, result.Installed)
 		assert.Empty(t, result.ActiveSource)
 		assert.True(t, result.UpstreamCheckedAt.IsZero())
+		assert.True(t, result.ConfirmedCurrentAt.IsZero())
+		assert.False(t, result.NewerAvailable, "says nothing; the stored flag is kept")
 		assert.Equal(t, []string{"tcp_refused", "tcp_refused"}, sourceClasses(result))
 		assert.Equal(t, f.manifestDigest, result.ManifestDigest, "the old DB stays active")
 		assert.Equal(t, "db v1", readDB(t, cacheDir))
@@ -144,18 +148,43 @@ func TestUpdate(t *testing.T) {
 		assert.Contains(t, logs.String(), sources[0].String()+": tcp_refused; "+sources[1].String()+": tcp_refused")
 	})
 
-	t.Run("newer DB found but not installed is a WARN, not degraded", func(t *testing.T) {
+	t.Run("newer DB offered but nothing installed: degraded and stale until a later success", func(t *testing.T) {
 		cacheDir := t.TempDir()
-		broken := startFakeOCIRegistry(t, dbLayer(t, "db", now))
-		serveBlob(broken, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("not the layer")) })
+		good := startFakeOCIRegistry(t, dbLayer(t, "db v1", now))
+		first := update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{good.source(t, "direct")})
+		require.True(t, first.Installed)
+		assert.Equal(t, FreshnessOK, Freshness(first.NewerAvailable, first.ConfirmedCurrentAt, time.Hour, time.Now()))
+
+		brokenA := startFakeOCIRegistry(t, dbLayer(t, "db v2", now))
+		serveBlob(brokenA, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("not the layer")) })
+		brokenB := startFakeOCIRegistry(t, dbLayer(t, "db v2b", now))
+		serveBlob(brokenB, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) })
 		logs := captureLogs(t)
 
-		result := update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{broken.source(t, "direct")})
+		failed := update(testContext(t), updateConfig, cacheDir, trivyDB,
+			[]config.DBSource{brokenA.source(t, "direct"), brokenB.source(t, "direct")})
 
-		assert.Equal(t, ModeNormal, result.Mode, "a source answered")
-		assert.False(t, result.Installed)
-		assert.Contains(t, logs.String(), "a newer DB was found but could not be installed")
-		assert.NotContains(t, logs.String(), `"level":"ERROR"`)
+		assert.Equal(t, ModeDegraded, failed.Mode)
+		assert.True(t, failed.NewerAvailable)
+		assert.False(t, failed.Installed)
+		assert.False(t, failed.UpstreamCheckedAt.IsZero(), "sources answered, so last_upstream_check_at is set")
+		assert.True(t, failed.ConfirmedCurrentAt.IsZero(), "nothing was confirmed current")
+		assert.Equal(t, []string{"download_error", "download_error"}, sourceClasses(failed))
+		assert.Equal(t, "db v1", readDB(t, cacheDir), "scans keep the old DB")
+		assert.Equal(t, 1, strings.Count(logs.String(), `"level":"ERROR"`))
+		assert.Contains(t, logs.String(), `"msg":"newer DB available but could not be installed"`)
+		assert.Contains(t, logs.String(), brokenA.source(t, "direct").String()+": download_error; "+brokenB.source(t, "direct").String()+": download_error")
+		assert.NotContains(t, logs.String(), "all DB sources failed")
+
+		// Stale while the flag is set, even when the last confirmation is recent.
+		assert.Equal(t, FreshnessStale, Freshness(failed.NewerAvailable, first.ConfirmedCurrentAt, 24*time.Hour, time.Now()))
+
+		fixed := update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{brokenA.source(t, "direct"), good.source(t, "direct")})
+
+		assert.Equal(t, ModeNormal, fixed.Mode)
+		assert.False(t, fixed.NewerAvailable, "cleared by the confirmed-current check")
+		assert.False(t, fixed.ConfirmedCurrentAt.IsZero())
+		assert.Equal(t, FreshnessOK, Freshness(fixed.NewerAvailable, fixed.ConfirmedCurrentAt, time.Hour, time.Now()))
 	})
 
 	t.Run("DB without UpdatedAt or with the wrong layer type is not installed", func(t *testing.T) {

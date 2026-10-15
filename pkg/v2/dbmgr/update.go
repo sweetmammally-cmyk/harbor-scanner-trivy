@@ -48,15 +48,26 @@ type SourceResult struct {
 
 // UpdateResult is the outcome of one update run, for the DB state and the API.
 type UpdateResult struct {
-	// Mode is degraded when no source answered.
+	// Mode is degraded when no source answered, or when a newer DB was offered
+	// but none could be installed.
 	Mode string `json:"mode"`
 	// ActiveSource is the last source that answered, "" when none did.
 	ActiveSource string `json:"active_source,omitempty"`
 	// ManifestDigest is the digest of the active DB after the run.
 	ManifestDigest string `json:"manifest_digest,omitempty"`
 	Installed      bool   `json:"installed"`
-	// UpstreamCheckedAt is when a source last answered in this run; zero when none did.
-	UpstreamCheckedAt time.Time `json:"upstream_checked_at"`
+	// UpstreamCheckedAt (last_upstream_check_at) is when a source last answered
+	// in this run; zero when none did. Diagnostic only.
+	UpstreamCheckedAt time.Time `json:"last_upstream_check_at"`
+	// ConfirmedCurrentAt (last_confirmed_current_at) is set when the installed
+	// digest equalled the answering source's digest, or a new DB was installed.
+	// Zero otherwise. Freshness is computed from it.
+	ConfirmedCurrentAt time.Time `json:"last_confirmed_current_at"`
+	// NewerAvailable is true when a source offered a different DB and none could
+	// be installed. It is false when this run installed or confirmed the DB.
+	// When no source answered (UpstreamCheckedAt is zero) it says nothing, and
+	// the stored flag must be kept.
+	NewerAvailable bool `json:"newer_available"`
 	// Metadata is the metadata.json of the active DB after the run; zero when there is none.
 	Metadata Metadata       `json:"metadata"`
 	Sources  []SourceResult `json:"sources"`
@@ -71,7 +82,7 @@ type UpdateResult struct {
 func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind, sources []config.DBSource) UpdateResult {
 	logger := slog.With(slog.String("db", kind.Name))
 	installed := installedDigest(cacheDir, kind.Name)
-	result := UpdateResult{Mode: ModeDegraded}
+	var result UpdateResult
 
 	// newerNotInstalled is set when a source offered a different DB that could not be installed.
 	newerNotInstalled := false
@@ -109,7 +120,6 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 
 		sourceResult.Answered = true
 		sourceResult.ManifestDigest = digest
-		result.Mode = ModeNormal
 		result.ActiveSource = sourceResult.Source
 		result.UpstreamCheckedAt = time.Now()
 		logger.Info("DB source selected", slog.String("source", sourceResult.Source),
@@ -117,6 +127,7 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 
 		if !changed {
 			result.ManifestDigest = digest
+			result.ConfirmedCurrentAt = time.Now()
 			newerNotInstalled = false
 			result.Sources = append(result.Sources, sourceResult)
 			logger.Info("DB is up to date", slog.String("source", sourceResult.Source))
@@ -162,6 +173,7 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 		sourceResult.Installed = true
 		result.Installed = true
 		result.ManifestDigest = digest
+		result.ConfirmedCurrentAt = time.Now()
 		newerNotInstalled = false
 		result.Sources = append(result.Sources, sourceResult)
 		logger.Info("DB installed", slog.String("source", sourceResult.Source),
@@ -173,18 +185,28 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 		result.ManifestDigest = installedDigest(cacheDir, kind.Name)
 	}
 
-	if result.Mode == ModeDegraded {
-		var failures []string
-		for _, sourceResult := range result.Sources {
+	var failures []string
+	for _, sourceResult := range result.Sources {
+		if sourceResult.FailureClass != "" {
 			failures = append(failures, sourceResult.Source+": "+sourceResult.FailureClass)
 		}
+	}
+	switch {
+	case result.UpstreamCheckedAt.IsZero():
+		result.Mode = ModeDegraded
 		logger.Error("all DB sources failed, scanning with existing DB",
 			slog.Bool("db_present", dbPresent(cacheDir, kind.Name, kind.Files[0])),
 			slog.String("failures", strings.Join(failures, "; ")),
 		)
-	} else if newerNotInstalled {
-		logger.Warn("a newer DB was found but could not be installed, scanning with existing DB",
-			slog.String("active_source", result.ActiveSource))
+	case newerNotInstalled:
+		result.Mode = ModeDegraded
+		result.NewerAvailable = true
+		logger.Error("newer DB available but could not be installed",
+			slog.String("active_source", result.ActiveSource),
+			slog.String("failures", strings.Join(failures, "; ")),
+		)
+	default:
+		result.Mode = ModeNormal
 	}
 
 	// DB age is for visibility only; it never blocks an install.

@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 3 (DB download module)
 - Last completed task: P3-6
 - In progress: none
-- Next task: P3-6 follow-up (degraded when a newer DB could not be installed, two timestamps, `newer_available`), then the real ghcr.io download (P3-9), then P3-7 and the rest of P3-9
+- Next task: real ghcr.io download (P3-9 manual part), then P3-7 and the rest of P3-9
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -122,6 +122,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-6  Follow-up: newer DB not installed, two timestamps, newer_available
+- Status: done
+- What changed: in `update`, the mode is decided after the loop. No source answered: `degraded` with the "all DB sources failed" ERROR. A source offered a different digest but nothing was installed: `degraded`, `NewerAvailable` true, ONE ERROR "newer DB available but could not be installed" listing each failed source's class (replaces the WARN). Otherwise `normal`. `UpdateResult` now has `UpstreamCheckedAt` (`last_upstream_check_at`), `ConfirmedCurrentAt` (`last_confirmed_current_at`, set on an equal digest or after an install) and `NewerAvailable` (false after an install or confirmation; meaningless when no source answered, so the state must keep the stored flag). New `Freshness(newerAvailable, confirmedCurrentAt, maxAge, now)`: `stale` while newer is available or when never confirmed, otherwise compared with `maxAge`.
+- Files: `pkg/v2/dbmgr/update.go`, `pkg/v2/dbmgr/update_test.go`, `pkg/v2/dbmgr/freshness.go`, `pkg/v2/dbmgr/freshness_test.go`
+- Tests run: `go test -short -race -count=5 ./pkg/v2/...` -> ok; `make test` -> ok. New test: install v1 (ok), then two sources offer v2 and both downloads fail (degraded, flag set, `last_upstream_check_at` set, `last_confirmed_current_at` zero, old DB kept, exactly one ERROR naming both classes, freshness `stale` even with a recent confirmation and a 24h max age), then a later run confirms v1 from a good source (normal, flag cleared, freshness `ok`). Freshness unit tests. The existing cases also check the two timestamps.
+- Decisions / surprises: the old "newer found is a WARN, not degraded" test was replaced, because the owner's decision changed the behaviour. The pure `Freshness` function is done early; P4-3 only has to wire it to the stored state.
+- Next: real ghcr.io download (P3-9)
 
 ### 2026-10-15  P3-6  Source update loop
 - Status: done
