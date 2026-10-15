@@ -15,6 +15,8 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	OnDemandRefreshWait:     60 * time.Second,
+	OnDemandRefreshMinGap:   60 * time.Second,
 	DBRetryInterval:         15 * time.Minute,
 	DBAgeWarn:               7 * 24 * time.Hour,
 	DBSeedDir:               "/home/scanner/seed/db",
@@ -157,6 +159,8 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT":  "30m",
 				"SCANNER_DB_MAX_AGE_DEFAULT":        "3h",
 				"SCANNER_DB_AGE_WARN":               "2d",
+				"SCANNER_ONDEMAND_REFRESH_WAIT":     "30s",
+				"SCANNER_ONDEMAND_REFRESH_MIN_GAP":  "2m",
 				"SCANNER_QUEUE_WORKERS":             "4",
 				"SCANNER_QUEUE_MAX_LENGTH":          "50",
 				"SCANNER_SCAN_TIMEOUT":              "20m",
@@ -191,6 +195,8 @@ func TestGetConfig(t *testing.T) {
 				JavaDBDownloadTimeout:   30 * time.Minute,
 				DBMaxAgeDefault:         3 * time.Hour,
 				DBAgeWarn:               48 * time.Hour,
+				OnDemandRefreshWait:     30 * time.Second,
+				OnDemandRefreshMinGap:   2 * time.Minute,
 				QueueWorkers:            4,
 				QueueMaxLength:          50,
 				ScanTimeout:             20 * time.Minute,

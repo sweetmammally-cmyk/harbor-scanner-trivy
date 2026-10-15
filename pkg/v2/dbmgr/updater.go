@@ -31,9 +31,13 @@ type Updater struct {
 	cfg      config.Config
 	cacheDir string
 	store    StateStore
+	// now is the clock. Tests replace it.
+	now func() time.Time
 
 	mu      sync.Mutex
 	running *updateRun
+	// lastFinished is when the last update run finished, for the on-demand min gap.
+	lastFinished time.Time
 }
 
 type updateRun struct {
@@ -45,7 +49,7 @@ type updateRun struct {
 // run it saves the state of each DB in store. ctx is the service lifetime: when it
 // ends, Run returns and runs stop.
 func NewUpdater(ctx context.Context, cfg config.Config, cacheDir string, store StateStore) *Updater {
-	return &Updater{ctx: ctx, cfg: cfg, cacheDir: cacheDir, store: store}
+	return &Updater{ctx: ctx, cfg: cfg, cacheDir: cacheDir, store: store, now: time.Now}
 }
 
 // Run installs the seed DBs when no DB exists yet, updates at once, and then
@@ -109,8 +113,48 @@ func (u *Updater) runOnce(run *updateRun) {
 
 	u.mu.Lock()
 	u.running = nil
+	u.lastFinished = u.now()
 	u.mu.Unlock()
 	close(run.done)
+}
+
+// RefreshForScan is called by the scan worker before a scan (DEMAND section 7.4).
+// It returns the Trivy DB state and its freshness for the request's maxAge
+// (max_db_age). When the DB is stale for maxAge, it joins or starts an update run
+// and waits at most SCANNER_ONDEMAND_REFRESH_WAIT; on timeout the scan goes on with
+// the current DB and the run continues in the background. No run is started while
+// the mode is degraded (the retry interval governs), or when a run finished within
+// SCANNER_ONDEMAND_REFRESH_MIN_GAP (its result is reused).
+func (u *Updater) RefreshForScan(ctx context.Context, maxAge time.Duration) (DBState, string, error) {
+	state, err := u.store.Get(ctx, trivyDB.Name)
+	if err != nil {
+		return DBState{}, FreshnessStale, err
+	}
+	freshness := state.Freshness(maxAge, u.now())
+	if freshness == FreshnessOK || state.Mode == ModeDegraded {
+		return state, freshness, nil
+	}
+
+	u.mu.Lock()
+	recentRun := !u.lastFinished.IsZero() && u.now().Sub(u.lastFinished) < u.cfg.OnDemandRefreshMinGap
+	u.mu.Unlock()
+	if recentRun {
+		return state, freshness, nil
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, u.cfg.OnDemandRefreshWait)
+	defer cancel()
+	if _, err = u.UpdateNow(waitCtx); err != nil {
+		slog.Warn("on-demand DB refresh did not finish in time, scanning with the current DB",
+			slog.String("wait", u.cfg.OnDemandRefreshWait.String()))
+		return state, freshness, nil
+	}
+
+	state, err = u.store.Get(ctx, trivyDB.Name)
+	if err != nil {
+		return DBState{}, FreshnessStale, err
+	}
+	return state, state.Freshness(maxAge, u.now()), nil
 }
 
 // saveState applies an update result to the stored state of a DB.

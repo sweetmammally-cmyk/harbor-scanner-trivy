@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 4 (updater and freshness)
-- Last completed task: P4-3
+- Last completed task: P4-4
 - In progress: none
-- Next task: P4-4 (on-demand refresh for the scan worker), then P4-5
+- Next task: P4-5 (fake-clock tests, including the 3h fallback)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -137,6 +137,18 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P4-4  On-demand refresh
+- Status: done
+- What changed: `Updater.RefreshForScan(ctx, maxAge)` returns the Trivy DB state and its freshness for the request:
+  - fresh for `maxAge`, or mode `degraded`: returns at once, no run;
+  - a run finished within `SCANNER_ONDEMAND_REFRESH_MIN_GAP`: returns the current state, no new run;
+  - otherwise `UpdateNow` with a `SCANNER_ONDEMAND_REFRESH_WAIT` wait limit, then rereads the state; on timeout it logs a WARN and returns the old state (`stale`) while the run goes on.
+  - `Updater` now records `lastFinished` per run and has a `now` clock field (`time.Now`, replaceable by tests). New config `OnDemandRefreshWait` and `OnDemandRefreshMinGap` (60s each).
+- Files: `pkg/v2/dbmgr/updater.go`, `pkg/v2/dbmgr/refresh_test.go`, `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`
+- Tests run: `go test -short -race -count=5 -run TestUpdater_RefreshForScan` -> ok; `go test -short -race ./pkg/v2/...` -> ok; config 100%. Cases: fresh (no run), stale (run, then `ok` with a new confirmation), degraded (no run, `stale`), run within the min gap reused (no run, `stale`), slow refresh (returns `stale` in under 250ms with a 50ms wait, the install finishes in the background and the state becomes `ok`), store error returned.
+- Decisions / surprises: the scan worker (P8-2) calls `RefreshForScan`; it is not called from any HTTP handler. Only the Trivy DB's state decides freshness (the `db` block of responses is about the Trivy DB); a refresh run updates both DBs.
+- Next: P4-5
 
 ### 2026-10-15  P4-3  Freshness and DB age from the stored state
 - Status: done

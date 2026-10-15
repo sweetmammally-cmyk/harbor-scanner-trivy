@@ -51,6 +51,9 @@ type Config struct {
 	DBDownloadTimeout      time.Duration `env:"SCANNER_DB_DOWNLOAD_TIMEOUT" envDefault:"15m"`
 	JavaDBDownloadTimeout  time.Duration `env:"SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT" envDefault:"45m"`
 	DBMaxAgeDefault        time.Duration `env:"SCANNER_DB_MAX_AGE_DEFAULT" envDefault:"6h"`
+	// On-demand refresh before a scan (DEMAND section 7.4).
+	OnDemandRefreshWait   time.Duration `env:"SCANNER_ONDEMAND_REFRESH_WAIT" envDefault:"60s"`
+	OnDemandRefreshMinGap time.Duration `env:"SCANNER_ONDEMAND_REFRESH_MIN_GAP" envDefault:"60s"`
 	// DBAgeWarn is read from SCANNER_DB_AGE_WARN by GetConfig, because it accepts days ("7d").
 	DBAgeWarn time.Duration
 
