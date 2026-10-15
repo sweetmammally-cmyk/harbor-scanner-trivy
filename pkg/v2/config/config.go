@@ -29,9 +29,10 @@ type Config struct {
 	// because it accepts days ("1d") and falls back to 3h when unset or invalid.
 	DBCheckInterval time.Duration
 
-	// The source lists are parsed in a later step.
-	DBSources     string `env:"SCANNER_DB_SOURCES"`
-	JavaDBSources string `env:"SCANNER_JAVA_DB_SOURCES"`
+	// DBSources and JavaDBSources are read from SCANNER_DB_SOURCES and
+	// SCANNER_JAVA_DB_SOURCES by GetConfig, see ParseDBSources.
+	DBSources     []DBSource
+	JavaDBSources []DBSource
 
 	PrecheckTimeoutDNS      time.Duration `env:"SCANNER_PRECHECK_TIMEOUT_DNS" envDefault:"5s"`
 	PrecheckTimeoutConnect  time.Duration `env:"SCANNER_PRECHECK_TIMEOUT_CONNECT" envDefault:"5s"`
@@ -70,6 +71,15 @@ func GetConfig() (Config, error) {
 		interval = FallbackDBCheckInterval
 	}
 	cfg.DBCheckInterval = interval
+
+	cfg.DBSources, err = ParseDBSources(os.Getenv("SCANNER_DB_SOURCES"))
+	if err != nil {
+		return cfg, fmt.Errorf("parsing SCANNER_DB_SOURCES: %w", err)
+	}
+	cfg.JavaDBSources, err = ParseDBSources(os.Getenv("SCANNER_JAVA_DB_SOURCES"))
+	if err != nil {
+		return cfg, fmt.Errorf("parsing SCANNER_JAVA_DB_SOURCES: %w", err)
+	}
 
 	if cfg.Enabled {
 		if cfg.MongoURI == "" {

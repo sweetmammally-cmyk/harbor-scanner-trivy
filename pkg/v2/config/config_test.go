@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"log/slog"
+	"net/url"
 	"testing"
 	"time"
 
@@ -78,6 +79,20 @@ func TestGetConfig(t *testing.T) {
 			expectedError: `parse error on field "ScanTimeout"`,
 		},
 		{
+			name: "Should return error when SCANNER_DB_SOURCES is invalid",
+			envs: Envs{
+				"SCANNER_DB_SOURCES": "ghcr.io/aquasecurity/trivy-db:2|ftp://user:s3cret@proxy:21",
+			},
+			expectedError: "parsing SCANNER_DB_SOURCES: source 1: route must be direct, http://host:port or socks5://host:port",
+		},
+		{
+			name: "Should return error when SCANNER_JAVA_DB_SOURCES is invalid",
+			envs: Envs{
+				"SCANNER_JAVA_DB_SOURCES": "ghcr.io/aquasecurity/trivy-java-db:1",
+			},
+			expectedError: "parsing SCANNER_JAVA_DB_SOURCES: source 1: expected repository|route",
+		},
+		{
 			name: "Should read all values from env",
 			envs: Envs{
 				"SCANNER_V2_API_ENABLED":            "true",
@@ -88,7 +103,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_REGISTRY_USERNAME":         "robot$scanner",
 				"SCANNER_REGISTRY_PASSWORD":         "s3cret",
 				"SCANNER_DB_CHECK_INTERVAL":         "1d",
-				"SCANNER_DB_SOURCES":                "mirror.local/aquasec/trivy-db:2|direct",
+				"SCANNER_DB_SOURCES":                "mirror.local/aquasec/trivy-db:2|direct,ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080",
 				"SCANNER_JAVA_DB_SOURCES":           "mirror.local/aquasec/trivy-java-db:1|direct",
 				"SCANNER_PRECHECK_TIMEOUT_DNS":      "1s",
 				"SCANNER_PRECHECK_TIMEOUT_CONNECT":  "2s",
@@ -104,16 +119,21 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_SCAN_TIMEOUT":              "20m",
 			},
 			expectedConfig: Config{
-				Enabled:                 true,
-				AuthToken:               "token",
-				MongoURI:                "mongodb://mongo:27017",
-				MongoDB:                 "scanner",
-				RegistryURL:             "https://harbor.local",
-				RegistryUsername:        "robot$scanner",
-				RegistryPassword:        "s3cret",
-				DBCheckInterval:         24 * time.Hour,
-				DBSources:               "mirror.local/aquasec/trivy-db:2|direct",
-				JavaDBSources:           "mirror.local/aquasec/trivy-java-db:1|direct",
+				Enabled:          true,
+				AuthToken:        "token",
+				MongoURI:         "mongodb://mongo:27017",
+				MongoDB:          "scanner",
+				RegistryURL:      "https://harbor.local",
+				RegistryUsername: "robot$scanner",
+				RegistryPassword: "s3cret",
+				DBCheckInterval:  24 * time.Hour,
+				DBSources: []DBSource{
+					{Repository: "mirror.local/aquasec/trivy-db:2"},
+					{Repository: "ghcr.io/aquasecurity/trivy-db:2", Proxy: &url.URL{Scheme: "socks5", Host: "proxy:1080"}},
+				},
+				JavaDBSources: []DBSource{
+					{Repository: "mirror.local/aquasec/trivy-java-db:1"},
+				},
 				PrecheckTimeoutDNS:      1 * time.Second,
 				PrecheckTimeoutConnect:  2 * time.Second,
 				PrecheckTimeoutTLS:      3 * time.Second,
