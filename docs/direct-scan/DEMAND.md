@@ -191,6 +191,7 @@ For each configured source, in order:
 3. TLS handshake check: record version, cipher and ALPN result.
 4. HTTP/2 request to the registry `/v2/` endpoint, then the DB manifest. Record DNS, connect, TLS, first-byte and total timings, status and negotiated protocol. HTTP/2 is required by default: a source that negotiates HTTP/1.1 fails its pre-check, unless that source has the `allow-http1` option. The negotiated protocol is always recorded.
 5. Every stage has its own timeout and the whole check has a deadline.
+6. DNS stage: for a direct route, resolve the registry host. For a proxy route the stage is recorded as skipped, because the proxy resolves the registry name; the proxy's DNS and TCP are covered by the connect stage.
 
 The sources form a pool: an ordered list that can mix public registries (for example Docker Hub, ghcr.io) and our own mirrors, each with its own route.
 

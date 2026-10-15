@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 2 (DB pre-check module)
-- Last completed task: P2-1
+- Last completed task: P2-2
 - In progress: none
-- Next task: P2-2
+- Next task: P2-3
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,7 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner): pre-check DNS stage. Direct route: resolve the registry host. Proxy route (HTTP CONNECT or SOCKS5): record the DNS stage as skipped; the connect stage covers the proxy's DNS and TCP. Chosen from three options (resolve first hop, always resolve registry, skip). DEMAND 7.3 item 6 added.
 - 2026-10-15 (P0-3): package layout confirmed as in PLAN.md: `pkg/v2/config`, `pkg/v2/dbmgr`, `pkg/v2/registry`, `pkg/v2/store`, `pkg/v2/runner`, `pkg/v2/queue`, `pkg/v2/api`, `pkg/v2/health`. Reason: no clashes with existing packages (`pkg/queue` vs `pkg/v2/queue` differ by path; import with an alias where both are used). Wiring: `cmd/scanner-trivy/main.go` is the one upstream file we must touch. When `SCANNER_V2_API_ENABLED=true` it wraps the existing v1 handler in a small `http.ServeMux` that sends `/api/v2/` to the v2 handler and everything else to the v1 handler, so `pkg/http/api/v1` stays unchanged. The v2 router uses gorilla/mux like v1. Readiness for Mongo and DB (P10-2) will need a touch to `/probe/ready` in `pkg/http/api/v1/handler.go`; decide the smallest hook when we get there.
 - 2026-10-15 (P0-4): libraries and Mongo test strategy.
   - Mongo driver: official `go.mongodb.org/mongo-driver/v2` (includes GridFS). The only new module dependency for Mongo.
@@ -99,6 +100,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P2-2  Stage runner and result types
+- Status: done
+- What changed: `pkg/v2/dbmgr/precheck.go` has `StageResult` (stage, ok, skipped, duration, detail), `CheckResult` (redacted source, ok, started_at, duration, stages), and `runStage`, which gives each stage its own timeout inside the overall-deadline context and records the result. On failure the detail says whether the stage timeout or the overall deadline was hit.
+- Files: `pkg/v2/dbmgr/precheck.go`, `pkg/v2/dbmgr/precheck_test.go`, `docs/direct-scan/DEMAND.md`
+- Tests run: `go test -short -race ./pkg/v2/dbmgr/` -> ok; `go vet` -> ok
+- Decisions / surprises: `runStage` calls the stage directly (no extra goroutine), so a stage must honour its context; every stage uses `DialContext`, `HandshakeContext` or a request with context. The JSON tags are there for the later `db_checks` documents and `/api/v2/db`.
+- Next: P2-3
 
 ### 2026-10-15  P2-1  Route-aware dialer
 - Status: done
