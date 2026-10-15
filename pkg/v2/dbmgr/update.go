@@ -44,15 +44,15 @@ var javaDB = dbKind{
 
 // SourceResult is what happened with one source during an update.
 type SourceResult struct {
-	Source   string      `json:"source"`
-	Precheck CheckResult `json:"precheck"`
+	Source   string      `json:"source" bson:"source"`
+	Precheck CheckResult `json:"precheck" bson:"precheck"`
 	// Answered is true when the pre-check and the upstream check succeeded.
-	Answered       bool   `json:"answered"`
-	ManifestDigest string `json:"manifest_digest,omitempty"`
-	Installed      bool   `json:"installed"`
+	Answered       bool   `json:"answered" bson:"answered"`
+	ManifestDigest string `json:"manifest_digest,omitempty" bson:"manifest_digest,omitempty"`
+	Installed      bool   `json:"installed" bson:"installed"`
 	// FailureClass is the pre-check class, or upstream_error, download_error or install_error.
-	FailureClass string `json:"failure_class,omitempty"`
-	Error        string `json:"error,omitempty"`
+	FailureClass string `json:"failure_class,omitempty" bson:"failure_class,omitempty"`
+	Error        string `json:"error,omitempty" bson:"error,omitempty"`
 }
 
 // UpdateResult is the outcome of one update run, for the DB state and the API.

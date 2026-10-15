@@ -9,21 +9,21 @@ import (
 // DBState is what we know about one DB across update runs: the db_state
 // document of DEMAND section 10, and the source of GET /api/v2/db.
 type DBState struct {
-	Mode           string `json:"mode"`
-	ActiveSource   string `json:"active_source,omitempty"`
-	ManifestDigest string `json:"manifest_digest,omitempty"`
+	Mode           string `json:"mode" bson:"mode"`
+	ActiveSource   string `json:"active_source,omitempty" bson:"active_source,omitempty"`
+	ManifestDigest string `json:"manifest_digest,omitempty" bson:"manifest_digest,omitempty"`
 	// LastUpstreamCheckAt is when a source last answered. Diagnostic only.
-	LastUpstreamCheckAt time.Time `json:"last_upstream_check_at"`
+	LastUpstreamCheckAt time.Time `json:"last_upstream_check_at" bson:"last_upstream_check_at"`
 	// LastConfirmedCurrentAt is when the DB was last confirmed current or installed.
 	// Freshness is computed from it.
-	LastConfirmedCurrentAt time.Time `json:"last_confirmed_current_at"`
+	LastConfirmedCurrentAt time.Time `json:"last_confirmed_current_at" bson:"last_confirmed_current_at"`
 	// NewerAvailable is set while a newer DB is known but could not be installed.
-	NewerAvailable bool `json:"newer_available"`
+	NewerAvailable bool `json:"newer_available" bson:"newer_available"`
 	// InstalledAt is when we installed the active DB (our downloaded_at).
-	InstalledAt time.Time `json:"installed_at"`
-	Metadata    Metadata  `json:"metadata"`
+	InstalledAt time.Time `json:"installed_at" bson:"installed_at"`
+	Metadata    Metadata  `json:"metadata" bson:"metadata"`
 	// LastSources are the per-source results of the last run.
-	LastSources []SourceResult `json:"last_sources"`
+	LastSources []SourceResult `json:"last_sources" bson:"last_sources"`
 }
 
 // apply returns the state after an update run. When no source answered, the run

@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 5 (MongoDB data plane)
-- Last completed task: P5-1
+- Last completed task: P5-2
 - In progress: none
-- Next task: P5-2 (models and collections: `scans`, `platforms`, `db_state`, `db_checks`)
+- Next task: P5-3 (indexes, idempotent at startup, TTL on `db_checks`, `schema_version` document)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -151,6 +151,20 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P5-2  MongoDB models and collections
+- Status: done
+- What changed: `pkg/v2/store/models.go`:
+  - Collection names `scans`, `platforms`, `db_state`, `db_checks`; scan states `queued`, `scanning`, `done`, `failed`.
+  - `Scan` (the job record, DEMAND section 10) with `Image`, `ScanOptions`, `TrivyInfo`. Times not known yet (`started_at`, `finished_at`, `lease_until`) are pointers with `omitempty`, so they are absent rather than year 0001; this keeps the indexes and the "not finished" queries simple. `Report` is an open `bson.M` until the scan runner (P7) fixes its shape.
+  - `Platform`.
+  - `DBStateDocument` (`_id` "db" or "java-db" plus an inline `dbmgr.DBState`).
+  - `DBCheck` (db, at, plus an inline `dbmgr.SourceResult`).
+  - `bson` tags added to `dbmgr.DBState`, `SourceResult`, `CheckResult`, `StageResult` (same snake_case names as their JSON) and `Metadata` (snake_case; its JSON names stay Trivy's file format). One struct per concept, no copies; `dbmgr` does not import `store`.
+- Files: `pkg/v2/store/models.go`, `pkg/v2/store/models_test.go`, `pkg/v2/dbmgr/state.go`, `pkg/v2/dbmgr/precheck.go`, `pkg/v2/dbmgr/update.go`, `pkg/v2/dbmgr/metadata.go`, `test/integration/store/mongo_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/...` -> ok; `make test` -> ok. Integration: `Scan` and `DBStateDocument` round-trip through `mongo:7` unchanged. Unit cases: field names of every document and sub-document match DEMAND section 10; a queued scan leaves out unknown times, report and worker; in-memory BSON round trips are equal.
+- Decisions / surprises: durations in stored pre-check results are int64 nanoseconds (BSON's default for `time.Duration`).
+- Next: P5-3
 
 ### 2026-10-15  P5-1  MongoDB client
 - Status: done

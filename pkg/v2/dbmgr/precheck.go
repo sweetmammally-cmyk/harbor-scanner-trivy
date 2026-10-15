@@ -22,30 +22,30 @@ var errHTTP2NotNegotiated = errors.New("server did not negotiate HTTP/2")
 
 // StageResult is the outcome of one pre-check stage (DEMAND section 7.3).
 type StageResult struct {
-	Stage   string `json:"stage"`
-	OK      bool   `json:"ok"`
-	Skipped bool   `json:"skipped,omitempty"`
+	Stage   string `json:"stage" bson:"stage"`
+	OK      bool   `json:"ok" bson:"ok"`
+	Skipped bool   `json:"skipped,omitempty" bson:"skipped,omitempty"`
 	// Class names the kind of failure, for example tls_reset (see classifyFailure). Empty when OK.
-	Class    string        `json:"class,omitempty"`
-	Duration time.Duration `json:"duration"`
+	Class    string        `json:"class,omitempty" bson:"class,omitempty"`
+	Duration time.Duration `json:"duration" bson:"duration"`
 	// FirstByte is the time from the stage start to the first response byte
 	// (http and manifest stages only).
-	FirstByte time.Duration `json:"first_byte,omitempty"`
+	FirstByte time.Duration `json:"first_byte,omitempty" bson:"first_byte,omitempty"`
 	// Detail holds what the stage found (for example the TLS version) or why it failed.
 	// It must never contain credentials.
-	Detail string `json:"detail,omitempty"`
+	Detail string `json:"detail,omitempty" bson:"detail,omitempty"`
 }
 
 // CheckResult is the outcome of the pre-check of one source.
 type CheckResult struct {
 	// Source is DBSource.String(), so proxy credentials are hidden.
-	Source string `json:"source"`
-	OK     bool   `json:"ok"`
+	Source string `json:"source" bson:"source"`
+	OK     bool   `json:"ok" bson:"ok"`
 	// FailureClass is the class of the failed stage. Empty when OK.
-	FailureClass string        `json:"failure_class,omitempty"`
-	StartedAt    time.Time     `json:"started_at"`
-	Duration     time.Duration `json:"duration"`
-	Stages       []StageResult `json:"stages"`
+	FailureClass string        `json:"failure_class,omitempty" bson:"failure_class,omitempty"`
+	StartedAt    time.Time     `json:"started_at" bson:"started_at"`
+	Duration     time.Duration `json:"duration" bson:"duration"`
+	Stages       []StageResult `json:"stages" bson:"stages"`
 }
 
 // runStage runs one stage with its own timeout, inside ctx which carries the

@@ -49,7 +49,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 
 ## Phase 5: MongoDB data plane
 - [x] P5-1 Mongo client, connect, ping; hard-dependency behaviour (not ready, 503, no exit when unreachable); connect / server selection / operation timeouts; background ping every 5s sets the readiness flag; URI redaction test; integration tests: unreachable at startup, then comes back
-- [ ] P5-2 Models and collections: `scans`, `platforms`, `db_state`, `db_checks`
+- [x] P5-2 Models and collections: `scans`, `platforms`, `db_state`, `db_checks`
 - [ ] P5-3 Indexes (scans.request_id unique; image.digest+state+finished_at; customer_ids+finished_at; state+queued_at) and TTL on `db_checks`; created idempotently at startup (safe with several replicas); `schema_version` document
 - [ ] P5-4 Repositories behind interfaces, with fakes for unit tests
 - [ ] P5-5 GridFS for reports above the size threshold

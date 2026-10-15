@@ -9,12 +9,13 @@ import (
 )
 
 // Metadata is Trivy's metadata.json, shipped next to trivy.db and trivy-java.db.
+// The JSON names are Trivy's file format; the BSON names are ours.
 // Example: {"Version":2,"NextUpdate":"...","UpdatedAt":"...","DownloadedAt":"..."}
 type Metadata struct {
-	Version      int       `json:"Version"`
-	NextUpdate   time.Time `json:"NextUpdate"`
-	UpdatedAt    time.Time `json:"UpdatedAt"`
-	DownloadedAt time.Time `json:"DownloadedAt"`
+	Version      int       `json:"Version" bson:"version"`
+	NextUpdate   time.Time `json:"NextUpdate" bson:"next_update"`
+	UpdatedAt    time.Time `json:"UpdatedAt" bson:"updated_at"`
+	DownloadedAt time.Time `json:"DownloadedAt" bson:"downloaded_at"`
 }
 
 // readMetadata reads metadata.json from a DB directory. UpdatedAt is required,

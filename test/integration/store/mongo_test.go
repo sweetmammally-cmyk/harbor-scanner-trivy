@@ -17,6 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
 
@@ -136,6 +137,43 @@ func TestMongoClient(t *testing.T) {
 		var doc bson.M
 		require.NoError(t, client.Database().Collection("it").FindOne(opCtx, bson.M{"_id": "one"}).Decode(&doc))
 		assert.EqualValues(t, 1, doc["value"])
+	})
+
+	t.Run("models survive a round trip through MongoDB", func(t *testing.T) {
+		client, err := store.NewClient(mongoConfig(mongoAddr))
+		require.NoError(t, err)
+		defer func() { _ = client.Disconnect(context.Background()) }()
+		ctx, cancel := client.OperationContext(context.Background())
+		defer cancel()
+
+		// MongoDB stores times in milliseconds and UTC.
+		at := time.Date(2026, 10, 15, 10, 0, 0, 123000000, time.UTC)
+		finished := at.Add(5 * time.Second)
+		scan := store.Scan{
+			ID: "scan-1", RequestID: "req-1", RequestedAt: at, CustomerIDs: []string{"cust-1"},
+			CustomerData: map[string]any{"env": "prod"},
+			Image:        store.Image{Repository: "customer-1", Name: "app", Tag: "v1", Digest: "sha256:abc"},
+			Options:      store.ScanOptions{Platforms: []string{"npm"}, Severity: []string{"HIGH", "CRITICAL"}},
+			State:        store.ScanDone, Platforms: []string{"npm"}, Summary: map[string]int{"high": 2},
+			QueuedAt: at, FinishedAt: &finished, TotalMS: 5000,
+		}
+		_, err = client.Database().Collection(store.CollectionScans).InsertOne(ctx, scan)
+		require.NoError(t, err)
+		var decodedScan store.Scan
+		require.NoError(t, client.Database().Collection(store.CollectionScans).FindOne(ctx, bson.M{"_id": "scan-1"}).Decode(&decodedScan))
+		assert.Equal(t, scan, decodedScan)
+
+		state := store.DBStateDocument{ID: "db", DBState: dbmgr.DBState{
+			Mode: dbmgr.ModeNormal, LastConfirmedCurrentAt: at, Metadata: dbmgr.Metadata{Version: 2, UpdatedAt: at},
+			LastSources: []dbmgr.SourceResult{{Source: "ghcr|direct", Answered: true,
+				Precheck: dbmgr.CheckResult{OK: true, StartedAt: at, Duration: 1500 * time.Millisecond,
+					Stages: []dbmgr.StageResult{{Stage: "tls", OK: true, Duration: 300 * time.Millisecond}}}}},
+		}}
+		_, err = client.Database().Collection(store.CollectionDBState).InsertOne(ctx, state)
+		require.NoError(t, err)
+		var decodedState store.DBStateDocument
+		require.NoError(t, client.Database().Collection(store.CollectionDBState).FindOne(ctx, bson.M{"_id": "db"}).Decode(&decodedState))
+		assert.Equal(t, state, decodedState)
 	})
 
 	t.Run("unreachable at startup: not up, no exit; comes back: up; goes away again: not up", func(t *testing.T) {
