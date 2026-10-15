@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	DBCheckInterval:         3 * time.Hour,
 	PrecheckTimeoutDNS:      5 * time.Second,
 	PrecheckTimeoutConnect:  5 * time.Second,
 	PrecheckTimeoutTLS:      5 * time.Second,
@@ -108,7 +111,7 @@ func TestGetConfig(t *testing.T) {
 				RegistryURL:             "https://harbor.local",
 				RegistryUsername:        "robot$scanner",
 				RegistryPassword:        "s3cret",
-				DBCheckInterval:         "1d",
+				DBCheckInterval:         24 * time.Hour,
 				DBSources:               "mirror.local/aquasec/trivy-db:2|direct",
 				JavaDBSources:           "mirror.local/aquasec/trivy-java-db:1|direct",
 				PrecheckTimeoutDNS:      1 * time.Second,
@@ -141,6 +144,76 @@ func TestGetConfig(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectedConfig, cfg)
+		})
+	}
+}
+
+func TestGetConfig_DBCheckInterval(t *testing.T) {
+	testCases := []struct {
+		name             string
+		value            string
+		expectedInterval time.Duration
+		expectedWarning  bool
+	}{
+		{name: "hours", value: "1h", expectedInterval: time.Hour},
+		{name: "minutes", value: "90m", expectedInterval: 90 * time.Minute},
+		{name: "days", value: "2d", expectedInterval: 48 * time.Hour},
+		{name: "unset", value: "", expectedInterval: 3 * time.Hour, expectedWarning: true},
+		{name: "invalid", value: "often", expectedInterval: 3 * time.Hour, expectedWarning: true},
+		{name: "invalid days", value: "xd", expectedInterval: 3 * time.Hour, expectedWarning: true},
+		{name: "zero", value: "0s", expectedInterval: 3 * time.Hour, expectedWarning: true},
+		{name: "negative", value: "-1h", expectedInterval: 3 * time.Hour, expectedWarning: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			defaultLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(defaultLogger)
+
+			t.Setenv("SCANNER_DB_CHECK_INTERVAL", tc.value)
+
+			cfg, err := GetConfig()
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedInterval, cfg.DBCheckInterval)
+			if tc.expectedWarning {
+				assert.Contains(t, logs.String(), "level=WARN")
+				assert.Contains(t, logs.String(), "using fallback interval")
+			} else {
+				assert.Empty(t, logs.String())
+			}
+		})
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	testCases := []struct {
+		value            string
+		expectedDuration time.Duration
+		expectedError    bool
+	}{
+		{value: "30s", expectedDuration: 30 * time.Second},
+		{value: "3h", expectedDuration: 3 * time.Hour},
+		{value: "1h30m", expectedDuration: 90 * time.Minute},
+		{value: "1d", expectedDuration: 24 * time.Hour},
+		{value: "7d", expectedDuration: 7 * 24 * time.Hour},
+		{value: "", expectedError: true},
+		{value: "d", expectedError: true},
+		{value: "1.5d", expectedError: true},
+		{value: "1d2h", expectedError: true},
+		{value: "abc", expectedError: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.value, func(t *testing.T) {
+			duration, err := ParseDuration(tc.value)
+			if tc.expectedError {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedDuration, duration)
 		})
 	}
 }

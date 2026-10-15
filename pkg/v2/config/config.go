@@ -2,6 +2,11 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v6"
@@ -20,10 +25,13 @@ type Config struct {
 	RegistryUsername string `env:"SCANNER_REGISTRY_USERNAME"`
 	RegistryPassword string `env:"SCANNER_REGISTRY_PASSWORD"`
 
-	// DBCheckInterval and the source lists are parsed in later steps.
-	DBCheckInterval string `env:"SCANNER_DB_CHECK_INTERVAL"`
-	DBSources       string `env:"SCANNER_DB_SOURCES"`
-	JavaDBSources   string `env:"SCANNER_JAVA_DB_SOURCES"`
+	// DBCheckInterval is read from SCANNER_DB_CHECK_INTERVAL by GetConfig,
+	// because it accepts days ("1d") and falls back to 3h when unset or invalid.
+	DBCheckInterval time.Duration
+
+	// The source lists are parsed in a later step.
+	DBSources     string `env:"SCANNER_DB_SOURCES"`
+	JavaDBSources string `env:"SCANNER_JAVA_DB_SOURCES"`
 
 	PrecheckTimeoutDNS      time.Duration `env:"SCANNER_PRECHECK_TIMEOUT_DNS" envDefault:"5s"`
 	PrecheckTimeoutConnect  time.Duration `env:"SCANNER_PRECHECK_TIMEOUT_CONNECT" envDefault:"5s"`
@@ -41,12 +49,27 @@ type Config struct {
 	ScanTimeout    time.Duration `env:"SCANNER_SCAN_TIMEOUT" envDefault:"10m"`
 }
 
+// FallbackDBCheckInterval is used when SCANNER_DB_CHECK_INTERVAL is unset or invalid.
+const FallbackDBCheckInterval = 3 * time.Hour
+
 func GetConfig() (Config, error) {
 	var cfg Config
 	err := env.Parse(&cfg)
 	if err != nil {
 		return cfg, err
 	}
+
+	value := os.Getenv("SCANNER_DB_CHECK_INTERVAL")
+	interval, err := ParseDuration(value)
+	if err != nil || interval <= 0 {
+		slog.Warn("using fallback interval",
+			slog.String("env", "SCANNER_DB_CHECK_INTERVAL"),
+			slog.String("value", value),
+			slog.String("fallback", FallbackDBCheckInterval.String()),
+		)
+		interval = FallbackDBCheckInterval
+	}
+	cfg.DBCheckInterval = interval
 
 	if cfg.Enabled {
 		if cfg.MongoURI == "" {
@@ -58,4 +81,16 @@ func GetConfig() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// ParseDuration parses a Go duration such as "90m" or "3h", and also whole days such as "1d".
+func ParseDuration(value string) (time.Duration, error) {
+	if strings.HasSuffix(value, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q", value)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(value)
 }
