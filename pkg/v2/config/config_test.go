@@ -16,6 +16,8 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	ScanMaxOutput:               256 << 20,
+	ScanMaxFindings:             10000,
 	RegistryTimeout:             15 * time.Second,
 	DBStateRetention:            7 * 24 * time.Hour,
 	InstanceID:                  hostname(),
@@ -208,6 +210,8 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_QUEUE_WORKERS":                  "4",
 				"SCANNER_QUEUE_MAX_LENGTH":               "50",
 				"SCANNER_SCAN_TIMEOUT":                   "20m",
+				"SCANNER_SCAN_MAX_OUTPUT":                "1048576",
+				"SCANNER_SCAN_MAX_FINDINGS":              "500",
 			},
 			expectedConfig: Config{
 				Enabled:                     true,
@@ -251,6 +255,8 @@ func TestGetConfig(t *testing.T) {
 				QueueWorkers:            4,
 				QueueMaxLength:          50,
 				ScanTimeout:             20 * time.Minute,
+				ScanMaxOutput:           1 << 20,
+				ScanMaxFindings:         500,
 			},
 		},
 	}

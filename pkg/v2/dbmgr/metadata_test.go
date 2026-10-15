@@ -20,7 +20,7 @@ func TestReadMetadata(t *testing.T) {
 	t.Run("real Trivy metadata", func(t *testing.T) {
 		dir := writeMetadata(t, `{"Version":2,"NextUpdate":"2026-09-28T07:04:17.756799482Z","UpdatedAt":"2026-09-27T07:04:17.756799612Z","DownloadedAt":"2026-09-27T07:44:09.999745202Z"}`)
 
-		metadata, err := readMetadata(dir)
+		metadata, err := ReadMetadata(dir)
 
 		require.NoError(t, err)
 		assert.Equal(t, 2, metadata.Version)
@@ -30,19 +30,19 @@ func TestReadMetadata(t *testing.T) {
 	})
 
 	t.Run("missing file", func(t *testing.T) {
-		_, err := readMetadata(t.TempDir())
+		_, err := ReadMetadata(t.TempDir())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "reading DB metadata")
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		_, err := readMetadata(writeMetadata(t, `{"Version":`))
+		_, err := ReadMetadata(writeMetadata(t, `{"Version":`))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "decoding DB metadata")
 	})
 
 	t.Run("no UpdatedAt", func(t *testing.T) {
-		_, err := readMetadata(writeMetadata(t, `{"Version":2}`))
+		_, err := ReadMetadata(writeMetadata(t, `{"Version":2}`))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "has no UpdatedAt")
 	})

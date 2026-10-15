@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 6 done; Phase 7 (scan runner) next
-- Last completed task: P6-3
+- Phase: 7 (scan runner)
+- Last completed task: P7-1
 - In progress: none
-- Next task: P7-1 (scan runner core)
+- Next task: P7-2 (stream-parse the output, validate platforms and severities, filter)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -174,6 +174,38 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P7-1  Running Trivy
+- Status: done
+- What changed:
+  - New package `pkg/v2/runner`: `NewRunner(cfg, trivyPath, cacheDir, workDir)`; `runTrivy(ctx, worker, reference)` returns the path of Trivy's JSON output (the caller removes it) and `DBInfo` (UpdatedAt, manifest digest).
+    1. Gives the worker its own cache directory `<workDir>/<worker>` (0700).
+    2. Pins the active DB version (`dbmgr.PinActiveVersion`; no DB gives `db_missing` without starting Trivy) and the Java DB version if there is one.
+    3. Points the worker's `db` / `java-db` symlinks at those concrete version directories (atomic rename).
+    4. Creates a 0600 output file.
+    5. Runs `trivy image --scanners vuln --format json --output <file> --list-all-pkgs=false --skip-db-update --skip-java-db-update --skip-version-check --image-src remote --cache-dir <worker dir> --timeout <SCANNER_SCAN_TIMEOUT minus 10%, at most 30s less> --quiet [--insecure for http registries] <reference>`.
+    6. Trivy runs in its own process group; at `SCANNER_SCAN_TIMEOUT`, `cmd.Cancel` kills the whole group (`WaitDelay` 5s).
+    7. The environment is an allowlist: `PATH`, `HOME`, `TMPDIR`, `TRIVY_*`, the proxy variables; the parent's `TRIVY_USERNAME`/`TRIVY_PASSWORD` are replaced by the robot account.
+    8. Only the last 8 KiB of stderr is kept, with the robot password replaced.
+    9. Failure classes: hard kill or "context deadline exceeded" = `trivy_timeout`; "Unable to initialize the Java DB" = `java_db_missing`; other exits = `trivy_exit_error`; output above `SCANNER_SCAN_MAX_OUTPUT` = `output_too_large`; no output file = `output_invalid`. The output file is removed on every failure.
+  - `dbmgr`: `PinActiveVersion(cacheDir, db)` with `ErrNoDB`. `InstallDB` (exported, was `installDB`) swaps and cleans up under the pin mutex and never removes a pinned version. `ReadMetadata` is exported.
+  - Config `ScanMaxOutput` (`SCANNER_SCAN_MAX_OUTPUT`, bytes, 268435456) and `ScanMaxFindings` (`SCANNER_SCAN_MAX_FINDINGS`, 10000).
+- Files: `pkg/v2/runner/trivy.go`, `pkg/v2/runner/trivy_test.go`, `pkg/v2/dbmgr/install.go`, `pkg/v2/dbmgr/install_test.go`, `pkg/v2/dbmgr/metadata.go` and renames in `pkg/v2/dbmgr/*`, `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`
+- Tests run: `go test -short -race -count=10 ./pkg/v2/runner/ ./pkg/v2/dbmgr/` -> ok; `make test` -> ok. A fake `trivy` shell script driven by `TRIVY_FAKE_*` variables (they pass the allowlist):
+  - success: exact argument list, 0600 output, DB info;
+  - `--insecure` for a plain-http registry;
+  - environment: no `SCANNER_*` variable and none of the Mongo URI, service token or other secrets; robot account in `TRIVY_USERNAME`/`TRIVY_PASSWORD` only, the parent's stale `TRIVY_PASSWORD` replaced, `HTTPS_PROXY` kept; credentials not in argv;
+  - hard timeout (300ms) kills the script and its `sleep` child (checked with `kill -0`);
+  - Trivy's own timeout message;
+  - 2000 bytes against a limit of 1000;
+  - exit status 2 with the password redacted in the stderr tail;
+  - the Java DB message;
+  - no DB installed (Trivy not started);
+  - two installs during a running scan: the scan reads the same version at start and end, and the version is removed by the next install after the scan;
+  - two workers run at the same time, each with its own cache directory.
+  - `dbmgr`: pinned versions survive installs, two pins on one version.
+- Decisions / surprises: pins live in memory, so they protect versions inside one scanner process; each instance has its own cache volume (DB state is per instance). Each worker keeps its own Trivy layer cache (`<workDir>/<worker>/fanal`), because Trivy's bolt cache cannot be shared by concurrent processes; disk for P11-4.
+- Next: P7-2
 
 ### 2026-10-15  P1-4  Follow-up: duplicate DB sources
 - Status: done

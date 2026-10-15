@@ -43,7 +43,7 @@ func TestInstallDB(t *testing.T) {
 		cacheDir := t.TempDir()
 		v1 := downloadedVersion(t, cacheDir, "db v1")
 
-		require.NoError(t, installDB(cacheDir, "db", v1, "sha256:v1"))
+		require.NoError(t, InstallDB(cacheDir, "db", v1, "sha256:v1"))
 
 		target, err := os.Readlink(filepath.Join(cacheDir, "db"))
 		require.NoError(t, err)
@@ -55,16 +55,16 @@ func TestInstallDB(t *testing.T) {
 	t.Run("updates keep the current and the previous version only", func(t *testing.T) {
 		cacheDir := t.TempDir()
 		v1 := downloadedVersion(t, cacheDir, "db v1")
-		require.NoError(t, installDB(cacheDir, "db", v1, "sha256:v1"))
+		require.NoError(t, InstallDB(cacheDir, "db", v1, "sha256:v1"))
 		v2 := downloadedVersion(t, cacheDir, "db v2")
-		require.NoError(t, installDB(cacheDir, "db", v2, "sha256:v2"))
+		require.NoError(t, InstallDB(cacheDir, "db", v2, "sha256:v2"))
 
 		assert.Equal(t, "db v2", readDB(t, cacheDir))
 		assert.ElementsMatch(t, []string{filepath.Base(v1), filepath.Base(v2)}, versionNames(t, cacheDir))
 
 		failed := downloadedVersion(t, cacheDir, "left by a failed download")
 		v3 := downloadedVersion(t, cacheDir, "db v3")
-		require.NoError(t, installDB(cacheDir, "db", v3, "sha256:v3"))
+		require.NoError(t, InstallDB(cacheDir, "db", v3, "sha256:v3"))
 
 		assert.Equal(t, "db v3", readDB(t, cacheDir))
 		assert.Equal(t, "sha256:v3", InstalledDigest(cacheDir, "db"))
@@ -76,15 +76,15 @@ func TestInstallDB(t *testing.T) {
 	t.Run("a scan that opened the DB before the swap keeps reading its copy", func(t *testing.T) {
 		cacheDir := t.TempDir()
 		v1 := downloadedVersion(t, cacheDir, "db v1")
-		require.NoError(t, installDB(cacheDir, "db", v1, "sha256:v1"))
+		require.NoError(t, InstallDB(cacheDir, "db", v1, "sha256:v1"))
 
 		inFlight, err := os.Open(filepath.Join(cacheDir, "db", "trivy.db"))
 		require.NoError(t, err)
 		defer inFlight.Close()
 
 		// Two swaps: the first keeps v1 as previous, the second deletes it.
-		require.NoError(t, installDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v2"), "sha256:v2"))
-		require.NoError(t, installDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v3"), "sha256:v3"))
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v2"), "sha256:v2"))
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v3"), "sha256:v3"))
 
 		data, err := io.ReadAll(inFlight)
 		require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestInstallDB(t *testing.T) {
 		assert.Equal(t, "", InstalledDigest(cacheDir, "db"), "a seed DB has no recorded digest")
 
 		v1 := downloadedVersion(t, cacheDir, "db v1")
-		require.NoError(t, installDB(cacheDir, "db", v1, "sha256:v1"))
+		require.NoError(t, InstallDB(cacheDir, "db", v1, "sha256:v1"))
 
 		assert.Equal(t, "db v1", readDB(t, cacheDir))
 		names := versionNames(t, cacheDir)
@@ -119,7 +119,7 @@ func TestInstallDB(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "trivy-java.db"), []byte("java"), 0o644))
 
-		require.NoError(t, installDB(cacheDir, "java-db", dir, "sha256:java"))
+		require.NoError(t, InstallDB(cacheDir, "java-db", dir, "sha256:java"))
 
 		data, err := os.ReadFile(filepath.Join(cacheDir, "java-db", "trivy-java.db"))
 		require.NoError(t, err)
@@ -154,7 +154,7 @@ func TestInstallSeed(t *testing.T) {
 
 	t.Run("keeps an installed DB", func(t *testing.T) {
 		cacheDir := t.TempDir()
-		require.NoError(t, installDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v1"), "sha256:v1"))
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v1"), "sha256:v1"))
 		seedDir := writeSeed(t, "trivy.db", "seed db", "metadata.json", "{}")
 
 		installed, err := installSeed(cacheDir, "db", seedDir, dbFiles)
@@ -192,5 +192,52 @@ func TestInstallSeed(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, "db", "trivy.db"), 0o755))
 
 		assert.False(t, dbPresent(cacheDir, "db", "trivy.db"))
+	})
+}
+
+func TestPinActiveVersion(t *testing.T) {
+	t.Run("no DB installed", func(t *testing.T) {
+		_, _, err := PinActiveVersion(t.TempDir(), "db")
+		assert.ErrorIs(t, err, ErrNoDB)
+	})
+
+	t.Run("a pinned version survives installs until it is unpinned", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		v1 := downloadedVersion(t, cacheDir, "db v1")
+		require.NoError(t, InstallDB(cacheDir, "db", v1, "sha256:v1"))
+
+		dir, unpin, err := PinActiveVersion(cacheDir, "db")
+		require.NoError(t, err)
+		assert.Equal(t, v1, dir)
+
+		// Two installs: without the pin, v1 would be removed by the second one.
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v2"), "sha256:v2"))
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v3"), "sha256:v3"))
+		data, err := os.ReadFile(filepath.Join(dir, "trivy.db"))
+		require.NoError(t, err)
+		assert.Equal(t, "db v1", string(data), "the scan still reads its version")
+
+		unpin()
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v4"), "sha256:v4"))
+		assert.NoDirExists(t, v1, "removed once no scan uses it")
+	})
+
+	t.Run("two scans pin the same version", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		v1 := downloadedVersion(t, cacheDir, "db v1")
+		require.NoError(t, InstallDB(cacheDir, "db", v1, "sha256:v1"))
+		_, unpinFirst, err := PinActiveVersion(cacheDir, "db")
+		require.NoError(t, err)
+		_, unpinSecond, err := PinActiveVersion(cacheDir, "db")
+		require.NoError(t, err)
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v2"), "sha256:v2"))
+
+		unpinFirst()
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v3"), "sha256:v3"))
+		assert.DirExists(t, v1, "the second scan still uses it")
+
+		unpinSecond()
+		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v4"), "sha256:v4"))
+		assert.NoDirExists(t, v1)
 	})
 }

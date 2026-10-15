@@ -74,6 +74,10 @@ type Config struct {
 	QueueWorkers   int           `env:"SCANNER_QUEUE_WORKERS" envDefault:"1"`
 	QueueMaxLength int           `env:"SCANNER_QUEUE_MAX_LENGTH" envDefault:"100"`
 	ScanTimeout    time.Duration `env:"SCANNER_SCAN_TIMEOUT" envDefault:"10m"`
+	// ScanMaxOutput is the largest Trivy JSON output read, in bytes (256 MiB).
+	ScanMaxOutput int64 `env:"SCANNER_SCAN_MAX_OUTPUT" envDefault:"268435456"`
+	// ScanMaxFindings is the most findings stored per scan.
+	ScanMaxFindings int `env:"SCANNER_SCAN_MAX_FINDINGS" envDefault:"10000"`
 }
 
 // FallbackDBCheckInterval is used when SCANNER_DB_CHECK_INTERVAL is unset or invalid.

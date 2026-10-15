@@ -18,9 +18,9 @@ type Metadata struct {
 	DownloadedAt time.Time `json:"DownloadedAt" bson:"downloaded_at"`
 }
 
-// readMetadata reads metadata.json from a DB directory. UpdatedAt is required,
+// ReadMetadata reads metadata.json from a DB directory. UpdatedAt is required,
 // because the scan cache and the DB age depend on it.
-func readMetadata(dir string) (Metadata, error) {
+func ReadMetadata(dir string) (Metadata, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
 	if err != nil {
 		return Metadata{}, fmt.Errorf("reading DB metadata: %w", err)

@@ -170,7 +170,7 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 		cancel()
 		if err == nil {
 			// A DB without a valid metadata.json would break the scan cache: do not install it.
-			_, err = readMetadata(versionDir)
+			_, err = ReadMetadata(versionDir)
 		}
 		if err != nil {
 			_ = os.RemoveAll(versionDir)
@@ -181,7 +181,7 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 			}
 			continue
 		}
-		if err = installDB(cacheDir, kind.Name, versionDir, digest); err != nil {
+		if err = InstallDB(cacheDir, kind.Name, versionDir, digest); err != nil {
 			_ = os.RemoveAll(versionDir)
 			fail("install_error", err)
 			continue
@@ -227,7 +227,7 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 	}
 
 	// DB age is for visibility only; it never blocks an install.
-	metadata, err := readMetadata(filepath.Join(cacheDir, kind.Name))
+	metadata, err := ReadMetadata(filepath.Join(cacheDir, kind.Name))
 	if err == nil {
 		result.Metadata = metadata
 		age := time.Since(metadata.UpdatedAt)

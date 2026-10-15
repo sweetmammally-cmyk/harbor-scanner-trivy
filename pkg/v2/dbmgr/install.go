@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // DB directory layout (DEMAND section 7.1), for dbName "db" (and "java-db"):
@@ -24,6 +25,48 @@ import (
 // digest of the installed DB, for the upstream check after a restart.
 const manifestDigestFile = "manifest-digest"
 
+// ErrNoDB is returned by PinActiveVersion when the DB is not installed.
+var ErrNoDB = errors.New("DB is not installed")
+
+// pinned counts the scans using each version directory (cache-dir relative path
+// joined to the cache dir). InstallDB never removes a pinned version. pinMu also
+// covers the symlink swap and the cleanup, so a version cannot be removed between
+// being resolved and being pinned.
+var (
+	pinMu  sync.Mutex
+	pinned = map[string]int{}
+)
+
+// PinActiveVersion returns the active version directory of a DB ("db" or
+// "java-db") and pins it until unpin is called, so a scan keeps its DB even when
+// newer versions are installed meanwhile. It returns ErrNoDB when no DB is installed.
+func PinActiveVersion(cacheDir, dbName string) (dir string, unpin func(), err error) {
+	dbFile := trivyDB.Files[0]
+	if dbName == javaDB.Name {
+		dbFile = javaDB.Files[0]
+	}
+
+	pinMu.Lock()
+	defer pinMu.Unlock()
+	target, err := os.Readlink(filepath.Join(cacheDir, dbName))
+	if err != nil {
+		return "", nil, ErrNoDB
+	}
+	dir = filepath.Join(cacheDir, target)
+	if info, err := os.Stat(filepath.Join(dir, dbFile)); err != nil || !info.Mode().IsRegular() {
+		return "", nil, ErrNoDB
+	}
+	pinned[dir]++
+	return dir, func() {
+		pinMu.Lock()
+		defer pinMu.Unlock()
+		pinned[dir]--
+		if pinned[dir] == 0 {
+			delete(pinned, dir)
+		}
+	}, nil
+}
+
 // newVersionDir creates an empty directory to download a new DB version into.
 func newVersionDir(cacheDir, dbName string) (string, error) {
 	versionsDir := filepath.Join(cacheDir, dbName+"-versions")
@@ -37,9 +80,9 @@ func newVersionDir(cacheDir, dbName string) (string, error) {
 	return dir, nil
 }
 
-// installDB makes versionDir (from newVersionDir, with the DB files in it) the
+// InstallDB makes versionDir (from newVersionDir, with the DB files in it) the
 // active DB, then removes versions older than the previous one.
-func installDB(cacheDir, dbName, versionDir, manifestDigest string) error {
+func InstallDB(cacheDir, dbName, versionDir, manifestDigest string) error {
 	if err := os.WriteFile(filepath.Join(versionDir, manifestDigestFile), []byte(manifestDigest), 0o644); err != nil {
 		return fmt.Errorf("writing manifest digest: %w", err)
 	}
@@ -68,6 +111,10 @@ func installDB(cacheDir, dbName, versionDir, manifestDigest string) error {
 		return fmt.Errorf("checking %s: %w", link, err)
 	}
 
+	// The swap and the cleanup run under pinMu, see PinActiveVersion.
+	pinMu.Lock()
+	defer pinMu.Unlock()
+
 	previous, _ := os.Readlink(link)
 
 	// Write the new symlink next to the old one, then rename it over the old one.
@@ -80,14 +127,17 @@ func installDB(cacheDir, dbName, versionDir, manifestDigest string) error {
 		return fmt.Errorf("activating DB version: %w", err)
 	}
 
-	// Keep the new and the previous version; remove the rest, including
-	// directories left by failed downloads.
+	// Keep the new and the previous version and every version a scan has pinned;
+	// remove the rest, including directories left by failed downloads.
 	entries, err := os.ReadDir(versionsDir)
 	if err != nil {
 		return fmt.Errorf("cleaning %s: %w", versionsDir, err)
 	}
 	for _, entry := range entries {
 		if entry.Name() == filepath.Base(versionDir) || entry.Name() == filepath.Base(previous) {
+			continue
+		}
+		if pinned[filepath.Join(versionsDir, entry.Name())] > 0 {
 			continue
 		}
 		if err = os.RemoveAll(filepath.Join(versionsDir, entry.Name())); err != nil {
@@ -136,7 +186,7 @@ func installSeed(cacheDir, dbName, seedDir string, files []string) (bool, error)
 			return false, fmt.Errorf("copying seed DB: %w", err)
 		}
 	}
-	if err = installDB(cacheDir, dbName, versionDir, ""); err != nil {
+	if err = InstallDB(cacheDir, dbName, versionDir, ""); err != nil {
 		return false, err
 	}
 	return true, nil
