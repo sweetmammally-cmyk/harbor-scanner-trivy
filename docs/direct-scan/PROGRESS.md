@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 3 done; Phase 4 (updater and freshness) next
-- Last completed task: P3-10
+- Phase: 4 (updater and freshness)
+- Last completed task: P4-1
 - In progress: none
-- Next task: P4-1
+- Next task: P4-2 (state behind an interface, in memory first: last_upstream_check_at, last_confirmed_current_at, newer_available kept when no source answered, mode, active source; fed from `UpdateResults`)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -127,6 +127,19 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P4-1  DB updater loop
+- Status: done
+- What changed: `pkg/v2/dbmgr/updater.go`:
+  - `NewUpdater(ctx, cfg, cacheDir)`, where ctx is the service lifetime.
+  - `Run()` installs the Trivy seed (and the Java seed only when Java sources exist), updates at once, then waits `SCANNER_DB_CHECK_INTERVAL`, or `SCANNER_DB_RETRY_INTERVAL` while either DB is degraded, and returns when ctx ends.
+  - `UpdateNow(waitCtx)` starts a run in its own goroutine, or joins the run in progress (single-flight), and waits for it. `waitCtx` only bounds the waiting: a caller that gives up returns its context error and the run goes on with the lifetime context.
+  - `UpdateResults` holds the Trivy DB result and the Java DB result (nil when `SCANNER_JAVA_DB_SOURCES` is empty), plus `Degraded()`.
+  - New config `DBRetryInterval` (`SCANNER_DB_RETRY_INTERVAL`, default 15m).
+- Files: `pkg/v2/dbmgr/updater.go`, `pkg/v2/dbmgr/updater_test.go`, `pkg/v2/dbmgr/update_test.go` (Java fake moved to file level), `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`
+- Tests run: `go test -short -race -count=10 ./pkg/v2/...` -> ok; `make test` -> ok; coverage config 100%, dbmgr 88.5%. Cases: first run at startup, then runs on a 100ms check interval with no second download; the retry interval while degraded (counted connections); back to the 1h check interval after the retry installs (no more runs for 300ms); the seed is installed before the first update and the Java seed is not installed without Java sources; Run stops within 5s of cancel (checked in cleanup); two concurrent `UpdateNow` calls share one download; a caller with a 50ms wait returns `DeadlineExceeded` and the run goes on; Java only with sources; a degraded Java DB makes the results degraded.
+- Decisions / surprises: the Java seed is only installed when Java sources are configured, so "no Java sources" always means "no Java DB". Tests use short real intervals; P4-5 adds a fake clock where exact timing matters. Not wired into `main.go` yet (P9-1).
+- Next: P4-2
 
 ### 2026-10-15  P3-10  Disk space check and Java DB download cap
 - Status: done

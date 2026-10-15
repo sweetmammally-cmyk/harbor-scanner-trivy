@@ -28,6 +28,8 @@ type Config struct {
 	// DBCheckInterval is read from SCANNER_DB_CHECK_INTERVAL by GetConfig,
 	// because it accepts days ("1d") and falls back to 3h when unset or invalid.
 	DBCheckInterval time.Duration
+	// DBRetryInterval replaces DBCheckInterval while the DB mode is degraded.
+	DBRetryInterval time.Duration `env:"SCANNER_DB_RETRY_INTERVAL" envDefault:"15m"`
 
 	// DBSources and JavaDBSources are read from SCANNER_DB_SOURCES and
 	// SCANNER_JAVA_DB_SOURCES by GetConfig, see ParseDBSources.

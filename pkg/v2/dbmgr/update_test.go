@@ -248,18 +248,19 @@ func TestUpdate(t *testing.T) {
 	})
 }
 
+// startFakeJavaRegistry serves a Java DB layer: Java file name and media type.
+func startFakeJavaRegistry(t *testing.T, content string) *fakeOCIRegistry {
+	f := startFakeOCIRegistry(t, makeLayer(t,
+		"trivy-java.db", content,
+		"metadata.json", `{"Version":1,"UpdatedAt":"`+time.Now().UTC().Format(time.RFC3339Nano)+`"}`,
+	))
+	f.manifest = []byte(strings.Replace(string(f.manifest), trivyDB.MediaType, javaDB.MediaType, 1))
+	f.manifestDigest = digestOf(f.manifest)
+	return f
+}
+
 func TestUpdate_JavaDB(t *testing.T) {
 	now := time.Now()
-	// startFakeJavaRegistry serves a Java DB layer: java file name and media type.
-	startFakeJavaRegistry := func(t *testing.T, content string) *fakeOCIRegistry {
-		f := startFakeOCIRegistry(t, makeLayer(t,
-			"trivy-java.db", content,
-			"metadata.json", `{"Version":1,"UpdatedAt":"`+now.UTC().Format(time.RFC3339Nano)+`"}`,
-		))
-		f.manifest = []byte(strings.Replace(string(f.manifest), trivyDB.MediaType, javaDB.MediaType, 1))
-		f.manifestDigest = digestOf(f.manifest)
-		return f
-	}
 
 	t.Run("Java DB is installed next to the main DB with the same flow", func(t *testing.T) {
 		cacheDir := t.TempDir()
@@ -442,13 +443,7 @@ func TestUpdate_DiskSpace(t *testing.T) {
 }
 
 func TestUpdate_JavaDBDownloadTimeout(t *testing.T) {
-	now := time.Now()
-	f := startFakeOCIRegistry(t, makeLayer(t,
-		"trivy-java.db", "java db",
-		"metadata.json", `{"Version":1,"UpdatedAt":"`+now.UTC().Format(time.RFC3339Nano)+`"}`,
-	))
-	f.manifest = []byte(strings.Replace(string(f.manifest), trivyDB.MediaType, javaDB.MediaType, 1))
-	f.manifestDigest = digestOf(f.manifest)
+	f := startFakeJavaRegistry(t, "java db")
 
 	// A Trivy DB cap that is already over must not affect the Java DB, which has its own.
 	cfg := updateConfig

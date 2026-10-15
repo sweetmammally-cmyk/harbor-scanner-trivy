@@ -15,6 +15,7 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	DBRetryInterval:         15 * time.Minute,
 	DBAgeWarn:               7 * 24 * time.Hour,
 	DBSeedDir:               "/home/scanner/seed/db",
 	JavaDBSeedDir:           "/home/scanner/seed/java-db",
@@ -140,6 +141,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_REGISTRY_USERNAME":         "robot$scanner",
 				"SCANNER_REGISTRY_PASSWORD":         "s3cret",
 				"SCANNER_DB_CHECK_INTERVAL":         "1d",
+				"SCANNER_DB_RETRY_INTERVAL":         "5m",
 				"SCANNER_DB_SOURCES":                "mirror.local/aquasec/trivy-db:2|direct|allow-http1,ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080",
 				"SCANNER_JAVA_DB_SOURCES":           "mirror.local/aquasec/trivy-java-db:1|direct",
 				"SCANNER_DB_SEED_DIR":               "/seed/db",
@@ -168,6 +170,7 @@ func TestGetConfig(t *testing.T) {
 				RegistryUsername: "robot$scanner",
 				RegistryPassword: "s3cret",
 				DBCheckInterval:  24 * time.Hour,
+				DBRetryInterval:  5 * time.Minute,
 				DBSources: []DBSource{
 					{Repository: "mirror.local/aquasec/trivy-db:2", AllowHTTP1: true},
 					{Repository: "ghcr.io/aquasecurity/trivy-db:2", Proxy: &url.URL{Scheme: "socks5", Host: "proxy:1080"}},
