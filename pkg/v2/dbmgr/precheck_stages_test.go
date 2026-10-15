@@ -306,3 +306,78 @@ func TestGetToken_InvalidRealm(t *testing.T) {
 		assert.EqualError(t, err, "token: invalid realm in registry challenge", challenge)
 	}
 }
+
+// TestPrecheck_Hangs checks the main promise of the pre-check: a source that
+// hangs at any point fails within its timeout instead of blocking.
+func TestPrecheck_Hangs(t *testing.T) {
+	for _, scheme := range []string{"http", "socks5"} {
+		t.Run("blackholed "+scheme+" proxy fails at connect", func(t *testing.T) {
+			blackhole := startBlackhole(t)
+			sources, err := config.ParseDBSources("ghcr.io/aquasecurity/trivy-db:2|" + scheme + "://user:s3cret@" + blackhole)
+			require.NoError(t, err)
+
+			cfg := testConfig
+			cfg.PrecheckTimeoutConnect = 100 * time.Millisecond
+			start := time.Now()
+			result := Precheck(context.Background(), sources[0], cfg)
+
+			assert.False(t, result.OK)
+			assert.Less(t, time.Since(start), 2*time.Second)
+			assert.Equal(t, []string{"dns", "connect"}, stageNames(result))
+			assert.Contains(t, result.Stages[1].Detail, "stage timeout 100ms exceeded")
+			assert.NotContains(t, result.Stages[1].Detail, "s3cret")
+		})
+	}
+
+	t.Run("registry that hangs on the manifest fails at the manifest timeout", func(t *testing.T) {
+		server := startFakeRegistry(t, true, false)
+		next := server.Config.Handler
+		server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/manifests/") {
+				<-r.Context().Done()
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+
+		cfg := testConfig
+		cfg.PrecheckTimeoutManifest = 100 * time.Millisecond
+		start := time.Now()
+		result := Precheck(context.Background(), registrySource(t, server, "direct"), cfg)
+
+		assert.False(t, result.OK)
+		assert.Less(t, time.Since(start), 2*time.Second)
+		assert.Equal(t, []string{"dns", "connect", "tls", "http", "manifest"}, stageNames(result))
+		assert.Contains(t, result.Stages[4].Detail, "stage timeout 100ms exceeded")
+	})
+
+	t.Run("overall deadline stops a hang before the stage timeout", func(t *testing.T) {
+		blackhole := startBlackhole(t)
+		sources, err := config.ParseDBSources(blackhole + "/aquasec/trivy-db:2|direct")
+		require.NoError(t, err)
+
+		cfg := testConfig
+		cfg.PrecheckTimeoutTLS = time.Minute
+		cfg.PrecheckTimeoutTotal = 150 * time.Millisecond
+		start := time.Now()
+		result := Precheck(context.Background(), sources[0], cfg)
+
+		assert.False(t, result.OK)
+		assert.Less(t, time.Since(start), 2*time.Second)
+		assert.Contains(t, result.Stages[len(result.Stages)-1].Detail, "overall pre-check deadline exceeded")
+	})
+
+	t.Run("caller cancellation stops the pre-check", func(t *testing.T) {
+		blackhole := startBlackhole(t)
+		sources, err := config.ParseDBSources(blackhole + "/aquasec/trivy-db:2|direct")
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		result := Precheck(ctx, sources[0], testConfig)
+
+		assert.False(t, result.OK)
+		assert.Less(t, time.Since(start), 2*time.Second)
+	})
+}

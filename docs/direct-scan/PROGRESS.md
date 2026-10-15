@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 2 (DB pre-check module)
-- Last completed task: P2-5
+- Last completed task: P2-6
 - In progress: none
-- Next task: P2-6 (fill test gaps: blackholed proxy end to end, redaction already covered)
+- Next task: P2-7 (manual pre-check against one real source)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -100,6 +100,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P2-6  Pre-check test matrix
+- Status: done
+- What changed: added `TestPrecheck_Hangs`: blackholed HTTP and SOCKS5 proxies fail at connect within the 100ms connect timeout; a registry that hangs on the manifest fails at the manifest timeout; the overall deadline (150ms) stops a TLS hang whose stage timeout is 1 minute; caller cancellation stops the check. The rest of the P2-6 list was already covered by P2-1 to P2-5: ok server, TLS failure, no HTTP/2 (with and without `allow-http1`), HTTP proxy, SOCKS5, redaction in results, errors and logs.
+- Files: `pkg/v2/dbmgr/precheck_stages_test.go`
+- Tests run: `go test -short -race -count=5 ./pkg/v2/dbmgr/` -> ok; coverage `pkg/v2/dbmgr` 83.9%, `pkg/v2/config` 100%
+- Decisions / surprises: none
+- Next: P2-7
 
 ### 2026-10-15  P2-5  Pre-check logging
 - Status: done

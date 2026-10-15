@@ -24,7 +24,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P2-3 Stages in order: DNS, connect, TLS handshake (version, cipher, ALPN), HTTP/2 GET `/v2/`, DB manifest request. HTTP/2 required unless the source has `allow-http1`; always record the negotiated protocol
 - [x] P2-4 `httptrace` timings: DNS, connect, TLS, first byte, total
 - [x] P2-5 Log effective source, route and each stage result; redact credentials and Authorization
-- [ ] P2-6 Tests: ok server, blackhole (timeout), TLS failure, no HTTP/2, HTTP proxy, SOCKS5, redaction
+- [x] P2-6 Tests: ok server, blackhole (timeout), TLS failure, no HTTP/2, HTTP proxy, SOCKS5, redaction
 - [ ] P2-7 Manual debug entrypoint or test helper to run a pre-check against one source
 
 ## Phase 3: DB download module
