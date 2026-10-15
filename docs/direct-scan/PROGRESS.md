@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 2 (P2-8 added), then Phase 3
-- Last completed task: P2-7
+- Phase: 2 done; Phase 3 (DB download module) next
+- Last completed task: P2-8
 - In progress: none
-- Next task: P2-8 (classify pre-check failures), then P3-1
+- Next task: P3-1 (OCI client over our transport: reuse `dialTLS`, `getManifest`, `getToken` from `pkg/v2/dbmgr/registry.go`; add blob download)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -106,6 +106,16 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P2-8  Pre-check failure classes
+- Status: done
+- What changed: `StageResult.Class` and `CheckResult.FailureClass`; `classifyFailure(stage, err, timedOut)` maps errors with `errors.Is` / `errors.As`. connect: `ECONNREFUSED` gives tcp_refused. tls: `tls.CertificateVerificationError` gives tls_cert_invalid, an `OpError` with Op "remote error" gives tls_alert, and `ECONNRESET` / EOF give tls_reset. HTTP: the sentinel `errHTTP2NotNegotiated` gives http2_not_negotiated. On a cert error the TLS stage detail gets the peer certificate subject, issuer and expiry. The class appears in each stage log line and as `failure_class` in the "pre-check failed" line. DEMAND 7.3 item 7 lists the classes.
+- Files: `pkg/v2/dbmgr/precheck.go`, `pkg/v2/dbmgr/precheck_class_test.go`, `docs/direct-scan/DEMAND.md`
+- Tests run: `go test -short -race -count=10 ./pkg/v2/dbmgr/` three times -> ok (30 runs); `make test` -> ok; `go vet` -> ok. New tests: raw servers that reset (linger 0, real "connection reset by peer"), go silent, or send a fatal handshake_failure alert after reading the ClientHello; unknown-CA certificate (subject, issuer, expiry checked); refused port; blackholed SOCKS5 proxy; unknown `.invalid` host; HTTP/1.1 only; manifest 404 and hang; no class on success; class in the log.
+- Decisions / surprises:
+  - Extra classes beyond the owner's list, so every failure has one: `tcp_error`, `tls_error`, `http_timeout`, `http_error`, `manifest_timeout`, `manifest_error`, `config_error`. `tls_reset` also covers a plain close (EOF) during the handshake, which an interfering path can send instead of a RST.
+  - Race found by the stress run: the dialers copy the context deadline onto the socket, so a connect could time out before `stageCtx.Err()` was set, and it was classified `tcp_error` in 3 of 10 runs. `runStage` now also counts `os.ErrDeadlineExceeded` as a timeout, and decides "overall vs stage" from the overall deadline itself.
+- Next: P3-1
 
 ### 2026-10-15  P2-7  Manual pre-check entrypoint
 - Status: done

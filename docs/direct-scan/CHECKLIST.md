@@ -26,7 +26,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P2-5 Log effective source, route and each stage result; redact credentials and Authorization
 - [x] P2-6 Tests: ok server, blackhole (timeout), TLS failure, no HTTP/2, HTTP proxy, SOCKS5, redaction
 - [x] P2-7 Manual debug entrypoint or test helper to run a pre-check against one source
-- [ ] P2-8 Classify pre-check failures (dns_failure, tcp_timeout, tcp_refused, tls_reset, tls_timeout, tls_alert, tls_cert_invalid with peer cert subject/issuer/expiry, plus http/manifest classes); record the class in the result and the log; tests with servers that reset, go silent, or send an alert after the ClientHello, and with an unknown-CA certificate
+- [x] P2-8 Classify pre-check failures (dns_failure, tcp_timeout, tcp_refused, tls_reset, tls_timeout, tls_alert, tls_cert_invalid with peer cert subject/issuer/expiry, plus http/manifest classes); record the class in the result and the log; tests with servers that reset, go silent, or send an alert after the ClientHello, and with an unknown-CA certificate
 
 ## Phase 3: DB download module
 - [ ] P3-1 OCI client over our transport (token auth if needed, manifest, blob); record raw-HTTP vs library decision

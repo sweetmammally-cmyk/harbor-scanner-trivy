@@ -3,23 +3,30 @@ package dbmgr
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 )
 
+var errHTTP2NotNegotiated = errors.New("server did not negotiate HTTP/2")
+
 // StageResult is the outcome of one pre-check stage (DEMAND section 7.3).
 type StageResult struct {
-	Stage    string        `json:"stage"`
-	OK       bool          `json:"ok"`
-	Skipped  bool          `json:"skipped,omitempty"`
+	Stage   string `json:"stage"`
+	OK      bool   `json:"ok"`
+	Skipped bool   `json:"skipped,omitempty"`
+	// Class names the kind of failure, for example tls_reset (see classifyFailure). Empty when OK.
+	Class    string        `json:"class,omitempty"`
 	Duration time.Duration `json:"duration"`
 	// FirstByte is the time from the stage start to the first response byte
 	// (http and manifest stages only).
@@ -32,11 +39,13 @@ type StageResult struct {
 // CheckResult is the outcome of the pre-check of one source.
 type CheckResult struct {
 	// Source is DBSource.String(), so proxy credentials are hidden.
-	Source    string        `json:"source"`
-	OK        bool          `json:"ok"`
-	StartedAt time.Time     `json:"started_at"`
-	Duration  time.Duration `json:"duration"`
-	Stages    []StageResult `json:"stages"`
+	Source string `json:"source"`
+	OK     bool   `json:"ok"`
+	// FailureClass is the class of the failed stage. Empty when OK.
+	FailureClass string        `json:"failure_class,omitempty"`
+	StartedAt    time.Time     `json:"started_at"`
+	Duration     time.Duration `json:"duration"`
+	Stages       []StageResult `json:"stages"`
 }
 
 // runStage runs one stage with its own timeout, inside ctx which carries the
@@ -58,10 +67,18 @@ func runStage(ctx context.Context, result *CheckResult, stage string, timeout ti
 	}
 
 	if err != nil {
+		// The dialers copy the context deadline onto the socket, so the socket can
+		// time out a moment before the context reports it. Socket deadlines only come
+		// from our contexts, so a deadline error is also a timeout.
+		timedOut := stageCtx.Err() != nil || errors.Is(err, os.ErrDeadlineExceeded)
+		overallDeadline, _ := ctx.Deadline()
+		overall := ctx.Err() != nil || (timedOut && !overallDeadline.IsZero() && !time.Now().Before(overallDeadline))
+
+		stageResult.Class = classifyFailure(stage, err, timedOut)
 		switch {
-		case ctx.Err() != nil:
+		case overall:
 			stageResult.Detail = fmt.Sprintf("overall pre-check deadline exceeded: %v", err)
-		case stageCtx.Err() != nil:
+		case timedOut:
 			stageResult.Detail = fmt.Sprintf("stage timeout %s exceeded: %v", timeout, err)
 		default:
 			stageResult.Detail = err.Error()
@@ -95,6 +112,9 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 	// result is a named return value, so this also runs with the final result on every early return.
 	defer func() {
 		result.Duration = time.Since(result.StartedAt)
+		if !result.OK && len(result.Stages) > 0 {
+			result.FailureClass = result.Stages[len(result.Stages)-1].Class
+		}
 		for _, stage := range result.Stages {
 			level := slog.LevelInfo
 			if !stage.OK {
@@ -104,6 +124,7 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 				slog.String("stage", stage.Stage),
 				slog.Bool("ok", stage.OK),
 				slog.Bool("skipped", stage.Skipped),
+				slog.String("class", stage.Class),
 				slog.Int64("duration_ms", stage.Duration.Milliseconds()),
 				slog.Int64("first_byte_ms", stage.FirstByte.Milliseconds()),
 				slog.String("detail", stage.Detail),
@@ -112,7 +133,10 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 		if result.OK {
 			logger.Info("DB source pre-check passed", slog.Int64("duration_ms", result.Duration.Milliseconds()))
 		} else {
-			logger.Warn("DB source pre-check failed", slog.Int64("duration_ms", result.Duration.Milliseconds()))
+			logger.Warn("DB source pre-check failed",
+				slog.String("failure_class", result.FailureClass),
+				slog.Int64("duration_ms", result.Duration.Milliseconds()),
+			)
 		}
 	}()
 
@@ -121,7 +145,7 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 
 	ref, err := parseRepository(source.Repository)
 	if err != nil {
-		result.Stages = append(result.Stages, StageResult{Stage: "config", Detail: err.Error()})
+		result.Stages = append(result.Stages, StageResult{Stage: "config", Class: "config_error", Detail: err.Error()})
 		return result
 	}
 
@@ -176,6 +200,13 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 		}
 		tlsConn = tls.Client(conn, newTLSConfig(host))
 		if err = tlsConn.HandshakeContext(ctx); err != nil {
+			// Record which certificate the path presented: a middlebox shows up here.
+			var certErr *tls.CertificateVerificationError
+			if errors.As(err, &certErr) && len(certErr.UnverifiedCertificates) > 0 {
+				cert := certErr.UnverifiedCertificates[0]
+				return "", fmt.Errorf("%w (peer certificate subject=%q issuer=%q expires=%s)", err,
+					cert.Subject.String(), cert.Issuer.String(), cert.NotAfter.UTC().Format(time.RFC3339))
+			}
 			return "", err
 		}
 		state := tlsConn.ConnectionState()
@@ -214,8 +245,8 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 		ctx = withFirstByteTrace(ctx, &firstByte)
 		if protocol != "h2" && !source.AllowHTTP1 {
 			_ = tlsConn.Close()
-			return "", fmt.Errorf("server did not negotiate HTTP/2 (alpn=%q); add the %s option to this source to accept HTTP/1.1",
-				protocol, config.OptionAllowHTTP1)
+			return "", fmt.Errorf("%w (alpn=%q); add the %s option to this source to accept HTTP/1.1",
+				errHTTP2NotNegotiated, protocol, config.OptionAllowHTTP1)
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+ref.Host+"/v2/", nil)
@@ -276,4 +307,53 @@ func withFirstByteTrace(ctx context.Context, firstByte *time.Duration) context.C
 			}
 		},
 	})
+}
+
+// classifyFailure names the kind of failure of a stage (DEMAND section 7.3),
+// so a failing network path can be told apart from a failing registry.
+// timedOut is true when the stage timeout or the overall deadline ended the stage.
+func classifyFailure(stage string, err error, timedOut bool) string {
+	switch stage {
+	case "dns":
+		return "dns_failure"
+	case "connect":
+		if timedOut {
+			return "tcp_timeout"
+		}
+		if errors.Is(err, syscall.ECONNREFUSED) {
+			return "tcp_refused"
+		}
+		return "tcp_error"
+	case "tls":
+		var certErr *tls.CertificateVerificationError
+		var opErr *net.OpError
+		switch {
+		case timedOut:
+			// Nothing came back after the ClientHello.
+			return "tls_timeout"
+		case errors.As(err, &certErr):
+			return "tls_cert_invalid"
+		case errors.As(err, &opErr) && opErr.Op == "remote error":
+			// crypto/tls reports a received alert as an OpError with Op "remote error".
+			return "tls_alert"
+		case errors.Is(err, syscall.ECONNRESET), errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+			// The connection was reset or closed during the handshake.
+			return "tls_reset"
+		}
+		return "tls_error"
+	case "http":
+		if timedOut {
+			return "http_timeout"
+		}
+		if errors.Is(err, errHTTP2NotNegotiated) {
+			return "http2_not_negotiated"
+		}
+		return "http_error"
+	case "manifest":
+		if timedOut {
+			return "manifest_timeout"
+		}
+		return "manifest_error"
+	}
+	return stage + "_error"
 }

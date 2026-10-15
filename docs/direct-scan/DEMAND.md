@@ -192,6 +192,13 @@ For each configured source, in order:
 4. HTTP/2 request to the registry `/v2/` endpoint, then the DB manifest. Record DNS, connect, TLS, first-byte and total timings, status and negotiated protocol. HTTP/2 is required by default: a source that negotiates HTTP/1.1 fails its pre-check, unless that source has the `allow-http1` option. The negotiated protocol is always recorded.
 5. Every stage has its own timeout and the whole check has a deadline.
 6. DNS stage: for a direct route, resolve the registry host. For a proxy route the stage is recorded as skipped, because the proxy resolves the registry name; the proxy's DNS and TCP are covered by the connect stage.
+7. A failed pre-check records a failure class in the result and the log, so a network path that interferes can be told apart from a failing registry:
+   - `dns_failure`
+   - `tcp_timeout`, `tcp_refused`, `tcp_error` (other connect errors, for example a proxy refusing the credentials)
+   - `tls_reset` (connection reset or closed during the handshake), `tls_timeout` (no response after the ClientHello), `tls_alert` (the peer sent a TLS alert), `tls_cert_invalid` (normal verification failed; the peer certificate's subject, issuer and expiry are recorded), `tls_error`
+   - `http2_not_negotiated`, `http_timeout`, `http_error`, `manifest_timeout`, `manifest_error`, `config_error`
+
+   The TLS stage is there to see whether the network path interferes with the handshake. Certificate verification is the normal one (system CA pool); there is no pinning and no skip-verify.
 
 The sources form a pool: an ordered list that can mix public registries (for example Docker Hub, ghcr.io) and our own mirrors, each with its own route.
 
