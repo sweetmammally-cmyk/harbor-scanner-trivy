@@ -6,10 +6,10 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 0
-- Last completed task: P0-1
+- Last completed task: P0-2
 - In progress: none
-- Next task: P0-2
-- Blockers / questions for the user: none
+- Next task: P0-3
+- Blockers / questions for the user: baseline has 3 failing tests caused by commit `0c87038` (Harbor report now carries `vendor_attributes.Trivy`). Owner must choose: keep the change and update the tests, or revert it. Also: the INFO-level "FULL TRIVY REPORT" dump in `pkg/trivy/wrapper.go` looks like leftover debug code.
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -30,9 +30,20 @@ Newest changelog entries go at the top of the Changelog.
 - Logger and config pattern: standard library `log/slog` with a JSON handler on stdout, set as default in `main.go`; level from `SCANNER_LOG_LEVEL` (`etc.LogLevel`). Code calls `slog.Info/Debug/...` with `slog.String(...)` attrs. Config is one struct per area with `env:"..." envDefault:"..."` tags parsed by `github.com/caarlos0/env/v6` (`etc.GetConfig`), then validated by `etc.Check`. Errors are wrapped with `fmt.Errorf("...: %w", err)` or `xerrors.Errorf`.
 - How Trivy is invoked today: `pkg/trivy/wrapper.go` `prepareScanCmd` builds `exec.Command("trivy", "image"|"sbom", ...)` with `--no-progress --severity --vuln-type --format --output <tmp file> --cache-dir --timeout` and optional flags (`--skip-db-update`, `--skip-java-db-update`, `--offline-scan`, `--db-repository`, ...). The env comes from `ambassador.Environ()`; registry credentials go in as env vars `TRIVY_USERNAME`/`TRIVY_PASSWORD` or `TRIVY_REGISTRY_TOKEN`, never argv. It runs through `ambassador.RunCmd` (`cmd.CombinedOutput`), with no Go-side context or kill; only Trivy's own `--timeout` (`SCANNER_TRIVY_TIMEOUT`, default 5m) limits it. The JSON report is read from the temp file.
 - Trivy version pinned: `TRIVY_VERSION=0.74.0` in `Dockerfile` and in `make setup`. The local dev machine has trivy 0.71.2 on PATH.
-- Build / test / lint commands: (TBD)
+- Build / test / lint commands:
+  - build: `go build ./...` (binary: `make build`)
+  - unit tests: `make test` (= `go test -v -short -race -coverprofile=coverage.txt -covermode=atomic ./...`)
+  - integration tests: `make test-integration` (= `go test -count=1 -v -tags=integration ./test/integration/...`, needs Docker)
+  - component tests: `make test-component` (builds the Docker image first)
+  - vet: `go vet ./...`
+  - lint: `make lint` needs `./bin/golangci-lint` (not installed locally)
 - CI: `.github/workflows/build.yml` on push to main and PRs: yamllint, `make setup`, `make lint`, `make test`, `make test-integration`, `make test-component`, goreleaser snapshot. Changes only under `docs/**` or `*.md` skip CI.
-- Baseline test result before our changes: (TBD)
+- Baseline test result before our changes (2026-10-15, HEAD `3d447af`, code same as `f917cc0`):
+  - `go build ./...`: OK. `go vet ./...`: OK.
+  - `make test`: **FAIL**. `TestWrapper_Scan` (pkg/trivy) and `TestTransformer_Transform` (pkg/scan) fail; everything else passes. Cause: commit `0c87038` added `Vulnerability.Target/Type` and the `Trivy` vendor attribute without updating tests. On upstream `2691434` all `./pkg/...` tests pass (checked in a temporary worktree).
+  - `make test-integration`: **FAIL** in `test/integration/api` (`TestRestAPI`: Harbor report now has `vendor_attributes.Trivy`, same cause). `test/integration/persistence/redis`: OK.
+  - `make test-component`: not run (needs a full image build; slow).
+  - `make lint`: not run (golangci-lint not installed; pinned v1.21.0 is too old for Go 1.26).
 
 ## Decisions
 
@@ -66,6 +77,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P0-2  Baseline build and tests
+- Status: done (baseline recorded; it is not green)
+- What changed: ran build, vet, unit and integration tests; recorded commands and results under "Repo facts".
+- Files: `docs/direct-scan/PROGRESS.md`, `docs/direct-scan/CHECKLIST.md`
+- Tests run: `go build ./...` -> ok; `go vet ./...` -> ok; `make test` -> FAIL (TestWrapper_Scan, TestTransformer_Transform); `go test -tags=integration ./test/integration/...` -> FAIL (TestRestAPI), redis ok; same `./pkg/...` tests on upstream `2691434` -> all ok. Component tests and lint not run.
+- Decisions / surprises: the failures come from our own earlier commit `0c87038`, not from upstream. Left untouched; question raised to the owner (see Current state).
+- Next: P0-3
 
 ### 2026-10-15  P0-1  Repo facts recorded
 - Status: done
