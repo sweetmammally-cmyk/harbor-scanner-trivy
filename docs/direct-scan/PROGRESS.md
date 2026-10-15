@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 2 (DB pre-check module)
-- Last completed task: P2-4
+- Last completed task: P2-5
 - In progress: none
-- Next task: P2-5 (log effective source, route and each stage result, redacted)
+- Next task: P2-6 (fill test gaps: blackholed proxy end to end, redaction already covered)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -100,6 +100,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P2-5  Pre-check logging
+- Status: done
+- What changed: `Precheck` logs "DB source pre-check started" (source with masked proxy credentials, route, TLS minimum version, ALPN offered, allow_http1). Then one "DB source pre-check stage" line per stage (stage, ok, skipped, duration_ms, first_byte_ms, detail): INFO when it passed, WARN when it failed. Last comes "DB source pre-check passed" (INFO) or "... failed" (WARN). The stage lines are written in a defer once the check ends; every stage is time-bounded, so they appear within `PrecheckTimeoutTotal`.
+- Files: `pkg/v2/dbmgr/precheck.go`, `pkg/v2/dbmgr/precheck_log_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/dbmgr/` -> ok; `go vet` -> ok. Log tests check line order and fields for a passing SOCKS5 check, WARN lines for an HTTP/1.1 rejection, and redaction: no proxy password, token, `user:`, `Authorization`, `Bearer` or `Basic` in any log line, including when the proxy rejects the credentials with 407.
+- Decisions / surprises: durations are logged in whole milliseconds, so very fast local stages show 0; the exact values stay in `CheckResult`. The ERROR "all DB sources failed" line belongs to the fallback loop (P3-6).
+- Next: P2-6
 
 ### 2026-10-15  P2-4  Pre-check timings
 - Status: done

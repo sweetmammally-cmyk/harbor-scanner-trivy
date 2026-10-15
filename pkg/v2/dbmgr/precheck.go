@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -75,11 +76,44 @@ func runStage(ctx context.Context, result *CheckResult, stage string, timeout ti
 // (DEMAND section 7.3). Stages run in order and stop at the first failure:
 // dns, connect, tls, http (GET /v2/) and manifest. Each stage has its own
 // timeout and the whole check is bounded by cfg.PrecheckTimeoutTotal.
+// It logs the effective source and every stage result; credentials never reach the logs.
 func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (result CheckResult) {
 	result = CheckResult{Source: source.String(), StartedAt: time.Now()}
-	// result is a named return value, so this also sets the duration on every early return.
+
+	route := config.RouteDirect
+	if source.Proxy != nil {
+		route = source.Proxy.Scheme + " proxy " + source.Proxy.Host
+	}
+	logger := slog.With(slog.String("source", result.Source))
+	logger.Info("DB source pre-check started",
+		slog.String("route", route),
+		slog.String("tls_min_version", "TLS 1.2"),
+		slog.String("alpn_offered", "h2,http/1.1"),
+		slog.Bool("allow_http1", source.AllowHTTP1),
+	)
+
+	// result is a named return value, so this also runs with the final result on every early return.
 	defer func() {
 		result.Duration = time.Since(result.StartedAt)
+		for _, stage := range result.Stages {
+			level := slog.LevelInfo
+			if !stage.OK {
+				level = slog.LevelWarn
+			}
+			logger.Log(context.Background(), level, "DB source pre-check stage",
+				slog.String("stage", stage.Stage),
+				slog.Bool("ok", stage.OK),
+				slog.Bool("skipped", stage.Skipped),
+				slog.Int64("duration_ms", stage.Duration.Milliseconds()),
+				slog.Int64("first_byte_ms", stage.FirstByte.Milliseconds()),
+				slog.String("detail", stage.Detail),
+			)
+		}
+		if result.OK {
+			logger.Info("DB source pre-check passed", slog.Int64("duration_ms", result.Duration.Milliseconds()))
+		} else {
+			logger.Warn("DB source pre-check failed", slog.Int64("duration_ms", result.Duration.Milliseconds()))
+		}
 	}()
 
 	ctx, cancel := context.WithTimeout(ctx, cfg.PrecheckTimeoutTotal)

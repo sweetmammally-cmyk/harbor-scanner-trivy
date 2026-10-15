@@ -23,7 +23,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P2-2 Stage runner with per-stage timeouts and an overall deadline; result struct (stage, ok, timing, detail)
 - [x] P2-3 Stages in order: DNS, connect, TLS handshake (version, cipher, ALPN), HTTP/2 GET `/v2/`, DB manifest request. HTTP/2 required unless the source has `allow-http1`; always record the negotiated protocol
 - [x] P2-4 `httptrace` timings: DNS, connect, TLS, first byte, total
-- [ ] P2-5 Log effective source, route and each stage result; redact credentials and Authorization
+- [x] P2-5 Log effective source, route and each stage result; redact credentials and Authorization
 - [ ] P2-6 Tests: ok server, blackhole (timeout), TLS failure, no HTTP/2, HTTP proxy, SOCKS5, redaction
 - [ ] P2-7 Manual debug entrypoint or test helper to run a pre-check against one source
 
