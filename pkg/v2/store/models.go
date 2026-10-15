@@ -36,6 +36,8 @@ type Scan struct {
 	CustomerData map[string]any `bson:"customer_data,omitempty"`
 	Image        Image          `bson:"image"`
 	Options      ScanOptions    `bson:"options"`
+	// Reference is what the scan runner scans: host/repository/name@digest.
+	Reference string `bson:"reference"`
 	// ScannedPlatform is the platform scanned in a multi-platform image
 	// (SCANNER_SCAN_PLATFORM); part of the cache and dedupe keys.
 	ScannedPlatform string    `bson:"scanned_platform"`
@@ -68,7 +70,17 @@ type Scan struct {
 
 	Worker     string     `bson:"worker,omitempty"`
 	LeaseUntil *time.Time `bson:"lease_until,omitempty"`
-	Error      string     `bson:"error,omitempty"`
+	// Attempt counts the claims of the scan; it fences the worker's writes.
+	Attempt int `bson:"attempt"`
+	// ActiveKey is set while the scan is queued or scanning (see queue.ActiveKey);
+	// a unique partial index makes identical work share one scan.
+	ActiveKey string `bson:"active_key,omitempty"`
+	// PriorRequestID keeps the request_id of a failed scan, so a retry with the
+	// same request_id creates a new scan.
+	PriorRequestID string `bson:"prior_request_id,omitempty"`
+	// Priority is reserved for queue priorities, which are deferred (DEMAND section 14).
+	Priority *int   `bson:"priority,omitempty"`
+	Error    string `bson:"error,omitempty"`
 	// FailureClass is set on a failed scan (for example trivy_timeout).
 	FailureClass string `bson:"failure_class,omitempty"`
 }
@@ -88,6 +100,8 @@ type Image struct {
 type ScanOptions struct {
 	Platforms []string `bson:"platforms"`
 	Severity  []string `bson:"severity"`
+	// MaxDBAge is the request's max_db_age, for the on-demand DB refresh.
+	MaxDBAge time.Duration `bson:"max_db_age,omitempty"`
 }
 
 // TrivyInfo records the Trivy and DB versions a scan used.

@@ -72,7 +72,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P7-7 Tests: canned Trivy JSON fixtures; fake trivy executable (env allowlist without SCANNER_* secrets, timeout kill including children, huge output, exit codes, stderr redaction); DB swap during a scan; two concurrent Trivy processes; one manual real-image run (`manual` tag)
 
 ## Phase 8: Queue
-- [ ] P8-1 Enqueue into `scans` (state queued); dedupe with `active_key` and its unique partial index (schema version bump); idempotency on `request_id` (queued, scanning, done; a failed scan moves it to `prior_request_id`); queue full -> 429 with `Retry-After`; reserved `priority`
+- [x] P8-1 Enqueue into `scans` (state queued); dedupe with `active_key` and its unique partial index (schema version bump); idempotency on `request_id` (queued, scanning, done; a failed scan moves it to `prior_request_id`); queue full -> 429 with `Retry-After`; reserved `priority`
 - [ ] P8-2 Worker pool: claim with `findOneAndUpdate` and `$$NOW` leases, heartbeat, fenced writes on `_id` + `worker` + `attempt` (lost lease: discard and kill Trivy), poll with jitter plus in-process wake-up, no claim while not ready, on-demand refresh before each scan, completion retry up to 2 minutes
 - [ ] P8-3 Reaper every 30s on every replica: expired -> queued, after `SCANNER_QUEUE_MAX_ATTEMPTS` -> failed `worker_lost`
 - [ ] P8-4 Graceful shutdown: stop claiming, `SCANNER_SHUTDOWN_GRACE`, then kill and release leases without counting the attempt

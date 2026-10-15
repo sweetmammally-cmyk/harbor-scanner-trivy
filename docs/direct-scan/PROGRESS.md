@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 7 done; Phase 8 (queue) next
-- Last completed task: P7-8
+- Phase: 8 (queue)
+- Last completed task: P8-1
 - In progress: none
-- Next task: P8-1 (enqueue, dedupe with `active_key`, idempotency, queue full)
+- Next task: P8-2 (claim, heartbeat, fenced writes, worker loop)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -178,6 +178,30 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P8-1  Enqueue, dedupe, idempotency
+- Status: done
+- What changed:
+  - New package `pkg/v2/queue`:
+    - `New(client, cfg)`.
+    - `ActiveKey(scan)` = sha256 of digest, sorted platforms, sorted severities, scanned platform and Trivy version.
+    - `Enqueue(ctx, scan)` returns `(scan, created, err)`: an existing scan with the same `request_id` (queued, scanning or done) is returned; then a queued or scanning scan with the same `active_key`; then `ErrQueueFull` if `queued` count >= `SCANNER_QUEUE_MAX_LENGTH`; otherwise insert with `state: queued`, `attempt: 0`, `queued_at` (the replica's clock; only lease times use MongoDB's clock). A duplicate-key error on the insert (a concurrent request won) returns the winner's scan, found by `request_id` or `active_key`. A successful enqueue wakes an idle worker of this replica.
+  - Model: `reference`, `attempt`, `active_key`, `prior_request_id`, reserved `priority`, `options.max_db_age`.
+  - Schema version 2: indexes `active_key_unique` (unique, partial on `{active_key: {$type: "string"}}`) and `state_lease_until` (for the reaper).
+  - Config `QueueLease` (60s), `QueueMaxAttempts` (3), `QueuePollInterval` (2s), `ShutdownGrace` (30s).
+  - Test helper package `test/integration/mongotest` (`StartContainer` for `TestMain`, `Config` with a new database per test, `Client` with the schema ensured).
+- Files: `pkg/v2/queue/queue.go`, `pkg/v2/queue/metrics.go` (placeholder for P8-5), `pkg/v2/store/models.go`, `pkg/v2/store/schema.go`, `pkg/v2/store/*_test.go`, `pkg/v2/config/*`, `test/integration/mongotest/mongotest.go`, `test/integration/queue/enqueue_test.go`, `test/integration/store/schema_test.go`
+- Tests run: `make test` -> ok; `go test -tags=integration ./test/integration/...` -> ok. Integration cases (`mongo:7`):
+  - a new scan is queued with its active key and no `priority`;
+  - the same `request_id` returns the first scan;
+  - identical work shares one scan whatever the list order;
+  - each of digest, platforms, severities, scanned platform and Trivy version makes new work;
+  - ten concurrent identical requests give one scan and one document;
+  - ten concurrent requests with the same `request_id` give one document;
+  - with a full queue new work gets `ErrQueueFull` while identical work still joins;
+  - a done scan stays idempotent and identical work after it is a new scan.
+- Decisions / surprises: the retry-after-failure case (`prior_request_id`) is tested with the real failure write in P8-2.
+- Next: P8-2
 
 ### 2026-10-15  P7-8  Trivy 0.74.0 and the scan platform
 - Status: done

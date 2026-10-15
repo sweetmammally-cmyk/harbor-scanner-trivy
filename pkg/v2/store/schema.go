@@ -13,7 +13,8 @@ import (
 )
 
 // SchemaVersion is the data plane schema version this code expects.
-const SchemaVersion = 1
+// 2: the queue indexes (active_key_unique, state_lease_until).
+const SchemaVersion = 2
 
 // CollectionSchemaVersion holds one document, _id "schema", with the stored version.
 const CollectionSchemaVersion = "schema_version"
@@ -74,6 +75,21 @@ func scansIndexes() []index {
 			collection: CollectionScans,
 			name:       "state_queued_at",
 			keys:       bson.D{{Key: "state", Value: 1}, {Key: "queued_at", Value: 1}},
+			options:    options.Index(),
+		},
+		{
+			collection: CollectionScans,
+			name:       "active_key_unique",
+			keys:       bson.D{{Key: "active_key", Value: 1}},
+			// Partial: only queued and scanning scans have an active_key.
+			options: options.Index().SetUnique(true).
+				SetPartialFilterExpression(bson.D{{Key: "active_key", Value: bson.D{{Key: "$type", Value: "string"}}}}),
+		},
+		{
+			// For the reaper: expired leases of scanning scans.
+			collection: CollectionScans,
+			name:       "state_lease_until",
+			keys:       bson.D{{Key: "state", Value: 1}, {Key: "lease_until", Value: 1}},
 			options:    options.Index(),
 		},
 	}

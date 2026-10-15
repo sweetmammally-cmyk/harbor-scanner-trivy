@@ -72,7 +72,15 @@ type Config struct {
 	// DBAgeWarn is read from SCANNER_DB_AGE_WARN by GetConfig, because it accepts days ("7d").
 	DBAgeWarn time.Duration
 
-	QueueWorkers   int           `env:"SCANNER_QUEUE_WORKERS" envDefault:"1"`
+	QueueWorkers int `env:"SCANNER_QUEUE_WORKERS" envDefault:"1"`
+	// QueueLease is the lease of a running scan; the heartbeat runs every third of it.
+	QueueLease time.Duration `env:"SCANNER_QUEUE_LEASE" envDefault:"60s"`
+	// QueueMaxAttempts is how many lease losses a scan may have before it fails.
+	QueueMaxAttempts int `env:"SCANNER_QUEUE_MAX_ATTEMPTS" envDefault:"3"`
+	// QueuePollInterval is how often idle workers look for work (with jitter).
+	QueuePollInterval time.Duration `env:"SCANNER_QUEUE_POLL_INTERVAL" envDefault:"2s"`
+	// ShutdownGrace is how long running scans may finish after SIGTERM.
+	ShutdownGrace  time.Duration `env:"SCANNER_SHUTDOWN_GRACE" envDefault:"30s"`
 	QueueMaxLength int           `env:"SCANNER_QUEUE_MAX_LENGTH" envDefault:"100"`
 	ScanTimeout    time.Duration `env:"SCANNER_SCAN_TIMEOUT" envDefault:"10m"`
 	// ScanPlatform is the platform scanned in a multi-platform image (Trivy --platform).

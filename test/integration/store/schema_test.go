@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -200,7 +201,7 @@ func TestSchema(t *testing.T) {
 
 		err := setup.EnsureSchema(context.Background())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "stored schema version 99 is newer than this scanner's 1")
+		assert.Contains(t, err.Error(), fmt.Sprintf("stored schema version 99 is newer than this scanner's %d", store.SchemaVersion))
 
 		client := newClient(t, cfg)
 		monitor(t, client)

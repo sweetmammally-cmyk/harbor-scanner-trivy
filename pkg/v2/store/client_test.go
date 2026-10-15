@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -228,7 +229,7 @@ func TestClient_SchemaReadiness(t *testing.T) {
 	client.checkOnce(context.Background())
 	assert.True(t, client.Ready())
 	assert.Equal(t, 3, ensureCalls)
-	assert.Contains(t, logs.String(), `"msg":"MongoDB schema is ready","schema_version":1`)
+	assert.Contains(t, logs.String(), fmt.Sprintf(`"msg":"MongoDB schema is ready","schema_version":%d`, SchemaVersion))
 
 	// Mongo goes down: not ready, and the schema step runs again when it comes back.
 	pingErr = errors.New("connection refused")

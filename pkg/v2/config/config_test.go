@@ -16,6 +16,10 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	QueueLease:                  60 * time.Second,
+	QueueMaxAttempts:            3,
+	QueuePollInterval:           2 * time.Second,
+	ShutdownGrace:               30 * time.Second,
 	ScanPlatform:                "linux/amd64",
 	ScanMaxOutput:               256 << 20,
 	ScanMaxFindings:             10000,
@@ -216,6 +220,10 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_ONDEMAND_REFRESH_WAIT":          "30s",
 				"SCANNER_ONDEMAND_REFRESH_MIN_GAP":       "2m",
 				"SCANNER_QUEUE_WORKERS":                  "4",
+				"SCANNER_QUEUE_LEASE":                    "90s",
+				"SCANNER_QUEUE_MAX_ATTEMPTS":             "5",
+				"SCANNER_QUEUE_POLL_INTERVAL":            "1s",
+				"SCANNER_SHUTDOWN_GRACE":                 "45s",
 				"SCANNER_QUEUE_MAX_LENGTH":               "50",
 				"SCANNER_SCAN_TIMEOUT":                   "20m",
 				"SCANNER_SCAN_PLATFORM":                  "linux/arm64/v8",
@@ -262,6 +270,10 @@ func TestGetConfig(t *testing.T) {
 				OnDemandRefreshWait:     30 * time.Second,
 				OnDemandRefreshMinGap:   2 * time.Minute,
 				QueueWorkers:            4,
+				QueueLease:              90 * time.Second,
+				QueueMaxAttempts:        5,
+				QueuePollInterval:       time.Second,
+				ShutdownGrace:           45 * time.Second,
 				QueueMaxLength:          50,
 				ScanTimeout:             20 * time.Minute,
 				ScanPlatform:            "linux/arm64/v8",
