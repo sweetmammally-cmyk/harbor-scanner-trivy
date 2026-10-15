@@ -6,10 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 3 (DB download module)
-- Last completed task: P3-6
-- In progress: none
-- Next task: P3-7 (Java DB), then finish P3-9 (fake-registry list)
-- In progress note: P3-9 is `[~]`: the real ghcr.io download is done and recorded; the fake-registry cases are mostly covered by P3-3 and P3-6 tests, and the gaps get filled after P3-7
+- Last completed task: P3-7
+- In progress: P3-9 (`[~]`): the real ghcr.io download is done and recorded; the fake-registry cases are mostly covered by the P3-3 and P3-6 tests; fill the gaps next
+- Next task: finish P3-9, then Phase 4
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -123,6 +122,16 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-7  Java DB
+- Status: done
+- What changed: `javaDB` kind in `pkg/v2/dbmgr/update.go`: directory `java-db`, files `trivy-java.db` and `metadata.json`, layer media type `application/vnd.aquasec.trivy.javadb.layer.v1.tar+gzip` (checked against the real `ghcr.io/aquasecurity/trivy-java-db:1` manifest). The Java DB uses the same `update`, `installDB` and `installSeed` code with its own sources and seed directory.
+- Files: `pkg/v2/dbmgr/update.go`, `pkg/v2/dbmgr/update_test.go`
+- Tests run: `go test -short -race -count=3 -run TestUpdate ./pkg/v2/dbmgr/` -> ok. Cases: the Java DB is installed next to the main DB through a fallback (refused, then ok), each keeps its own digest; the main DB layer is rejected as a Java DB; the Java seed goes into `java-db` only.
+- Decisions / surprises:
+  - The real Java DB layer is 983,567,002 bytes (938 MiB) compressed, and `trivy-java.db` is 1.55 GB extracted (seen in the tar listing; the full DB was not downloaded). At the default 15m `SCANNER_DB_DOWNLOAD_TIMEOUT` this needs at least about 1.1 MB/s; slower links must raise the cap. To raise with the owner.
+  - `update` with no sources reports `degraded`, so the updater (P4-1) must skip the Java DB when `SCANNER_JAVA_DB_SOURCES` is empty; added to P4-1.
+- Next: finish P3-9
 
 ### 2026-10-15  P3-9  Partial: real ghcr.io DB download
 - Status: partial (manual real-registry part done)

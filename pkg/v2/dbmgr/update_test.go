@@ -3,6 +3,8 @@ package dbmgr
 import (
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -240,5 +242,63 @@ func TestUpdate(t *testing.T) {
 		require.True(t, result.Installed)
 		assertNoSecretsInLogs(t, logs.String())
 		assert.NotContains(t, result.ActiveSource, "s3cret")
+	})
+}
+
+func TestUpdate_JavaDB(t *testing.T) {
+	now := time.Now()
+	// startFakeJavaRegistry serves a Java DB layer: java file name and media type.
+	startFakeJavaRegistry := func(t *testing.T, content string) *fakeOCIRegistry {
+		f := startFakeOCIRegistry(t, makeLayer(t,
+			"trivy-java.db", content,
+			"metadata.json", `{"Version":1,"UpdatedAt":"`+now.UTC().Format(time.RFC3339Nano)+`"}`,
+		))
+		f.manifest = []byte(strings.Replace(string(f.manifest), trivyDB.MediaType, javaDB.MediaType, 1))
+		f.manifestDigest = digestOf(f.manifest)
+		return f
+	}
+
+	t.Run("Java DB is installed next to the main DB with the same flow", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		mainDB := startFakeOCIRegistry(t, dbLayer(t, "main db", now))
+		javaSource := startFakeJavaRegistry(t, "java db")
+
+		mainResult := update(testContext(t), updateConfig, cacheDir, trivyDB, []config.DBSource{mainDB.source(t, "direct")})
+		javaResult := update(testContext(t), updateConfig, cacheDir, javaDB,
+			[]config.DBSource{refusedSource(t), javaSource.source(t, "direct")})
+
+		require.True(t, mainResult.Installed)
+		require.True(t, javaResult.Installed)
+		assert.Equal(t, []string{"tcp_refused", ""}, sourceClasses(javaResult), "the Java DB uses the same fallback")
+		assert.Equal(t, "main db", readDB(t, cacheDir))
+		assert.True(t, dbPresent(cacheDir, "java-db", "trivy-java.db"))
+		assert.Equal(t, javaSource.manifestDigest, installedDigest(cacheDir, "java-db"))
+		assert.Equal(t, mainDB.manifestDigest, installedDigest(cacheDir, "db"))
+		assert.Equal(t, 1, javaResult.Metadata.Version)
+	})
+
+	t.Run("the main DB layer is not accepted as a Java DB", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		mainDB := startFakeOCIRegistry(t, dbLayer(t, "main db", now))
+
+		result := update(testContext(t), updateConfig, cacheDir, javaDB, []config.DBSource{mainDB.source(t, "direct")})
+
+		assert.False(t, result.Installed)
+		assert.Equal(t, "manifest has no layer of type "+javaDB.MediaType, result.Sources[0].Error)
+		assert.False(t, dbPresent(cacheDir, "java-db", "trivy-java.db"))
+	})
+
+	t.Run("Java seed is installed from its own seed directory", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		seedDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(seedDir, "trivy-java.db"), []byte("java seed"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(seedDir, "metadata.json"), []byte("{}"), 0o644))
+
+		installed, err := installSeed(cacheDir, javaDB.Name, seedDir, javaDB.Files)
+
+		require.NoError(t, err)
+		assert.True(t, installed)
+		assert.True(t, dbPresent(cacheDir, "java-db", "trivy-java.db"))
+		assert.False(t, dbPresent(cacheDir, "db", "trivy.db"))
 	})
 }

@@ -33,6 +33,14 @@ var trivyDB = dbKind{
 	MediaType: "application/vnd.aquasec.trivy.db.layer.v1.tar+gzip",
 }
 
+// javaDB is Trivy's Java DB (for example ghcr.io/aquasecurity/trivy-java-db:1),
+// read from <cache-dir>/java-db.
+var javaDB = dbKind{
+	Name:      "java-db",
+	Files:     []string{"trivy-java.db", "metadata.json"},
+	MediaType: "application/vnd.aquasec.trivy.javadb.layer.v1.tar+gzip",
+}
+
 // SourceResult is what happened with one source during an update.
 type SourceResult struct {
 	Source   string      `json:"source"`
