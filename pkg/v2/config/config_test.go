@@ -15,6 +15,8 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	DBSeedDir:               "/home/scanner/seed/db",
+	JavaDBSeedDir:           "/home/scanner/seed/java-db",
 	DBCheckInterval:         3 * time.Hour,
 	PrecheckTimeoutDNS:      5 * time.Second,
 	PrecheckTimeoutConnect:  5 * time.Second,
@@ -124,6 +126,8 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_DB_CHECK_INTERVAL":         "1d",
 				"SCANNER_DB_SOURCES":                "mirror.local/aquasec/trivy-db:2|direct|allow-http1,ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080",
 				"SCANNER_JAVA_DB_SOURCES":           "mirror.local/aquasec/trivy-java-db:1|direct",
+				"SCANNER_DB_SEED_DIR":               "/seed/db",
+				"SCANNER_JAVA_DB_SEED_DIR":          "/seed/java-db",
 				"SCANNER_PRECHECK_TIMEOUT_DNS":      "1s",
 				"SCANNER_PRECHECK_TIMEOUT_CONNECT":  "2s",
 				"SCANNER_PRECHECK_TIMEOUT_TLS":      "3s",
@@ -153,6 +157,8 @@ func TestGetConfig(t *testing.T) {
 				JavaDBSources: []DBSource{
 					{Repository: "mirror.local/aquasec/trivy-java-db:1"},
 				},
+				DBSeedDir:               "/seed/db",
+				JavaDBSeedDir:           "/seed/java-db",
 				PrecheckTimeoutDNS:      1 * time.Second,
 				PrecheckTimeoutConnect:  2 * time.Second,
 				PrecheckTimeoutTLS:      3 * time.Second,

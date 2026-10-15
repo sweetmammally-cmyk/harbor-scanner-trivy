@@ -128,3 +128,69 @@ func TestInstallDB(t *testing.T) {
 		assert.Equal(t, "", installedDigest(cacheDir, "db"))
 	})
 }
+
+func TestInstallSeed(t *testing.T) {
+	writeSeed := func(t *testing.T, files ...string) string {
+		seedDir := t.TempDir()
+		for i := 0; i < len(files); i += 2 {
+			require.NoError(t, os.WriteFile(filepath.Join(seedDir, files[i]), []byte(files[i+1]), 0o644))
+		}
+		return seedDir
+	}
+
+	t.Run("installs the seed when there is no DB", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		seedDir := writeSeed(t, "trivy.db", "seed db", "metadata.json", "{}")
+		assert.False(t, dbPresent(cacheDir, "db", "trivy.db"), "not ready before the seed")
+
+		installed, err := installSeed(cacheDir, "db", seedDir, dbFiles)
+
+		require.NoError(t, err)
+		assert.True(t, installed)
+		assert.True(t, dbPresent(cacheDir, "db", "trivy.db"))
+		assert.Equal(t, "seed db", readDB(t, cacheDir))
+		assert.Equal(t, "", installedDigest(cacheDir, "db"), "the first upstream check must download")
+	})
+
+	t.Run("keeps an installed DB", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		require.NoError(t, installDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v1"), "sha256:v1"))
+		seedDir := writeSeed(t, "trivy.db", "seed db", "metadata.json", "{}")
+
+		installed, err := installSeed(cacheDir, "db", seedDir, dbFiles)
+
+		require.NoError(t, err)
+		assert.False(t, installed)
+		assert.Equal(t, "db v1", readDB(t, cacheDir))
+	})
+
+	t.Run("no seed directory means no seed and not ready", func(t *testing.T) {
+		cacheDir := t.TempDir()
+
+		installed, err := installSeed(cacheDir, "db", filepath.Join(t.TempDir(), "missing"), dbFiles)
+
+		require.NoError(t, err)
+		assert.False(t, installed)
+		assert.False(t, dbPresent(cacheDir, "db", "trivy.db"))
+	})
+
+	t.Run("incomplete seed is an error and leaves nothing behind", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		seedDir := writeSeed(t, "trivy.db", "seed db")
+
+		installed, err := installSeed(cacheDir, "db", seedDir, dbFiles)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "copying seed DB")
+		assert.False(t, installed)
+		assert.False(t, dbPresent(cacheDir, "db", "trivy.db"))
+		assert.Empty(t, versionNames(t, cacheDir))
+	})
+
+	t.Run("a directory named like the DB file is not a DB", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, "db", "trivy.db"), 0o755))
+
+		assert.False(t, dbPresent(cacheDir, "db", "trivy.db"))
+	})
+}

@@ -34,6 +34,10 @@ type Config struct {
 	DBSources     []DBSource
 	JavaDBSources []DBSource
 
+	// Seed DBs baked into the image, used when no DB is installed yet. A missing directory means no seed.
+	DBSeedDir     string `env:"SCANNER_DB_SEED_DIR" envDefault:"/home/scanner/seed/db"`
+	JavaDBSeedDir string `env:"SCANNER_JAVA_DB_SEED_DIR" envDefault:"/home/scanner/seed/java-db"`
+
 	PrecheckTimeoutDNS      time.Duration `env:"SCANNER_PRECHECK_TIMEOUT_DNS" envDefault:"5s"`
 	PrecheckTimeoutConnect  time.Duration `env:"SCANNER_PRECHECK_TIMEOUT_CONNECT" envDefault:"5s"`
 	PrecheckTimeoutTLS      time.Duration `env:"SCANNER_PRECHECK_TIMEOUT_TLS" envDefault:"5s"`

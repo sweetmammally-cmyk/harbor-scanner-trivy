@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 3 (DB download module)
-- Last completed task: P3-4
+- Last completed task: P3-5
 - In progress: none
-- Next task: P3-5 (seed DB support; not ready until a DB exists)
+- Next task: P3-6 (source fallback loop: pre-check, upstream check, download, install; all failed -> degraded, ERROR log, old DB kept; finish the partial P3-6)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,7 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner): seed DB location. `SCANNER_DB_SEED_DIR` and `SCANNER_JAVA_DB_SEED_DIR`, defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing seed directory means no seed, and readiness then waits for the first download. Chosen from: env var with image default, fixed path, or seed required at startup. DEMAND section 11 updated.
 - 2026-10-15 (P3-4): DB swap mechanism. `<cache-dir>/db` (the path Trivy reads with `--cache-dir`) is a relative symlink to `<cache-dir>/db-versions/<version>`; a new version is activated by renaming a new symlink over it (atomic). The current and previous versions are kept; older ones and failed-download leftovers are removed at install time. Scans that opened the DB file keep reading it even after its directory is deleted (Linux keeps open files). `java-db` works the same. Each version stores its manifest digest in a `manifest-digest` file. A real `db` directory from the old layout or a seed is moved into `db-versions` once; during that one move there is a moment with no `db` path.
 - 2026-10-15 (P3-1): OCI client is raw `net/http` (not go-containerregistry). Reasons: the manifest and token code already existed and runs over our route (`Dial` + `dialTLS`), and we need exact control of redirects (token never sent to another host:port), stall timeouts (P3-3) and timings. A library would add its own retries and redirect handling.
 - 2026-10-15 (owner, third round):
@@ -108,6 +109,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-5  Seed DB
+- Status: done
+- What changed: config `DBSeedDir` / `JavaDBSeedDir` (`SCANNER_DB_SEED_DIR`, `SCANNER_JAVA_DB_SEED_DIR`). `installSeed(cacheDir, dbName, seedDir, files)` copies the seed files (fsynced) into a new version and installs it with an empty digest, only when no DB is active and the seed directory exists. `dbPresent(cacheDir, dbName, dbFile)` is the readiness check: the active DB file is a regular file.
+- Files: `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`, `pkg/v2/dbmgr/install.go`, `pkg/v2/dbmgr/install_test.go`, `docs/direct-scan/DEMAND.md`
+- Tests run: `go test -short -race ./pkg/v2/...` -> ok (config 100%); `make test` -> ok. Cases: seed installed when no DB (empty digest), installed DB kept, missing seed directory (not ready), incomplete seed is an error that leaves no version behind, a directory named `trivy.db` is not a DB.
+- Decisions / surprises: wiring (calling `installSeed` at startup, readiness in the probe) comes with the updater (P4-1) and P10-2.
+- Next: P3-6
 
 ### 2026-10-15  P3-4  Atomic DB swap
 - Status: done

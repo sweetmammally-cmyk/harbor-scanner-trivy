@@ -3,6 +3,7 @@ package dbmgr
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -104,4 +105,61 @@ func installedDigest(cacheDir, dbName string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// dbPresent reports whether an active DB exists: <cacheDir>/<dbName>/<dbFile>
+// is a regular file. The service is not ready until it is true (DEMAND section 7.1).
+func dbPresent(cacheDir, dbName, dbFile string) bool {
+	info, err := os.Stat(filepath.Join(cacheDir, dbName, dbFile))
+	return err == nil && info.Mode().IsRegular()
+}
+
+// installSeed installs the seed DB from seedDir when no DB is active yet.
+// files are the DB files to copy; the first one is the DB file itself.
+// The seed gets no manifest digest, so the first upstream check always downloads.
+// It returns false without error when a DB is already active or there is no seed.
+func installSeed(cacheDir, dbName, seedDir string, files []string) (bool, error) {
+	if dbPresent(cacheDir, dbName, files[0]) {
+		return false, nil
+	}
+	if _, err := os.Stat(seedDir); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+
+	versionDir, err := newVersionDir(cacheDir, dbName)
+	if err != nil {
+		return false, err
+	}
+	for _, name := range files {
+		if err = copyFile(filepath.Join(seedDir, name), filepath.Join(versionDir, name)); err != nil {
+			_ = os.RemoveAll(versionDir)
+			return false, fmt.Errorf("copying seed DB: %w", err)
+		}
+	}
+	if err = installDB(cacheDir, dbName, versionDir, ""); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func copyFile(from, to string) error {
+	source, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	target, err := os.OpenFile(to, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(target, source)
+	if err == nil {
+		err = target.Sync()
+	}
+	closeErr := target.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
