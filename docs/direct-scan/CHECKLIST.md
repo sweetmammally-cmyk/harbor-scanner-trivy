@@ -48,9 +48,9 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P4-5 Fake-clock tests (including the 3h fallback)
 
 ## Phase 5: MongoDB data plane
-- [ ] P5-1 Mongo client, connect, ping; hard-dependency behaviour (not ready, 503)
+- [ ] P5-1 Mongo client, connect, ping; hard-dependency behaviour (not ready, 503, no exit when unreachable); connect / server selection / operation timeouts; background ping every 5s sets the readiness flag; URI redaction test; integration tests: unreachable at startup, then comes back
 - [ ] P5-2 Models and collections: `scans`, `platforms`, `db_state`, `db_checks`
-- [ ] P5-3 Indexes (scans.request_id unique; image.digest+state+finished_at; customer_ids+finished_at; state+queued_at) and TTL on `db_checks`
+- [ ] P5-3 Indexes (scans.request_id unique; image.digest+state+finished_at; customer_ids+finished_at; state+queued_at) and TTL on `db_checks`; created idempotently at startup (safe with several replicas); `schema_version` document
 - [ ] P5-4 Repositories behind interfaces, with fakes for unit tests
 - [ ] P5-5 GridFS for reports above the size threshold
 - [ ] P5-6 Persist DB state and checks in Mongo (replace the in-memory implementation); the DB updater keeps running while Mongo is down, state stays in memory and is written when Mongo is back; not ready while Mongo is down
@@ -90,16 +90,16 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 
 ## Phase 10: Health, logging, metrics
 - [ ] P10-1 `GET /api/v2/health` computed from stored data (includes `db_age`)
-- [ ] P10-2 Readiness and liveness: Mongo reachable, DB present
+- [ ] P10-2 Readiness and liveness: Mongo reachable (from the background ping flag, never a direct Mongo call), DB present
 - [ ] P10-3 Verify all required log lines from DEMAND section 12
-- [ ] P10-4 Prometheus metrics
+- [ ] P10-4 Prometheus metrics (including a `mongo_up` gauge from the ping flag)
 - [ ] P10-5 Remove the FULL TRIVY REPORT debug log (`pkg/trivy/wrapper.go`) once v2 logging exists
 
 ## Phase 11: Hardening and acceptance
 - [ ] P11-1 End-to-end run in docker compose (scanner, Mongo, mirror or fake mirror)
 - [ ] P11-2 Walk the acceptance criteria below and record evidence in PROGRESS.md
 - [ ] P11-3 Harbor adapter regression: existing tests pass and one manual Harbor scan works
-- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code
+- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code. It must also say: MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`); the service uses no multi-document transactions
 - [ ] P11-5 Secrets review: no tokens or passwords in logs, argv or MongoDB
 - [ ] P11-6 List the upstream files touched, for future merges; run the component tests again
 - [ ] P11-7 (low priority) Get a working golangci-lint for Go 1.26 and run `make lint`

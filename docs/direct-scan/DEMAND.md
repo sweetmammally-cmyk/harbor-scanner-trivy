@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.10 (on-demand refresh rules, DB updater without Mongo, 2026-10-15)
+Status: DRAFT v0.11 (MongoDB client behaviour, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -296,7 +296,10 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 |---|---|
 | `SCANNER_V2_API_ENABLED` | Feature flag for the new API |
 | `SCANNER_V2_AUTH_TOKEN` | Service token for the new API |
-| `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error. |
+| `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error (config error). If MongoDB is only unreachable, the service does not exit: it keeps running with readiness false and the v2 API returning 503, the DB updater keeps running, and the client reconnects. Write and read concern come from the connection string (no separate settings). The connection string is never logged or included in errors. No multi-document transactions are used. |
+| `SCANNER_MONGO_CONNECT_TIMEOUT` | Connect timeout. Default 5s |
+| `SCANNER_MONGO_SERVER_SELECTION_TIMEOUT` | Server selection timeout. Default 5s |
+| `SCANNER_MONGO_OPERATION_TIMEOUT` | Deadline of every MongoDB call. Default 10s |
 | `SCANNER_REGISTRY_URL` | Harbor URL used to resolve digests and pull images |
 | `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret) |
 | `SCANNER_DB_CHECK_INTERVAL` | `1h`, `3h`, `1d`... fallback `3h` |
