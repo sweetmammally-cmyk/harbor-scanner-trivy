@@ -58,7 +58,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 
 ## Phase 6: Registry client
 - [x] P6-1 Registry client using the robot account from config, reusing the Phase 3 OCI client and token flow (basic credentials to the token endpoint, cached tokens with expiry, single-flight per scope, bounded challenges); validate names (OCI rules); resolve `repository/name:tag` to a digest with HEAD and the four manifest media types, GET + sha256 fallback; store `media_type`
-- [ ] P6-2 Error mapping: 404 `image_not_found`, 401/403 `registry_auth_failed`, timeout/5xx `registry_unavailable`; `SCANNER_REGISTRY_TIMEOUT` 15s; one retry on network errors and 5xx only; WARN for `http://` registries
+- [x] P6-2 Error mapping: 404 `image_not_found`, 401/403 `registry_auth_failed`, timeout/5xx `registry_unavailable`; `SCANNER_REGISTRY_TIMEOUT` 15s; one retry on network errors and 5xx only; WARN for `http://` registries
 - [ ] P6-3 Tests with a fake registry: token flow and expiry refresh, index vs plain manifest, missing digest header, 404, 401/403, endless challenge, redirect, timeouts, invalid names, redaction
 
 ## Phase 7: Scan runner

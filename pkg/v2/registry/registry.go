@@ -34,8 +34,18 @@ var (
 	tagPattern    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
 )
 
-// ErrInvalidName is returned for an image name that breaks the OCI rules (400).
-var ErrInvalidName = errors.New("invalid image name")
+// The errors of Resolve. The API maps them (DEMAND section 6.1): ErrInvalidName
+// to 400, ErrImageNotFound to 404 image_not_found, ErrAuthFailed to 502
+// registry_auth_failed, ErrUnavailable to 503 registry_unavailable with a retry hint.
+var (
+	ErrInvalidName   = errors.New("invalid image name")
+	ErrImageNotFound = errors.New("image_not_found")
+	ErrAuthFailed    = errors.New("registry_auth_failed")
+	ErrUnavailable   = errors.New("registry_unavailable")
+)
+
+// retryBackoff is the pause before the single retry.
+const retryBackoff = 200 * time.Millisecond
 
 // Image is the image a scan request names.
 type Image struct {
@@ -110,12 +120,10 @@ func (c *Client) Resolve(ctx context.Context, image Image) (Resolved, error) {
 	repository := image.Repository + "/" + image.Name
 	manifestURL := c.base.String() + "/v2/" + repository + "/manifests/" + image.Tag
 
+	what := repository + ":" + image.Tag
 	status, header, _, err := c.fetch(ctx, http.MethodHead, manifestURL)
-	if err != nil {
+	if err = checkResponse(status, err, "HEAD manifest "+what); err != nil {
 		return Resolved{}, err
-	}
-	if status != http.StatusOK {
-		return Resolved{}, fmt.Errorf("HEAD manifest %s:%s returned status %d", repository, image.Tag, status)
 	}
 	digest := header.Get("Docker-Content-Digest")
 	mediaType := header.Get("Content-Type")
@@ -123,11 +131,8 @@ func (c *Client) Resolve(ctx context.Context, image Image) (Resolved, error) {
 	if digest == "" {
 		var body []byte
 		status, header, body, err = c.fetch(ctx, http.MethodGet, manifestURL)
-		if err != nil {
+		if err = checkResponse(status, err, "GET manifest "+what); err != nil {
 			return Resolved{}, err
-		}
-		if status != http.StatusOK {
-			return Resolved{}, fmt.Errorf("GET manifest %s:%s returned status %d", repository, image.Tag, status)
 		}
 		digest = fmt.Sprintf("sha256:%x", sha256.Sum256(body))
 		mediaType = header.Get("Content-Type")
@@ -143,9 +148,44 @@ func (c *Client) Resolve(ctx context.Context, image Image) (Resolved, error) {
 	}, nil
 }
 
-// fetch sends one registry request with the per-request timeout and returns its
-// status, headers and body (manifests are small: at most 4 MiB is read).
+// checkResponse turns a registry answer into nil (200) or one of the Resolve errors.
+func checkResponse(status int, err error, what string) error {
+	switch {
+	case errors.Is(err, oci.ErrTokenDenied):
+		return fmt.Errorf("%w: %s: %w", ErrAuthFailed, what, err)
+	case err != nil:
+		return fmt.Errorf("%w: %s: %w", ErrUnavailable, what, err)
+	case status == http.StatusOK:
+		return nil
+	case status == http.StatusNotFound:
+		return fmt.Errorf("%w: %s", ErrImageNotFound, what)
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return fmt.Errorf("%w: %s returned status %d", ErrAuthFailed, what, status)
+	case status >= 500:
+		return fmt.Errorf("%w: %s returned status %d", ErrUnavailable, what, status)
+	}
+	return fmt.Errorf("%s returned unexpected status %d", what, status)
+}
+
+// fetch sends a registry request. A network error, a timeout or a 5xx is
+// retried once after a short pause; 401, 403 and 404 are not.
 func (c *Client) fetch(ctx context.Context, method, requestURL string) (int, http.Header, []byte, error) {
+	status, header, body, err := c.fetchOnce(ctx, method, requestURL)
+	retry := (err != nil && !errors.Is(err, oci.ErrTokenDenied)) || status >= 500
+	if !retry || ctx.Err() != nil {
+		return status, header, body, err
+	}
+	select {
+	case <-ctx.Done():
+		return status, header, body, err
+	case <-time.After(retryBackoff):
+	}
+	return c.fetchOnce(ctx, method, requestURL)
+}
+
+// fetchOnce sends one registry request with the per-request timeout and returns
+// its status, headers and body (manifests are small: at most 4 MiB is read).
+func (c *Client) fetchOnce(ctx context.Context, method, requestURL string) (int, http.Header, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	resp, err := c.oci.Do(ctx, method, requestURL, manifestAccept)

@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 6 (registry client)
-- Last completed task: P6-1
+- Last completed task: P6-2
 - In progress: none
-- Next task: P6-2 (error mapping, one retry on network errors and 5xx, per-request timeout), then P6-3
+- Next task: P6-3 (remaining fake-registry tests: token expiry at the registry level, endless challenge, redirect, http WARN, redaction)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -165,6 +165,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P6-2  Registry error mapping and retry
+- Status: done
+- What changed: in `pkg/v2/registry`, `ErrImageNotFound`, `ErrAuthFailed` and `ErrUnavailable` (with `ErrInvalidName`; the API maps them to 404, 502, 503 + retry hint and 400 in P9-2). `checkResponse` maps a refused token request (`oci.ErrTokenDenied`), 401 and 403 to auth failed; network errors, timeouts and 5xx to unavailable; 404 to not found; any other status to a plain error (a 500 from our API). `fetch` retries once after 200ms on a network error, a timeout or a 5xx, never on 401/403/404 or a refused token, and not when the caller's context is done; each attempt has its own `SCANNER_REGISTRY_TIMEOUT`.
+- Files: `pkg/v2/registry/registry.go`, `pkg/v2/registry/errors_test.go`
+- Tests run: `go test -short -race -count=3 -run TestResolve_Errors ./pkg/v2/registry/` -> ok; `go test -short -race ./pkg/v2/...` -> ok. Cases: unknown tag (not found, 2 requests: challenge + 404); wrong robot password (auth failed, 1 request, 1 token request); 403 (auth failed, 1 request); 500 twice (unavailable after exactly 2 requests); 502 then 200 (resolves); a registry that never answers with a 100ms timeout (unavailable, `DeadlineExceeded`, 2 requests, under 2s); a closed server (unavailable); 400 (plain error, 1 request); the caller's 100ms deadline (unavailable, no retry).
+- Decisions / surprises: none.
+- Next: P6-3
 
 ### 2026-10-15  P6-1  Part 2: Harbor registry client
 - Status: done (P6-1 complete)
