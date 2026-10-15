@@ -19,7 +19,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P1-5 Unit tests for config
 
 ## Phase 2: DB pre-check module
-- [ ] P2-1 Route-aware dialer: direct, HTTP proxy (CONNECT), SOCKS5
+- [x] P2-1 Route-aware dialer: direct, HTTP proxy (CONNECT), SOCKS5
 - [ ] P2-2 Stage runner with per-stage timeouts and an overall deadline; result struct (stage, ok, timing, detail)
 - [ ] P2-3 Stages in order: DNS, connect, TLS handshake (version, cipher, ALPN), HTTP/2 GET `/v2/`, DB manifest request. HTTP/2 required unless the source has `allow-http1`; always record the negotiated protocol
 - [ ] P2-4 `httptrace` timings: DNS, connect, TLS, first byte, total

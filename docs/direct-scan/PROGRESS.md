@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 2 (DB pre-check module)
-- Last completed task: P1-5
+- Last completed task: P2-1
 - In progress: none
-- Next task: P2-1
+- Next task: P2-2
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -99,6 +99,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P2-1  Route-aware dialer
+- Status: done
+- What changed: new package `pkg/v2/dbmgr` with `Dial(ctx, source, addr)`, which returns a plain TCP connection to `addr` directly, through an HTTP proxy (our own CONNECT exchange, `Proxy-Authorization: Basic` from the proxy URL userinfo), or through SOCKS5 (`golang.org/x/net/proxy`, user/password auth). TLS is left to the caller, so the pre-check can time the TLS stage separately and HTTP/2 negotiates normally over the tunnel. `ctx` bounds the whole dial, including the proxy handshake (`context.AfterFunc` expires the connection deadline for CONNECT; the SOCKS5 library honours `ctx` itself).
+- Files: `pkg/v2/dbmgr/dial.go`, `pkg/v2/dbmgr/dial_test.go`
+- Tests run: `go test -short -race ./pkg/v2/dbmgr/` -> ok (80.8% coverage); `make test` -> ok. Tests use in-process servers: echo target, CONNECT proxy, minimal SOCKS5 server, blackhole. Cases: direct, HTTP proxy with and without auth, 407, SOCKS5 with and without auth, wrong SOCKS5 auth, blackholed proxy stops at the 200ms deadline for both schemes, unreachable proxy. Redaction: no error contains the password, `user:` or `Basic `.
+- Decisions / surprises: no new module (x/net was already required; `go.mod` unchanged). Our own CONNECT code instead of `http.Transport.Proxy`, so the pre-check and the download use the exact same dial path (DEMAND 7.5). With a proxy, the target host name is resolved by the proxy (SOCKS5 sends the name, CONNECT sends host:port).
+- Next: P2-2
 
 ### 2026-10-15  P3-6  Partial: SCANNER_DB_SOURCES required when v2 is enabled
 - Status: partial (only the startup check; the fallback loop and degraded mode are still to do in Phase 3)
