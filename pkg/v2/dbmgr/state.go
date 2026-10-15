@@ -79,3 +79,18 @@ func (m *MemoryStateStore) Save(_ context.Context, db string, state DBState) err
 	m.states[db] = state
 	return nil
 }
+
+// Freshness is db.freshness for a request with maxAge (max_db_age), from the stored
+// state: stale while newer_available, otherwise ok when confirmed current within maxAge.
+func (s DBState) Freshness(maxAge time.Duration, now time.Time) string {
+	return Freshness(s.NewerAvailable, s.LastConfirmedCurrentAt, maxAge, now)
+}
+
+// Age is db_age: how old the active DB is (now minus its UpdatedAt), zero when unknown.
+// It is reported for visibility only.
+func (s DBState) Age(now time.Time) time.Duration {
+	if s.Metadata.UpdatedAt.IsZero() {
+		return 0
+	}
+	return now.Sub(s.Metadata.UpdatedAt)
+}

@@ -170,3 +170,21 @@ func TestUpdater_StateStoreError(t *testing.T) {
 	assert.True(t, results.DB.Installed, "the DB update itself does not depend on the store")
 	assert.Contains(t, logs.String(), `"level":"ERROR","msg":"saving DB state failed","db":"db","error":"store down"`)
 }
+
+func TestDBState_FreshnessAndAge(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	state := DBState{
+		LastConfirmedCurrentAt: now.Add(-2 * time.Hour),
+		Metadata:               Metadata{UpdatedAt: now.Add(-30 * time.Hour)},
+	}
+
+	assert.Equal(t, FreshnessOK, state.Freshness(3*time.Hour, now))
+	assert.Equal(t, FreshnessStale, state.Freshness(time.Hour, now), "confirmed 2h ago, request wants 1h")
+	assert.Equal(t, 30*time.Hour, state.Age(now))
+
+	state.NewerAvailable = true
+	assert.Equal(t, FreshnessStale, state.Freshness(24*time.Hour, now), "newer available is always stale")
+
+	assert.Equal(t, FreshnessStale, DBState{}.Freshness(24*time.Hour, now), "never confirmed")
+	assert.Equal(t, time.Duration(0), DBState{}.Age(now), "no metadata, unknown age")
+}

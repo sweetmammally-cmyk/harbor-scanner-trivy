@@ -43,7 +43,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 ## Phase 4: Updater and freshness
 - [x] P4-1 Interval loop, first run at startup, single-flight; skip the Java DB when `SCANNER_JAVA_DB_SOURCES` is empty; `SCANNER_DB_RETRY_INTERVAL` (15m) while degraded, back to the check interval after a success
 - [x] P4-2 State behind an interface: last_upstream_check_at, last_confirmed_current_at, newer_available (kept when no source answered), mode, active source (in-memory first)
-- [ ] P4-3 (pure `Freshness` function already done in the P3-6 follow-up; wire it to the state) Freshness `ok|stale` from `last_confirmed_current_at` versus `max_db_age`; always `stale` while `newer_available`
+- [x] P4-3 Freshness `ok|stale` from `last_confirmed_current_at` versus `max_db_age`; always `stale` while `newer_available`
 - [ ] P4-4 On-demand refresh for the scan worker when a request's `max_db_age` is exceeded: wait at most `SCANNER_ONDEMAND_REFRESH_WAIT` (60s), reuse a run that finished within `SCANNER_ONDEMAND_REFRESH_MIN_GAP` (60s), never while degraded
 - [ ] P4-5 Fake-clock tests (including the 3h fallback)
 

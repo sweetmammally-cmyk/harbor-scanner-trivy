@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 4 (updater and freshness)
-- Last completed task: P4-2
+- Last completed task: P4-3
 - In progress: none
-- Next task: P4-3, then P4-4, P4-5
+- Next task: P4-4 (on-demand refresh for the scan worker), then P4-5
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -137,6 +137,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P4-3  Freshness and DB age from the stored state
+- Status: done
+- What changed: `DBState.Freshness(maxAge, now)` uses the stored `newer_available` and `last_confirmed_current_at` through `Freshness`; `DBState.Age(now)` is `db_age` (now minus the active DB's `UpdatedAt`, zero when unknown). The API (P9) and health (P10) read a `DBState` from the store and call these.
+- Files: `pkg/v2/dbmgr/state.go`, `pkg/v2/dbmgr/state_test.go`
+- Tests run: `go test -short -race -run TestDBState ./pkg/v2/dbmgr/` -> ok. Cases: confirmed 2h ago is ok for 3h and stale for 1h, age 30h, `newer_available` stale even with 24h, never confirmed is stale, no metadata gives age 0.
+- Decisions / surprises: none.
+- Next: P4-4
 
 ### 2026-10-15  P4-2  Follow-up: injected write failures, digest read from disk
 - Status: done
