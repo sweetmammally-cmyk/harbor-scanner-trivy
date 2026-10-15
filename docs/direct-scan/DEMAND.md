@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.13 (report limits, GridFS cleanup, per-instance DB state, 2026-10-15)
+Status: DRAFT v0.14 (db_checks ids, db_state retention, registry client, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -72,6 +72,7 @@ All endpoints require a service token in the `Authorization: Bearer` header. Thi
 Fields:
 
 - `request_id`: idempotency key (important for Temporal retries).
+- `image`: `repository`, `name` and `tag` must follow the OCI distribution rules (path components `[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*`, tag `[A-Za-z0-9_][A-Za-z0-9._-]{0,127}`; no `..`, no encoded characters); otherwise 400. The tag is resolved to a digest synchronously in this request.
 - `platforms`: required. The Trivy result types (npm, jar, pip, ...) the caller wants reported.
 - `severity`: optional, default `["HIGH","CRITICAL"]`.
 - `max_db_age`: how fresh the DB must be for the response to report `freshness: ok` (see section 7.4). Optional, falls back to a server default.
@@ -141,7 +142,7 @@ Current DB version, `updated_at`, `downloaded_at`, `db_age`, `last_upstream_chec
 ```
 POST /api/v2/scans
   -> auth + validate, idempotency on request_id
-  -> resolve digest for repository/name:tag (registry call with robot account)
+  -> resolve digest for repository/name:tag (registry call with robot account, see 6.1)
   -> look up the last successful scan for this digest in the `scans` collection
   -> cache hit if ALL are true:
        - force == false
@@ -168,6 +169,15 @@ Notes:
 - Trivy runs once per scan. Summary counts are kept for all severities of the requested platforms; details are kept only for the requested severities. Only the requested result types are persisted; Trivy's full output is not stored.
 
 ## 7. Trivy DB lifecycle
+
+### 6.1 Resolving the digest (registry client)
+
+- The registry client reuses the OCI client of the DB download (section 7.5) and its token flow: the robot account's basic credentials go to the token endpoint, scope `repository:<repo>:pull`; tokens are cached until they expire, fetched once per scope at a time (single-flight), and an endless chain of auth challenges is cut off after a few attempts.
+- `HEAD` on the manifest with `Accept`: OCI image index, Docker manifest list, OCI image manifest, Docker v2 manifest. The digest is `Docker-Content-Digest`; if that header is missing, the manifest is fetched with `GET` and the digest is the sha256 of the exact bytes. The manifest `media_type` is stored with the scan (multi-architecture handling stays deferred, section 14).
+- The scan runner scans `registry/repository/name@digest`, never the tag.
+- `SCANNER_REGISTRY_TIMEOUT` (default 15s) per request; one retry with a short backoff on network errors and 5xx; no retry on 401, 403 or 404.
+- Errors: 404 -> `image_not_found` (HTTP 404); 401/403 -> `registry_auth_failed` (HTTP 502); timeout or 5xx -> `registry_unavailable` (HTTP 503 with a retry hint).
+- `http://` registry URLs are allowed, with one WARN at startup. Credentials and tokens are never logged.
 
 ### 7.1 Always have a DB
 
@@ -283,9 +293,9 @@ Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format
 
 `platforms`: `{ _id, first_seen_at, last_seen_at, seen_count, example_digest }`
 
-`db_state`: one document per scanner instance and DB kind, `_id` `"<instance_id>:<kind>"` (kind `db` or `java-db`), with `instance_id`, `db`, mode, active source, manifest digest, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, `installed_at`, metadata (version, `updated_at`, `next_update`, `downloaded_at`) and the last per-source results. The instance id is `SCANNER_INSTANCE_ID` (default: the hostname). Behaviour: the state is kept in memory first; while MongoDB is down the updater keeps running and the state is written when MongoDB is back (also without a new update run); at startup the instance loads its stored state, but if the stored digest differs from the digest installed on disk, the stored confirmation (`last_confirmed_current_at`, `newer_available`) is ignored: the disk is the source of truth.
+`db_state`: one document per scanner instance and DB kind, `_id` `"<instance_id>:<kind>"` (kind `db` or `java-db`), with `instance_id`, `db`, mode, active source, manifest digest, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, `installed_at`, metadata (version, `updated_at`, `next_update`, `downloaded_at`) and the last per-source results. The instance id is `SCANNER_INSTANCE_ID` (default: the hostname). Behaviour: the state is kept in memory first; while MongoDB is down the updater keeps running and the state is written when MongoDB is back (also without a new update run); at startup the instance loads its stored state, but if the stored digest differs from the digest installed on disk, the stored confirmation (`last_confirmed_current_at`, `newer_available`) is ignored: the disk is the source of truth. On the first time MongoDB becomes ready after boot: if no update run has completed since startup, the stored state is loaded first (with the disk check) and nothing older is overwritten; if a run has completed, the memory state is written. Each document has `updated_at` (set on every write) and a TTL index on it from `SCANNER_DB_STATE_RETENTION`, so states of instances that are gone expire.
 
-`db_checks`: history of pre-checks and downloads (`instance_id`, db, source, route, per-stage timings, result, at). TTL index to expire old rows. Best effort: while MongoDB is down they are buffered in memory with a bound; when the buffer is full the oldest are dropped and the number dropped is logged.
+`db_checks`: history of pre-checks and downloads (`instance_id`, db, source, route, per-stage timings, result, at). Each row has a deterministic `_id` `"<instance_id>:<kind>:<run_started_at>:<source>"` and is written with an upsert, so a repeated flush never duplicates rows. TTL index to expire old rows. Best effort: while MongoDB is down they are buffered in memory with a bound; when the buffer is full the oldest are dropped and the number dropped is logged.
 
 Schema setup ("ensure schema"):
 
@@ -309,13 +319,15 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | `SCANNER_V2_API_ENABLED` | Feature flag for the new API |
 | `SCANNER_V2_AUTH_TOKEN` | Service token for the new API |
 | `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error (config error). If MongoDB is only unreachable, the service does not exit: it keeps running with readiness false and the v2 API returning 503, the DB updater keeps running, and the driver reconnects automatically (no custom backoff loop). Write and read concern come from the connection string (no separate settings). The connection string is never logged or included in errors. No multi-document transactions are used. |
-| `SCANNER_INSTANCE_ID` | Id of this scanner instance for `db_state` and `db_checks`. Default: the hostname |
+| `SCANNER_INSTANCE_ID` | Id of this scanner instance for `db_state` and `db_checks`. Default: the hostname, with a WARN at startup (set it explicitly, for example in compose) |
+| `SCANNER_DB_STATE_RETENTION` | How long a `db_state` document lives after its last write (TTL index on `updated_at`, updated with `collMod`). Default 7d; startup fails if it is shorter than twice `SCANNER_DB_CHECK_INTERVAL` |
 | `SCANNER_MONGO_CONNECT_TIMEOUT` | Connect timeout. Default 5s |
 | `SCANNER_DB_CHECKS_RETENTION` | How long `db_checks` documents are kept (TTL index). Default 30d (the `d` suffix is supported) |
 | `SCANNER_MONGO_SERVER_SELECTION_TIMEOUT` | Server selection timeout. Default 5s |
 | `SCANNER_MONGO_OPERATION_TIMEOUT` | Deadline of every MongoDB call. Default 10s |
-| `SCANNER_REGISTRY_URL` | Harbor URL used to resolve digests and pull images |
-| `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret) |
+| `SCANNER_REGISTRY_URL` | Harbor URL used to resolve digests and pull images. `http://` is allowed (one WARN at startup) |
+| `SCANNER_REGISTRY_TIMEOUT` | Timeout of each registry request. Default 15s |
+| `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret). Harbor robot names contain `$`, which needs escaping in compose files and shells |
 | `SCANNER_DB_CHECK_INTERVAL` | `1h`, `3h`, `1d`... fallback `3h` |
 | `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Example: `mirror.local/aquasec/trivy-db:2\|direct\|allow-http1,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
 | `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB. Empty means no Java DB at all: nothing is downloaded and the Java seed is not installed |

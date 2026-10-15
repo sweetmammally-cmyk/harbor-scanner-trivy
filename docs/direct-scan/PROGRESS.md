@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 5 done; Phase 6 (registry client) next
 - Last completed task: P5-7
 - In progress: none
-- Next task: P6-1 (registry client with the robot account from config; resolve `repository/name:tag` to a digest with a manifest HEAD)
+- Next task: P5-6 follow-ups (db_checks ids, instance WARN and db_state retention, first-reconnect load), then P6-1 to P6-3
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,11 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, twelfth round): DEMAND v0.14 (5.1, 6.1, 10, 11).
+  - `db_checks` rows get a deterministic `_id` "<instance>:<kind>:<run_started_at>:<source>" and are upserted, so a repeated flush never duplicates them.
+  - `SCANNER_INSTANCE_ID` falling back to the hostname logs a WARN. New `SCANNER_DB_STATE_RETENTION` (7d): TTL on `db_state.updated_at`, `collMod` on change; startup fails if it is shorter than twice `SCANNER_DB_CHECK_INTERVAL`.
+  - First ready after boot: if no update run has completed yet, load the stored state (with the disk check) before writing; otherwise write memory.
+  - Phase 6: reuse the Phase 3 OCI client and token flow (basic credentials to the token endpoint, scope `repository:<repo>:pull`, cached tokens, single-flight per scope, bounded challenges); HEAD with the four manifest media types, `Docker-Content-Digest` or GET + sha256 of the exact bytes; store `media_type`; P7 scans `registry/repo/name@digest`; names validated against the OCI rules (400), resolved synchronously in `POST /api/v2/scans`; `SCANNER_REGISTRY_TIMEOUT` 15s, one retry on network errors and 5xx, none on 401/403/404; errors `image_not_found` (404), `registry_auth_failed` (502), `registry_unavailable` (503 + retry hint); `http://` registries allowed with one WARN; credentials and tokens never logged; README notes the `$` in robot names.
 - 2026-10-15 (owner, eleventh round): DEMAND v0.13 (5.1, 5.4, 5.5, 10, 11).
   - The inline report limit stays a code constant of 8 MiB, measured on the BSON-encoded report. P9-2 rejects (400) `customer_data` > 64 KiB and > 100 `customer_ids`; P9-5 list queries project out the report.
   - GridFS: upload first, then save the scan document; if the save fails, delete the file at once (best effort). File metadata `scan_id` and `uploaded_at`. A retry for the same `scan_id` deletes the previous file first. Retention stays deferred.

@@ -57,12 +57,12 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P5-7 Integration tests against real Mongo
 
 ## Phase 6: Registry client
-- [ ] P6-1 Registry client using the robot account from config; resolve `repository/name:tag` to a digest (manifest HEAD)
-- [ ] P6-2 Error mapping: not found, unauthorized, timeout
-- [ ] P6-3 Tests with a fake registry
+- [ ] P6-1 Registry client using the robot account from config, reusing the Phase 3 OCI client and token flow (basic credentials to the token endpoint, cached tokens with expiry, single-flight per scope, bounded challenges); validate names (OCI rules); resolve `repository/name:tag` to a digest with HEAD and the four manifest media types, GET + sha256 fallback; store `media_type`
+- [ ] P6-2 Error mapping: 404 `image_not_found`, 401/403 `registry_auth_failed`, timeout/5xx `registry_unavailable`; `SCANNER_REGISTRY_TIMEOUT` 15s; one retry on network errors and 5xx only; WARN for `http://` registries
+- [ ] P6-3 Tests with a fake registry: token flow and expiry refresh, index vs plain manifest, missing digest header, 404, 401/403, endless challenge, redirect, timeouts, invalid names, redaction
 
 ## Phase 7: Scan runner
-- [ ] P7-1 Run Trivy with DB updates disabled and JSON output; credentials via env, never argv; timeout and kill
+- [ ] P7-1 Run Trivy with DB updates disabled and JSON output; credentials via env, never argv; timeout and kill; scan `registry/repository/name@digest`, never the tag
 - [ ] P7-2 Parse output; keep only requested result types and severities
 - [ ] P7-3 Summary counts for all severities of the requested result types
 - [ ] P7-4 Platform discovery from all result types; upsert `platforms`; set `has_more_platforms`
@@ -99,7 +99,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P11-1 End-to-end run in docker compose (scanner, Mongo, mirror or fake mirror)
 - [ ] P11-2 Walk the acceptance criteria below and record evidence in PROGRESS.md
 - [ ] P11-3 Harbor adapter regression: existing tests pass and one manual Harbor scan works
-- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code. It must also say: MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`); the service uses no multi-document transactions
+- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code. It must also say: Harbor robot usernames contain `$`, which needs escaping in compose files and shells. And: MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`); the service uses no multi-document transactions
 - [ ] P11-5 Secrets review: no tokens or passwords in logs, argv or MongoDB
 - [ ] P11-6 List the upstream files touched, for future merges; run the component tests again
 - [ ] P11-7 (low priority) Get a working golangci-lint for Go 1.26 and run `make lint`
