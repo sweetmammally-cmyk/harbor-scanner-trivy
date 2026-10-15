@@ -37,7 +37,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P3-6 Source loop: pre-check, upstream check, download and install if the digest differs; stop on equal digest or install; failed sources recorded with class; no source answered = degraded, one ERROR log, old DB kept; return mode, active source and per-source results; `SCANNER_DB_AGE_WARN` WARN after each check; no downgrade guard
 - [ ] P3-7 Java DB through the same flow
 - [x] P3-8 Parse `metadata.json` (UpdatedAt, NextUpdate, Version, DownloadedAt)
-- [ ] P3-9 Tests with a fake registry: success, wrong digest, truncated, hang mid-download, fallback to second source, all sources fail; plus a manual download of the real ghcr.io DB (about 70 MB) with duration, size and result recorded in PROGRESS
+- [~] P3-9 (real ghcr.io download done; fake-registry list to finish) Tests with a fake registry: success, wrong digest, truncated, hang mid-download, fallback to second source, all sources fail; plus a manual download of the real ghcr.io DB (about 70 MB) with duration, size and result recorded in PROGRESS
 
 ## Phase 4: Updater and freshness
 - [ ] P4-1 Interval loop, first run at startup, single-flight; `SCANNER_DB_RETRY_INTERVAL` while degraded (default to be decided by the owner)

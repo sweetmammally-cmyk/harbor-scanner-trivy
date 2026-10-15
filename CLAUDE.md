@@ -48,6 +48,7 @@ integration:       make test-integration     (build tag integration, needs Docke
 component:         make test-component       (builds the Docker image; slow)
 vet:               go vet ./...
 manual pre-check:  SCANNER_DB_SOURCES='ghcr.io/aquasecurity/trivy-db:2|direct' go test -tags=manual -count=1 -v -run TestManualPrecheck ./pkg/v2/dbmgr/
+manual DB update:  SCANNER_DB_SOURCES='ghcr.io/aquasecurity/trivy-db:2|direct' SCANNER_TRIVY_CACHE_DIR=<dir> go test -tags=manual -count=1 -v -timeout 30m -run TestManualUpdate ./pkg/v2/dbmgr/   (downloads ~128 MiB, needs ~1.7 GB free per DB version)
 lint:              make lint                 (needs ./bin/golangci-lint; not installed locally, the pinned v1.21.0 is too old for Go 1.26)
 ```
 

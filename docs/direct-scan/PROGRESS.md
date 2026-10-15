@@ -8,7 +8,8 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 3 (DB download module)
 - Last completed task: P3-6
 - In progress: none
-- Next task: real ghcr.io download (P3-9 manual part), then P3-7 and the rest of P3-9
+- Next task: P3-7 (Java DB), then finish P3-9 (fake-registry list)
+- In progress note: P3-9 is `[~]`: the real ghcr.io download is done and recorded; the fake-registry cases are mostly covered by P3-3 and P3-6 tests, and the gaps get filled after P3-7
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -122,6 +123,20 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-9  Partial: real ghcr.io DB download
+- Status: partial (manual real-registry part done)
+- What changed: `TestManualUpdate` (build tag `manual`) runs `update` against `SCANNER_DB_SOURCES` into `SCANNER_TRIVY_CACHE_DIR`; the command is in `CLAUDE.md` section 4.
+- Files: `pkg/v2/dbmgr/precheck_manual_test.go`, `CLAUDE.md`
+- Tests run (2026-10-15, this dev machine, `ghcr.io/aquasecurity/trivy-db:2|direct`):
+  - First run: installed. Total 43.6s: pre-check 1.6s, upstream check about 1s, download plus extract plus verify 41.0s. Manifest `sha256:01d3818690b9e3366e9b1ff67cfd480dd935803e4ecb3c65dfa07bcc3afcef47`. Layer `application/vnd.aquasec.trivy.db.layer.v1.tar+gzip`, 133,916,706 bytes (127.7 MiB) compressed. Extracted `trivy.db` 1,623,306,240 bytes (1.62 GB), `metadata.json` 143 bytes, UpdatedAt 2026-10-15T07:10:08Z, NextUpdate 2026-10-16T07:10:08Z.
+  - Second run: "DB is up to date" in 2.3s, no download.
+  - Real Trivy 0.71.2: `trivy fs --cache-dir <dir> --skip-db-update --offline-scan` on a `requirements.txt` with `django==2.0.0` used the symlinked DB and found 3 CRITICAL (CVE-2019-19844, CVE-2020-7471, CVE-2025-64459). Trivy did not change the `db` symlink or the versions directory.
+- Decisions / surprises:
+  - The "about 70 MB" estimate was low: 128 MiB compressed, 1.62 GB on disk. With the current version, the previous version and one download in progress, the DB volume needs about 5 GB for the main DB alone. P11-4 (Dockerfile and volume) must size for this, and the seed DB adds 1.6 GB to the image.
+  - Version directories are created with mode 0700 (`os.MkdirTemp`); fine because Trivy runs as the same user as the scanner.
+  - The manual run printed "using fallback interval", because `GetConfig` logs it even with v2 disabled (known, fixed in P9-1).
+- Next: P3-7
 
 ### 2026-10-15  P3-6  Follow-up: newer DB not installed, two timestamps, newer_available
 - Status: done
