@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 3 (DB download module)
 - Last completed task: P3-5
 - In progress: none
-- Next task: P3-6 (source fallback loop: pre-check, upstream check, download, install; all failed -> degraded, ERROR log, old DB kept; finish the partial P3-6)
+- Next task: P3-8 (parse `metadata.json`, needed by the age WARN), then P3-6
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,12 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, fourth round): update loop and DB age (DEMAND v0.6, 7.4 and 11).
+  - No downgrade guard: install what the first answering source offers. A mirror a few hours behind is accepted. (No guard or "behind" class had been built; nothing to remove.)
+  - Loop per source in order: pre-check, upstream check, then download and install if the digest differs. Stop on an equal digest or after an install. A failed source is recorded with its class and the loop continues. No source answered: mode `degraded`, one ERROR log, old DB kept. Return the mode, the active source and the per-source results. `last_upstream_check_at` is updated when at least one source answered.
+  - `SCANNER_DB_AGE_WARN` (default `7d`): after each check, WARN with the age and the active source when the installed DB's `UpdatedAt` is older. `db_age` goes into `GET /api/v2/db` (P9-6) and the health output (P10-1). Visibility only.
+  - Freshness is relative to the first source that answered; DB age is reported separately.
+  - Implementation order: P3-8 (metadata.json) before P3-6, because the age WARN needs `UpdatedAt`.
 - 2026-10-15 (owner): seed DB location. `SCANNER_DB_SEED_DIR` and `SCANNER_JAVA_DB_SEED_DIR`, defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing seed directory means no seed, and readiness then waits for the first download. Chosen from: env var with image default, fixed path, or seed required at startup. DEMAND section 11 updated.
 - 2026-10-15 (P3-4): DB swap mechanism. `<cache-dir>/db` (the path Trivy reads with `--cache-dir`) is a relative symlink to `<cache-dir>/db-versions/<version>`; a new version is activated by renaming a new symlink over it (atomic). The current and previous versions are kept; older ones and failed-download leftovers are removed at install time. Scans that opened the DB file keep reading it even after its directory is deleted (Linux keeps open files). `java-db` works the same. Each version stores its manifest digest in a `manifest-digest` file. A real `db` directory from the old layout or a seed is moved into `db-versions` once; during that one move there is a moment with no `db` path.
 - 2026-10-15 (P3-1): OCI client is raw `net/http` (not go-containerregistry). Reasons: the manifest and token code already existed and runs over our route (`Dial` + `dialTLS`), and we need exact control of redirects (token never sent to another host:port), stall timeouts (P3-3) and timings. A library would add its own retries and redirect handling.

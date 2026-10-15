@@ -34,7 +34,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P3-3 Download DB layer only after the pre-check passed, with stall timeout and overall cap, verify digest, extract `trivy.db` and `metadata.json` to a temp dir
 - [x] P3-4 Atomic swap; in-flight scans keep the old copy (record mechanism)
 - [x] P3-5 Seed DB support; service not ready until a DB exists
-- [ ] P3-6 (startup check for empty `SCANNER_DB_SOURCES` already done) Source fallback loop; all failed means degraded mode, ERROR log, old DB kept
+- [ ] P3-6 (startup check for empty `SCANNER_DB_SOURCES` already done) Source loop: pre-check, upstream check, download and install if the digest differs; stop on equal digest or install; failed sources recorded with class; no source answered = degraded, one ERROR log, old DB kept; return mode, active source and per-source results; `SCANNER_DB_AGE_WARN` WARN after each check; no downgrade guard
 - [ ] P3-7 Java DB through the same flow
 - [ ] P3-8 Parse `metadata.json` (UpdatedAt, NextUpdate, Version, DownloadedAt)
 - [ ] P3-9 Tests with a fake registry: success, wrong digest, truncated, hang mid-download, fallback to second source, all sources fail
@@ -83,12 +83,12 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P9-3 Cache decision (all conditions in DEMAND section 6) and cached response with `cached` and `db_unchanged`
 - [ ] P9-4 `GET /api/v2/scans/{id}` with `not_found` (404), `queued`, `scanning`, `done`, `failed`
 - [ ] P9-5 `GET /api/v2/scans` filters and paging
-- [ ] P9-6 `GET /api/v2/db`
+- [ ] P9-6 `GET /api/v2/db` (includes `db_age`)
 - [ ] P9-7 `db` block in responses (updated_at, last_upstream_check_at, freshness)
 - [ ] P9-8 API tests covering every row of the DEMAND response tables
 
 ## Phase 10: Health, logging, metrics
-- [ ] P10-1 `GET /api/v2/health` computed from stored data
+- [ ] P10-1 `GET /api/v2/health` computed from stored data (includes `db_age`)
 - [ ] P10-2 Readiness and liveness: Mongo reachable, DB present
 - [ ] P10-3 Verify all required log lines from DEMAND section 12
 - [ ] P10-4 Prometheus metrics

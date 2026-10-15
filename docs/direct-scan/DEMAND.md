@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.5 (settings and DB download limits decided 2026-10-15)
+Status: DRAFT v0.6 (update loop, freshness and DB age decided 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -215,8 +215,12 @@ If a stage fails: log the failure with the stage and timings, store it, move to 
 
 ### 7.4 Failure policy and freshness
 
-- All sources failed: log ERROR, set mode `degraded`, keep scanning with the existing DB, keep retrying on the interval until fixed.
-- `db.freshness` in responses: `ok` if the DB was verified against upstream within `max_db_age` (measured from `last_upstream_check_at`, not from `UpdatedAt`, because upstream may simply not have published a newer DB). Otherwise `stale`.
+- Update loop, per source in order: pre-check, then upstream check, then download and install when the digest differs from the installed one. The loop stops when a source's digest equals the installed one or when a DB was installed. A failed source is recorded with its failure class and the loop goes on to the next source.
+- There is no downgrade guard: the first source that answers is trusted, even a mirror a few hours behind upstream.
+- A source has answered when its pre-check and upstream check succeeded. `last_upstream_check_at` is updated whenever at least one source answered.
+- No source answered: log ERROR once, set mode `degraded`, keep scanning with the existing DB, keep retrying on the interval until fixed.
+- `db.freshness` in responses: `ok` if the DB was verified against upstream within `max_db_age`, measured from `last_upstream_check_at` (not from `UpdatedAt`, because upstream may simply not have published a newer DB). "Upstream" here means the first source that answered. Otherwise `stale`.
+- DB age (now minus the installed DB's `metadata.json` `UpdatedAt`) is reported separately as `db_age` in `GET /api/v2/db` and in the health output. After each check, when the age is above `SCANNER_DB_AGE_WARN`, a WARN log gives the age and the active source. This is for visibility only and never blocks an install.
 - If the request's `max_db_age` is exceeded, the service attempts one refresh (single-flight, bounded by the pre-check and download timeouts). On failure the scan proceeds with the old DB and the response says `stale`.
 
 Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format) and follows the same pre-check and fallback flow.
@@ -290,6 +294,7 @@ Large reports: summary plus report inline; move the full report to GridFS above 
 | `SCANNER_DB_SEED_DIR`, `SCANNER_JAVA_DB_SEED_DIR` | Seed DB baked into the image, installed when no DB exists yet (with no digest, so the first update downloads). Defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing directory means no seed; the service is then not ready until the first download succeeds |
 | `SCANNER_DB_DOWNLOAD_STALL_TIMEOUT` | Abort a download when no bytes arrive for this long. Default 30s |
 | `SCANNER_DB_DOWNLOAD_TIMEOUT` | Overall cap per source per download (safety net). Default 15m |
+| `SCANNER_DB_AGE_WARN` | Log a WARN after a check when the installed DB's `UpdatedAt` is older than this. Visibility only. Default `7d` (the `d` suffix is supported) |
 | `SCANNER_DB_MAX_AGE_DEFAULT` | Default for `max_db_age`. Default 6h |
 | `SCANNER_QUEUE_WORKERS`, `SCANNER_QUEUE_MAX_LENGTH` | Queue settings. Defaults 1 and 100 |
 | `SCANNER_SCAN_TIMEOUT` | Per-scan timeout. Default 10m |
