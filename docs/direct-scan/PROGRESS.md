@@ -8,7 +8,7 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 2 (DB pre-check module)
 - Last completed task: P1-5
 - In progress: none
-- Next task: P1-4 follow-up (source options `allow-http1`) and the P3-6 startup check, then P2-1
+- Next task: P3-6 startup check (`SCANNER_DB_SOURCES` required when v2 is enabled), then P2-1
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -99,6 +99,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P1-4  Follow-up: allow-http1 source option
+- Status: done
+- What changed: `SCANNER_DB_SOURCES` entries accept an optional third field of `;`-separated options; `allow-http1` sets `DBSource.AllowHTTP1`. `String()` prints the option. An unknown or empty option is a parse error that names the option (options never hold secrets).
+- Files: `pkg/v2/config/sources.go`, `pkg/v2/config/sources_test.go`, `pkg/v2/config/config_test.go`
+- Tests run: `go test -short -race -cover ./pkg/v2/...` -> ok, 100.0%; `go vet` -> ok
+- Decisions / surprises: `repo|direct|` (empty options) is rejected rather than ignored, so a typo cannot silently drop an option.
+- Next: P3-6 startup check, then P2-1
 
 ### 2026-10-15  DECISIONS  Second round of owner answers, history fixed
 - Status: done

@@ -90,7 +90,7 @@ func TestGetConfig(t *testing.T) {
 			envs: Envs{
 				"SCANNER_JAVA_DB_SOURCES": "ghcr.io/aquasecurity/trivy-java-db:1",
 			},
-			expectedError: "parsing SCANNER_JAVA_DB_SOURCES: source 1: expected repository|route",
+			expectedError: "parsing SCANNER_JAVA_DB_SOURCES: source 1: expected repository|route or repository|route|options",
 		},
 		{
 			name: "Should read all values from env",
@@ -103,7 +103,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_REGISTRY_USERNAME":         "robot$scanner",
 				"SCANNER_REGISTRY_PASSWORD":         "s3cret",
 				"SCANNER_DB_CHECK_INTERVAL":         "1d",
-				"SCANNER_DB_SOURCES":                "mirror.local/aquasec/trivy-db:2|direct,ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080",
+				"SCANNER_DB_SOURCES":                "mirror.local/aquasec/trivy-db:2|direct|allow-http1,ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080",
 				"SCANNER_JAVA_DB_SOURCES":           "mirror.local/aquasec/trivy-java-db:1|direct",
 				"SCANNER_PRECHECK_TIMEOUT_DNS":      "1s",
 				"SCANNER_PRECHECK_TIMEOUT_CONNECT":  "2s",
@@ -128,7 +128,7 @@ func TestGetConfig(t *testing.T) {
 				RegistryPassword: "s3cret",
 				DBCheckInterval:  24 * time.Hour,
 				DBSources: []DBSource{
-					{Repository: "mirror.local/aquasec/trivy-db:2"},
+					{Repository: "mirror.local/aquasec/trivy-db:2", AllowHTTP1: true},
 					{Repository: "ghcr.io/aquasecurity/trivy-db:2", Proxy: &url.URL{Scheme: "socks5", Host: "proxy:1080"}},
 				},
 				JavaDBSources: []DBSource{

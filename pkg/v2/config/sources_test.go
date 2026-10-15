@@ -35,19 +35,42 @@ func TestParseDBSources(t *testing.T) {
 			},
 		},
 		{
+			name:  "allow-http1 option on direct and proxy routes",
+			value: "mirror.local/aquasec/trivy-db:2|direct|allow-http1,ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080| allow-http1 ",
+			expectedSources: []string{
+				"mirror.local/aquasec/trivy-db:2|direct|allow-http1",
+				"ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080|allow-http1",
+			},
+		},
+		{
+			name:            "option list with a repeated option",
+			value:           "mirror.local/aquasec/trivy-db:2|direct|allow-http1;allow-http1",
+			expectedSources: []string{"mirror.local/aquasec/trivy-db:2|direct|allow-http1"},
+		},
+		{
+			name:          "unknown option",
+			value:         "mirror.local/aquasec/trivy-db:2|direct|http1",
+			expectedError: `source 1: unknown option "http1", known options: allow-http1`,
+		},
+		{
+			name:          "empty options field",
+			value:         "mirror.local/aquasec/trivy-db:2|direct|",
+			expectedError: `source 1: unknown option "", known options: allow-http1`,
+		},
+		{
 			name:          "missing route",
 			value:         "mirror.local/aquasec/trivy-db:2",
-			expectedError: "source 1: expected repository|route",
+			expectedError: "source 1: expected repository|route or repository|route|options",
 		},
 		{
 			name:          "too many parts",
-			value:         "mirror.local/aquasec/trivy-db:2|direct|direct",
-			expectedError: "source 1: expected repository|route",
+			value:         "mirror.local/aquasec/trivy-db:2|direct|allow-http1|direct",
+			expectedError: "source 1: expected repository|route or repository|route|options",
 		},
 		{
 			name:          "empty item",
 			value:         "mirror.local/aquasec/trivy-db:2|direct,",
-			expectedError: "source 2: expected repository|route",
+			expectedError: "source 2: expected repository|route or repository|route|options",
 		},
 		{
 			name:          "empty repository",
@@ -131,6 +154,15 @@ func TestParseDBSources_Redaction(t *testing.T) {
 		assert.NotContains(t, err.Error(), "s3cret")
 		assert.NotContains(t, err.Error(), "proxyuser")
 	})
+}
+
+func TestParseDBSources_AllowHTTP1(t *testing.T) {
+	sources, err := ParseDBSources("a.local/trivy-db:2|direct,b.local/trivy-db:2|direct|allow-http1")
+	require.NoError(t, err)
+	require.Len(t, sources, 2)
+
+	assert.False(t, sources[0].AllowHTTP1, "HTTP/2 is required by default")
+	assert.True(t, sources[1].AllowHTTP1)
 }
 
 func TestDBSource_String(t *testing.T) {
