@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 3 (DB download module)
-- Last completed task: P3-1
+- Last completed task: P3-2
 - In progress: none
-- Next task: P3-2 (upstream check: compare the remote manifest digest with the stored one)
+- Next task: P3-3 (download the DB layer with stall timeout and overall cap, verify digest and size, extract `trivy.db` and `metadata.json` to a temp dir)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -107,6 +107,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-2  Upstream check
+- Status: done
+- What changed: `checkUpstream(ctx, client, installedDigest)` in `pkg/v2/dbmgr/download.go` gets the remote manifest and reports whether its digest differs from the installed one. An empty installed digest (seed DB, first start) counts as changed. It returns the manifest so the download needs no second request.
+- Files: `pkg/v2/dbmgr/download.go`, `pkg/v2/dbmgr/download_test.go`
+- Tests run: `go test -short -race -run TestCheckUpstream ./pkg/v2/dbmgr/` -> ok (same, different and empty digest, registry 404); `go vet` -> ok
+- Decisions / surprises: the installed digest is passed in by the caller; it will come from the DB state (P4-2, Mongo `db_state` in P5-6). Phase 3 plan: P3-3 `downloadDB` (stall timeout, digest and size check, tar.gz extraction), P3-4 versioned directories plus a symlink swapped with `rename`, P3-6 the source loop calling Precheck, then checkUpstream, then download and install.
+- Next: P3-3
 
 ### 2026-10-15  P3-1  OCI registry client
 - Status: done
