@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 2 (DB pre-check module)
-- Last completed task: P2-6
+- Phase: 2 done; Phase 3 (DB download module) next
+- Last completed task: P2-7
 - In progress: none
-- Next task: P2-7 (manual pre-check against one real source)
+- Next task: P3-1 (OCI client over our transport: reuse `dialTLS`, `getManifest`, `getToken` from `pkg/v2/dbmgr/registry.go`; add blob download)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -100,6 +100,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P2-7  Manual pre-check entrypoint
+- Status: done
+- What changed: `pkg/v2/dbmgr/precheck_manual_test.go` (build tag `manual`) runs `Precheck` on every source in `SCANNER_DB_SOURCES`, with the normal v2 config and timeouts, printing the logs and the JSON result. It is skipped when no sources are set. The command is listed in `CLAUDE.md` section 4.
+- Files: `pkg/v2/dbmgr/precheck_manual_test.go`, `CLAUDE.md`
+- Tests run: `go vet -tags=manual` -> ok; run without sources -> skipped; manual run on this dev machine against `ghcr.io/aquasecurity/trivy-db:2|direct` and `docker.io/aquasec/trivy-db:2|direct` -> both passed over HTTP/2, TLS 1.3, anonymous token flow working. ghcr.io: total 1543ms (dns 218, tls 340, http 194, manifest 789). Docker Hub: total 2247ms (manifest 1330).
+- Decisions / surprises: on this dev machine the connect stage takes about 0.3ms to reach GitHub and Docker Hub, so something local (VPN/TUN or transparent proxy) accepts TCP; the real network latency shows up in the TLS stage. Keep this in mind when reading timings from such hosts. Known limitation: the direct route connects only to the first resolved address (normally IPv4 first when the host has no IPv6 route); trying the next addresses can be added if a mirror needs it.
+- Next: P3-1
 
 ### 2026-10-15  P2-6  Pre-check test matrix
 - Status: done

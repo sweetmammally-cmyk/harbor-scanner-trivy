@@ -47,6 +47,7 @@ one package:       go test -short ./pkg/v2/config/...
 integration:       make test-integration     (build tag integration, needs Docker: Redis, Mongo, registry)
 component:         make test-component       (builds the Docker image; slow)
 vet:               go vet ./...
+manual pre-check:  SCANNER_DB_SOURCES='ghcr.io/aquasecurity/trivy-db:2|direct' go test -tags=manual -count=1 -v -run TestManualPrecheck ./pkg/v2/dbmgr/
 lint:              make lint                 (needs ./bin/golangci-lint; not installed locally, the pinned v1.21.0 is too old for Go 1.26)
 ```
 

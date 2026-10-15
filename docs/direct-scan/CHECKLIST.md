@@ -25,7 +25,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P2-4 `httptrace` timings: DNS, connect, TLS, first byte, total
 - [x] P2-5 Log effective source, route and each stage result; redact credentials and Authorization
 - [x] P2-6 Tests: ok server, blackhole (timeout), TLS failure, no HTTP/2, HTTP proxy, SOCKS5, redaction
-- [ ] P2-7 Manual debug entrypoint or test helper to run a pre-check against one source
+- [x] P2-7 Manual debug entrypoint or test helper to run a pre-check against one source
 
 ## Phase 3: DB download module
 - [ ] P3-1 OCI client over our transport (token auth if needed, manifest, blob); record raw-HTTP vs library decision
