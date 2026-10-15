@@ -256,31 +256,3 @@ func TestNewRegistryClient_InvalidRepository(t *testing.T) {
 	_, err := newRegistryClient(config.DBSource{Repository: "no-tag/trivy-db"})
 	assert.Error(t, err)
 }
-
-func TestDropAuthOnRedirect(t *testing.T) {
-	newRequest := func(url string) *http.Request {
-		req, err := http.NewRequest(http.MethodGet, url, nil)
-		require.NoError(t, err)
-		req.Header.Set("Authorization", "Bearer "+testToken)
-		return req
-	}
-	first := newRequest("https://registry.local:443/v2/x/blobs/sha256:1")
-
-	sameHost := newRequest("https://registry.local:443/other")
-	require.NoError(t, dropAuthOnRedirect(sameHost, []*http.Request{first}))
-	assert.Equal(t, "Bearer "+testToken, sameHost.Header.Get("Authorization"))
-
-	otherPort := newRequest("https://registry.local:8443/blob")
-	require.NoError(t, dropAuthOnRedirect(otherPort, []*http.Request{first}))
-	assert.Empty(t, otherPort.Header.Get("Authorization"))
-
-	otherHost := newRequest("https://cdn.local/blob")
-	require.NoError(t, dropAuthOnRedirect(otherHost, []*http.Request{first}))
-	assert.Empty(t, otherHost.Header.Get("Authorization"))
-
-	via := make([]*http.Request, 10)
-	for i := range via {
-		via[i] = first
-	}
-	assert.Error(t, dropAuthOnRedirect(newRequest("https://registry.local/again"), via))
-}

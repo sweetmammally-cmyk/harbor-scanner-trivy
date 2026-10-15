@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/oci"
 )
 
 var errHTTP2NotNegotiated = errors.New("server did not negotiate HTTP/2")
@@ -237,7 +238,7 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 		},
 	}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, CheckRedirect: dropAuthOnRedirect}
+	client := &http.Client{Transport: transport, CheckRedirect: oci.DropAuthOnRedirect}
 
 	protocol := tlsConn.ConnectionState().NegotiatedProtocol
 	var firstByte time.Duration
@@ -274,8 +275,8 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 	firstByte = 0
 	ok = runStage(ctx, &result, "manifest", cfg.PrecheckTimeoutManifest, func(ctx context.Context) (string, error) {
 		ctx = withFirstByteTrace(ctx, &firstByte)
-		registry := &registryClient{client: client, ref: ref}
-		resp, err := registry.get(ctx, registry.manifestURL(), manifestAccept)
+		registry := &registryClient{oci: oci.NewClient(client, oci.Credentials{}), ref: ref}
+		resp, err := registry.oci.Do(ctx, http.MethodGet, registry.manifestURL(), manifestAccept)
 		if err != nil {
 			return "", err
 		}

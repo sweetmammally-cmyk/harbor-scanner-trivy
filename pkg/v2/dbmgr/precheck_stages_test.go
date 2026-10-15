@@ -296,17 +296,6 @@ func TestParseRepository(t *testing.T) {
 	}
 }
 
-func TestGetToken_InvalidRealm(t *testing.T) {
-	for _, challenge := range []string{
-		`Bearer service="fake"`,
-		`Bearer realm="http://insecure.local/token"`,
-		`Bearer realm="::bad"`,
-	} {
-		_, err := getToken(context.Background(), http.DefaultClient, challenge)
-		assert.EqualError(t, err, "token: invalid realm in registry challenge", challenge)
-	}
-}
-
 // TestPrecheck_Hangs checks the main promise of the pre-check: a source that
 // hangs at any point fails within its timeout instead of blocking.
 func TestPrecheck_Hangs(t *testing.T) {

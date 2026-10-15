@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 5 done; Phase 6 (registry client) next
-- Last completed task: P5-7
-- In progress: none
-- Next task: P6-1 (move the Phase 3 OCI request and token code to `pkg/v2/oci`, then the registry client), P6-2, P6-3
+- Phase: 6 (registry client)
+- Last completed task: P5-7 (and the P5-6 follow-ups)
+- In progress: P6-1 (`[~]`): the shared OCI client is done and committed; the Harbor registry client (`pkg/v2/registry`: name validation, HEAD resolve, GET + sha256 fallback, media type) is next
+- Next task: finish P6-1, then P6-2, P6-3
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -165,6 +165,20 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P6-1  Part 1: shared OCI client (`pkg/v2/oci`)
+- Status: partial (P6-1 continues with the registry client)
+- What changed:
+  - New package `pkg/v2/oci`, `Client`:
+    - `NewClient(httpClient, creds)` (sets `DropAuthOnRedirect` when the HTTP client has no redirect rule).
+    - `Do(ctx, method, url, accept)` sends the request and answers up to `MaxChallenges` (3) 401 challenges, then returns the registry's 401. Bearer: a token from the challenge realm; a token the registry refuses after it was sent is dropped and fetched again. Basic: the credentials, when there are any.
+    - Tokens are cached per realm|service|scope until `expires_in` (default 60s) minus 5s; one fetch per key at a time, other callers wait (single-flight).
+    - The credentials go to the token endpoint as basic auth. A plain-`http` realm is accepted only when the request itself is plain `http`. A 401/403 from the token endpoint is `ErrTokenDenied`. Errors name the realm host only.
+  - `dbmgr` now uses it with anonymous credentials (`registryClient{oci, ref}`, pre-check manifest stage); its own `get`, `send`, `getToken` and `dropAuthOnRedirect` were removed, and their tests moved to `pkg/v2/oci`.
+- Files: `pkg/v2/oci/client.go`, `pkg/v2/oci/client_test.go`, `pkg/v2/dbmgr/registry.go`, `pkg/v2/dbmgr/precheck.go`, `pkg/v2/dbmgr/registry_test.go`, `pkg/v2/dbmgr/precheck_stages_test.go`
+- Tests run: `go test -short -race -count=3 ./pkg/v2/oci/` -> ok, 91.2%; `go test -short -race -count=3 ./pkg/v2/dbmgr/` -> ok, unchanged behaviour (token reused for the blob, no token on the CDN redirect, pre-check token flow); `make test` -> ok. New oci cases: anonymous token cached for 3 requests with the right scope; basic credentials reach the token endpoint; refused credentials give `ErrTokenDenied` without the user or password; a token expires at `expires_in` minus 5s and is fetched again; a revoked token is replaced; 10 concurrent requests share one token fetch; a registry that refuses every token gets exactly `MaxChallenges+1` requests and the 401 back; plain-http realm allowed for a plain-http registry and refused for an https one; invalid realms; Basic challenge with and without credentials; the redirect rule; a caller's own redirect rule is kept.
+- Decisions / surprises: requests no longer send a token up front; each request is answered by a 401 first and then reuses the cached token (one extra round trip, no extra token fetch). It keeps the client simple: the cache key comes from the challenge.
+- Next: P6-1 part 2 (registry client)
 
 ### 2026-10-15  P5-6  Follow-up: first ready after boot
 - Status: done

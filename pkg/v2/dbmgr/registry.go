@@ -6,15 +6,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/oci"
 )
 
 // manifestAccept lists the manifest media types we ask the registry for.
@@ -95,13 +94,11 @@ func dialTLS(ctx context.Context, source config.DBSource, addr string) (*tls.Con
 }
 
 // registryClient talks to one DB repository with the registry API (OCI distribution).
-// It uses raw net/http so every request goes through the source's route.
+// Its oci.Client answers the anonymous token challenges; its HTTP client sends
+// every request through the source's route.
 type registryClient struct {
-	client *http.Client
-	ref    repositoryRef
-	// token is the anonymous pull token, set after the first Bearer challenge.
-	// It is sent only to the registry host and never logged or returned.
-	token string
+	oci *oci.Client
+	ref repositoryRef
 }
 
 // newRegistryClient returns a client whose connections go through the source's route.
@@ -116,21 +113,8 @@ func newRegistryClient(source config.DBSource) (*registryClient, error) {
 			return dialTLS(ctx, source, addr)
 		},
 	}
-	client := &http.Client{Transport: transport, CheckRedirect: dropAuthOnRedirect}
-	return &registryClient{client: client, ref: ref}, nil
-}
-
-// dropAuthOnRedirect removes the registry token when a redirect leaves the registry
-// host:port (for example to a blob CDN). net/http alone keeps the header when only
-// the port changes. It keeps the default limit of 10 redirects.
-func dropAuthOnRedirect(req *http.Request, via []*http.Request) error {
-	if len(via) >= 10 {
-		return errors.New("stopped after 10 redirects")
-	}
-	if req.URL.Host != via[0].URL.Host {
-		req.Header.Del("Authorization")
-	}
-	return nil
+	client := oci.NewClient(&http.Client{Transport: transport}, oci.Credentials{})
+	return &registryClient{oci: client, ref: ref}, nil
 }
 
 // ociManifest is the part of an OCI image manifest we need.
@@ -145,43 +129,6 @@ type ociDescriptor struct {
 	Size      int64  `json:"size"`
 }
 
-// get requests a registry URL. When the registry answers 401 with a Bearer
-// challenge, it gets an anonymous pull token, keeps it, and asks again.
-// The caller must close the response body.
-func (c *registryClient) get(ctx context.Context, url string, accept string) (*http.Response, error) {
-	resp, err := c.send(ctx, url, accept)
-	if err != nil {
-		return nil, err
-	}
-
-	challenge := resp.Header.Get("WWW-Authenticate")
-	if resp.StatusCode != http.StatusUnauthorized || !strings.HasPrefix(challenge, "Bearer ") {
-		return resp, nil
-	}
-	_ = resp.Body.Close()
-
-	c.token, err = getToken(ctx, c.client, challenge)
-	if err != nil {
-		return nil, err
-	}
-	return c.send(ctx, url, accept)
-}
-
-func (c *registryClient) send(ctx context.Context, url string, accept string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if accept != "" {
-		req.Header.Set("Accept", accept)
-	}
-	if c.token != "" {
-		// dropAuthOnRedirect removes it when a redirect goes to another host (a blob CDN).
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	return c.client.Do(req)
-}
-
 func (c *registryClient) manifestURL() string {
 	return "https://" + c.ref.Host + "/v2/" + c.ref.Path + "/manifests/" + c.ref.Tag
 }
@@ -189,7 +136,7 @@ func (c *registryClient) manifestURL() string {
 // getManifest returns the manifest of the repository tag and its digest
 // (sha256 of the manifest bytes, checked against Docker-Content-Digest when sent).
 func (c *registryClient) getManifest(ctx context.Context) (ociManifest, string, error) {
-	resp, err := c.get(ctx, c.manifestURL(), manifestAccept)
+	resp, err := c.oci.Do(ctx, http.MethodGet, c.manifestURL(), manifestAccept)
 	if err != nil {
 		return ociManifest{}, "", err
 	}
@@ -221,7 +168,7 @@ func (c *registryClient) getManifest(ctx context.Context) (ociManifest, string, 
 // getBlob opens the blob with the given digest. Registries often redirect blobs to
 // a CDN; the redirect is followed through the same route. The caller must close the body.
 func (c *registryClient) getBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
-	resp, err := c.get(ctx, "https://"+c.ref.Host+"/v2/"+c.ref.Path+"/blobs/"+digest, "")
+	resp, err := c.oci.Do(ctx, http.MethodGet, "https://"+c.ref.Host+"/v2/"+c.ref.Path+"/blobs/"+digest, "")
 	if err != nil {
 		return nil, err
 	}
@@ -230,58 +177,4 @@ func (c *registryClient) getBlob(ctx context.Context, digest string) (io.ReadClo
 		return nil, fmt.Errorf("GET blob %s returned status %d", digest, resp.StatusCode)
 	}
 	return resp.Body, nil
-}
-
-// getToken gets an anonymous token for a challenge such as
-// `Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:aquasecurity/trivy-db:pull"`.
-func getToken(ctx context.Context, client *http.Client, challenge string) (string, error) {
-	params := map[string]string{}
-	for _, part := range strings.Split(strings.TrimPrefix(challenge, "Bearer "), ",") {
-		key, value, found := strings.Cut(strings.TrimSpace(part), "=")
-		if found {
-			params[key] = strings.Trim(value, `"`)
-		}
-	}
-
-	realm, err := url.Parse(params["realm"])
-	if err != nil || realm.Scheme != "https" || realm.Host == "" {
-		return "", fmt.Errorf("token: invalid realm in registry challenge")
-	}
-	query := realm.Query()
-	if params["service"] != "" {
-		query.Set("service", params["service"])
-	}
-	if params["scope"] != "" {
-		query.Set("scope", params["scope"])
-	}
-	realm.RawQuery = query.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, realm.String(), nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("token: %s returned status %d", realm.Host, resp.StatusCode)
-	}
-
-	var body struct {
-		Token       string `json:"token"`
-		AccessToken string `json:"access_token"`
-	}
-	if err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return "", fmt.Errorf("token: decoding response from %s: %w", realm.Host, err)
-	}
-	if body.Token != "" {
-		return body.Token, nil
-	}
-	if body.AccessToken != "" {
-		return body.AccessToken, nil
-	}
-	return "", fmt.Errorf("token: empty token from %s", realm.Host)
 }
