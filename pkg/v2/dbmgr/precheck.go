@@ -237,7 +237,7 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 		},
 	}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: transport, CheckRedirect: dropAuthOnRedirect}
 
 	protocol := tlsConn.ConnectionState().NegotiatedProtocol
 	var firstByte time.Duration
@@ -274,7 +274,8 @@ func Precheck(ctx context.Context, source config.DBSource, cfg config.Config) (r
 	firstByte = 0
 	ok = runStage(ctx, &result, "manifest", cfg.PrecheckTimeoutManifest, func(ctx context.Context) (string, error) {
 		ctx = withFirstByteTrace(ctx, &firstByte)
-		resp, err := getManifest(ctx, client, ref)
+		registry := &registryClient{client: client, ref: ref}
+		resp, err := registry.get(ctx, registry.manifestURL(), manifestAccept)
 		if err != nil {
 			return "", err
 		}

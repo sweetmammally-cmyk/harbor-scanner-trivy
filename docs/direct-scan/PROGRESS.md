@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 2 done; Phase 3 (DB download module) next
-- Last completed task: P2-8
+- Phase: 3 (DB download module)
+- Last completed task: P3-1
 - In progress: none
-- Next task: P3-1 (OCI client over our transport: reuse `dialTLS`, `getManifest`, `getToken` from `pkg/v2/dbmgr/registry.go`; add blob download)
+- Next task: P3-2 (upstream check: compare the remote manifest digest with the stored one)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -64,6 +64,7 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (P3-1): OCI client is raw `net/http` (not go-containerregistry). Reasons: the manifest and token code already existed and runs over our route (`Dial` + `dialTLS`), and we need exact control of redirects (token never sent to another host:port), stall timeouts (P3-3) and timings. A library would add its own retries and redirect handling.
 - 2026-10-15 (owner, third round):
   - TLS stage purpose: only to see whether the network path interferes with the TLS handshake, not certificate security. Normal verification against the system CA pool stays. No CA file option, no pinning, no insecure-skip-verify. (No CA option was ever added; nothing to undo.)
   - P2-8 added: classify pre-check failures and record the class in the result and the log.
@@ -106,6 +107,17 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-1  OCI registry client
+- Status: done
+- What changed: `registryClient` in `pkg/v2/dbmgr/registry.go` (replaces the `getManifest` function) holds the HTTP client, the parsed repository and the anonymous pull token, so the manifest and blob requests share one token. `newRegistryClient(source)` builds a transport whose every connection, including redirects, uses `dialTLS` over the source's route.
+  - `getManifest(ctx)` returns the parsed OCI manifest (layers: media type, digest, size) and its digest, computed as the sha256 of the bytes and checked against `Docker-Content-Digest`.
+  - `getBlob(ctx, digest)` returns the blob body and follows CDN redirects.
+  - `dropAuthOnRedirect` removes the token when a redirect changes host:port. The pre-check client uses the same rule.
+- Files: `pkg/v2/dbmgr/registry.go`, `pkg/v2/dbmgr/registry_test.go`, `pkg/v2/dbmgr/precheck.go`
+- Tests run: `go test -short -race -count=5 ./pkg/v2/dbmgr/` -> ok; `make test` -> ok; coverage `pkg/v2/dbmgr` 88.3%; `go.mod` unchanged. Fake OCI registry plus a separate CDN server: manifest parse and digest, digest header mismatch, manifest without layers, unknown tag, token fetched once and reused for the blob, blob redirect to the CDN without the token, redirect going through the same SOCKS5 proxy, unknown blob, redirect rule unit test.
+- Decisions / surprises: the CDN test found a real token leak. net/http keeps `Authorization` on a redirect when only the port changes (it compares host names), so a mirror redirecting to another port on the same host would have received the token. Fixed with `dropAuthOnRedirect`. Raw HTTP vs library decision recorded under Decisions.
+- Next: P3-2
 
 ### 2026-10-15  P2-8  Pre-check failure classes
 - Status: done

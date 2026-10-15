@@ -29,7 +29,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P2-8 Classify pre-check failures (dns_failure, tcp_timeout, tcp_refused, tls_reset, tls_timeout, tls_alert, tls_cert_invalid with peer cert subject/issuer/expiry, plus http/manifest classes); record the class in the result and the log; tests with servers that reset, go silent, or send an alert after the ClientHello, and with an unknown-CA certificate
 
 ## Phase 3: DB download module
-- [ ] P3-1 OCI client over our transport (token auth if needed, manifest, blob); record raw-HTTP vs library decision
+- [x] P3-1 OCI client over our transport (token auth if needed, manifest, blob); record raw-HTTP vs library decision
 - [ ] P3-2 Upstream check: compare remote manifest digest with the stored one
 - [ ] P3-3 Download DB layer only after the pre-check passed, with stall timeout and overall cap, verify digest, extract `trivy.db` and `metadata.json` to a temp dir
 - [ ] P3-4 Atomic swap; in-flight scans keep the old copy (record mechanism)

@@ -2,9 +2,11 @@ package dbmgr
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -92,19 +94,62 @@ func dialTLS(ctx context.Context, source config.DBSource, addr string) (*tls.Con
 	return tlsConn, nil
 }
 
-// getManifest requests the manifest of ref. When the registry answers 401 with a
-// Bearer challenge, it gets an anonymous pull token and asks again.
-// The caller must close the response body. The token is never logged or returned.
-func getManifest(ctx context.Context, client *http.Client, ref repositoryRef) (*http.Response, error) {
-	manifestURL := "https://" + ref.Host + "/v2/" + ref.Path + "/manifests/" + ref.Tag
+// registryClient talks to one DB repository with the registry API (OCI distribution).
+// It uses raw net/http so every request goes through the source's route.
+type registryClient struct {
+	client *http.Client
+	ref    repositoryRef
+	// token is the anonymous pull token, set after the first Bearer challenge.
+	// It is sent only to the registry host and never logged or returned.
+	token string
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
+// newRegistryClient returns a client whose connections go through the source's route.
+func newRegistryClient(source config.DBSource) (*registryClient, error) {
+	ref, err := parseRepository(source.Repository)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", manifestAccept)
+	transport := &http.Transport{
+		ForceAttemptHTTP2: true,
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialTLS(ctx, source, addr)
+		},
+	}
+	client := &http.Client{Transport: transport, CheckRedirect: dropAuthOnRedirect}
+	return &registryClient{client: client, ref: ref}, nil
+}
 
-	resp, err := client.Do(req)
+// dropAuthOnRedirect removes the registry token when a redirect leaves the registry
+// host:port (for example to a blob CDN). net/http alone keeps the header when only
+// the port changes. It keeps the default limit of 10 redirects.
+func dropAuthOnRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if req.URL.Host != via[0].URL.Host {
+		req.Header.Del("Authorization")
+	}
+	return nil
+}
+
+// ociManifest is the part of an OCI image manifest we need.
+type ociManifest struct {
+	MediaType string          `json:"mediaType"`
+	Layers    []ociDescriptor `json:"layers"`
+}
+
+type ociDescriptor struct {
+	MediaType string `json:"mediaType"`
+	Digest    string `json:"digest"`
+	Size      int64  `json:"size"`
+}
+
+// get requests a registry URL. When the registry answers 401 with a Bearer
+// challenge, it gets an anonymous pull token, keeps it, and asks again.
+// The caller must close the response body.
+func (c *registryClient) get(ctx context.Context, url string, accept string) (*http.Response, error) {
+	resp, err := c.send(ctx, url, accept)
 	if err != nil {
 		return nil, err
 	}
@@ -115,18 +160,76 @@ func getManifest(ctx context.Context, client *http.Client, ref repositoryRef) (*
 	}
 	_ = resp.Body.Close()
 
-	token, err := getToken(ctx, client, challenge)
+	c.token, err = getToken(ctx, c.client, challenge)
 	if err != nil {
 		return nil, err
+	}
+	return c.send(ctx, url, accept)
+}
+
+func (c *registryClient) send(ctx context.Context, url string, accept string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	if c.token != "" {
+		// dropAuthOnRedirect removes it when a redirect goes to another host (a blob CDN).
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return c.client.Do(req)
+}
+
+func (c *registryClient) manifestURL() string {
+	return "https://" + c.ref.Host + "/v2/" + c.ref.Path + "/manifests/" + c.ref.Tag
+}
+
+// getManifest returns the manifest of the repository tag and its digest
+// (sha256 of the manifest bytes, checked against Docker-Content-Digest when sent).
+func (c *registryClient) getManifest(ctx context.Context) (ociManifest, string, error) {
+	resp, err := c.get(ctx, c.manifestURL(), manifestAccept)
+	if err != nil {
+		return ociManifest{}, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return ociManifest{}, "", fmt.Errorf("GET manifest %s:%s returned status %d", c.ref.Path, c.ref.Tag, resp.StatusCode)
 	}
 
-	req, err = http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return ociManifest{}, "", fmt.Errorf("reading manifest %s:%s: %w", c.ref.Path, c.ref.Tag, err)
+	}
+	digest := fmt.Sprintf("sha256:%x", sha256.Sum256(body))
+	if header := resp.Header.Get("Docker-Content-Digest"); header != "" && header != digest {
+		return ociManifest{}, "", fmt.Errorf("manifest %s:%s: digest %s does not match Docker-Content-Digest %s", c.ref.Path, c.ref.Tag, digest, header)
+	}
+
+	var manifest ociManifest
+	if err = json.Unmarshal(body, &manifest); err != nil {
+		return ociManifest{}, "", fmt.Errorf("decoding manifest %s:%s: %w", c.ref.Path, c.ref.Tag, err)
+	}
+	if len(manifest.Layers) == 0 {
+		return ociManifest{}, "", fmt.Errorf("manifest %s:%s has no layers", c.ref.Path, c.ref.Tag)
+	}
+	return manifest, digest, nil
+}
+
+// getBlob opens the blob with the given digest. Registries often redirect blobs to
+// a CDN; the redirect is followed through the same route. The caller must close the body.
+func (c *registryClient) getBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
+	resp, err := c.get(ctx, "https://"+c.ref.Host+"/v2/"+c.ref.Path+"/blobs/"+digest, "")
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", manifestAccept)
-	req.Header.Set("Authorization", "Bearer "+token)
-	return client.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("GET blob %s returned status %d", digest, resp.StatusCode)
+	}
+	return resp.Body, nil
 }
 
 // getToken gets an anonymous token for a challenge such as
