@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 3 (DB download module)
-- Last completed task: P3-7
-- In progress: P3-9 (`[~]`): the real ghcr.io download is done and recorded; the fake-registry cases are mostly covered by the P3-3 and P3-6 tests; fill the gaps next
-- Next task: finish P3-9, then Phase 4
-- Blockers / questions for the user: none
+- Phase: 3 done; Phase 4 (updater and freshness) next
+- Last completed task: P3-9
+- In progress: none
+- Next task: P4-1 (interval loop, first run at startup, single-flight; seed install at startup; skip the Java DB without sources; `SCANNER_DB_RETRY_INTERVAL` while degraded once the owner gives its default)
+- Blockers / questions for the user: (1) default for `SCANNER_DB_RETRY_INTERVAL` (needed in P4-1); (2) the Java DB is 938 MiB compressed: is the 15m download cap right for it, or should the Java DB get its own cap?
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -122,6 +122,14 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P3-9  Fake-registry test list complete
+- Status: done
+- What changed: `TestUpdate_DownloadFailuresFallBack` runs each broken download through the whole loop (different content, truncated, hang mid-download, HTTP 502). Each time the first source fails with `download_error`, the second source is installed, the run takes under 3s (stall 200ms), and no version directory is left behind. With the earlier tests this covers the whole P3-9 list: success (`TestUpdate`), wrong digest (`TestDownloadDB`), truncated, hang mid-download, fallback to the second source and all sources failing, plus the real ghcr.io run recorded below.
+- Files: `pkg/v2/dbmgr/update_test.go`
+- Tests run: `go test -short -race -count=5 -run TestUpdate_DownloadFailuresFallBack` -> ok; `go test -short -race -count=3 ./pkg/v2/...` -> ok; coverage config 100%, dbmgr 88.2%; `make test` -> ok
+- Decisions / surprises: a P3-7 doc edit failed after its commit had been made (the edit script and the commit were not chained); fixed by amending that local commit. Doc edits and commits are now chained with `&&`.
+- Next: P4-1
 
 ### 2026-10-15  P3-7  Java DB
 - Status: done

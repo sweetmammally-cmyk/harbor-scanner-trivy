@@ -302,3 +302,66 @@ func TestUpdate_JavaDB(t *testing.T) {
 		assert.False(t, dbPresent(cacheDir, "db", "trivy.db"))
 	})
 }
+
+// TestUpdate_DownloadFailuresFallBack is the P3-9 list at the update level: each
+// broken download fails its source and the next source is installed, in bounded time.
+func TestUpdate_DownloadFailuresFallBack(t *testing.T) {
+	now := time.Now()
+	layer := dbLayer(t, strings.Repeat("broken source db ", 2000), now)
+
+	testCases := []struct {
+		name          string
+		blob          http.HandlerFunc
+		expectedError string
+	}{
+		{
+			// Size or digest mismatch; the exact digest error is tested in TestDownloadDB.
+			name:          "different content",
+			blob:          func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(dbLayer(t, "other", now)) },
+			expectedError: "",
+		},
+		{
+			name:          "truncated",
+			blob:          func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(layer[:len(layer)/2]) },
+			expectedError: "unexpected EOF",
+		},
+		{
+			name: "hang mid-download",
+			blob: func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write(layer[:len(layer)/2])
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			},
+			expectedError: "download stalled",
+		},
+		{
+			name:          "server error",
+			blob:          func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) },
+			expectedError: "returned status 502",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheDir := t.TempDir()
+			broken := startFakeOCIRegistry(t, layer)
+			serveBlob(broken, tc.blob)
+			good := startFakeOCIRegistry(t, dbLayer(t, "good db", now))
+
+			cfg := updateConfig
+			cfg.DBDownloadStallTimeout = 200 * time.Millisecond
+			start := time.Now()
+			result := update(testContext(t), cfg, cacheDir, trivyDB,
+				[]config.DBSource{broken.source(t, "direct"), good.source(t, "direct")})
+
+			assert.Less(t, time.Since(start), 3*time.Second)
+			assert.Equal(t, ModeNormal, result.Mode)
+			assert.True(t, result.Installed)
+			assert.Equal(t, []string{"download_error", ""}, sourceClasses(result))
+			assert.Contains(t, result.Sources[0].Error, tc.expectedError)
+			assert.Equal(t, good.source(t, "direct").String(), result.ActiveSource)
+			assert.Equal(t, "good db", readDB(t, cacheDir))
+			assert.Len(t, versionNames(t, cacheDir), 1, "the broken download left nothing behind")
+		})
+	}
+}
