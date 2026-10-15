@@ -30,6 +30,7 @@ type Updater struct {
 	ctx      context.Context
 	cfg      config.Config
 	cacheDir string
+	store    StateStore
 
 	mu      sync.Mutex
 	running *updateRun
@@ -40,10 +41,11 @@ type updateRun struct {
 	results UpdateResults
 }
 
-// NewUpdater returns an updater for the DBs in Trivy's cache directory.
-// ctx is the service lifetime: when it ends, Run returns and runs stop.
-func NewUpdater(ctx context.Context, cfg config.Config, cacheDir string) *Updater {
-	return &Updater{ctx: ctx, cfg: cfg, cacheDir: cacheDir}
+// NewUpdater returns an updater for the DBs in Trivy's cache directory. After each
+// run it saves the state of each DB in store. ctx is the service lifetime: when it
+// ends, Run returns and runs stop.
+func NewUpdater(ctx context.Context, cfg config.Config, cacheDir string, store StateStore) *Updater {
+	return &Updater{ctx: ctx, cfg: cfg, cacheDir: cacheDir, store: store}
 }
 
 // Run installs the seed DBs when no DB exists yet, updates at once, and then
@@ -98,8 +100,10 @@ func (u *Updater) UpdateNow(waitCtx context.Context) (UpdateResults, error) {
 
 func (u *Updater) runOnce(run *updateRun) {
 	run.results.DB = update(u.ctx, u.cfg, u.cacheDir, trivyDB, u.cfg.DBSources)
+	u.saveState(trivyDB.Name, run.results.DB)
 	if len(u.cfg.JavaDBSources) > 0 {
 		javaResult := update(u.ctx, u.cfg, u.cacheDir, javaDB, u.cfg.JavaDBSources)
+		u.saveState(javaDB.Name, javaResult)
 		run.results.JavaDB = &javaResult
 	}
 
@@ -107,6 +111,17 @@ func (u *Updater) runOnce(run *updateRun) {
 	u.running = nil
 	u.mu.Unlock()
 	close(run.done)
+}
+
+// saveState applies an update result to the stored state of a DB.
+func (u *Updater) saveState(db string, result UpdateResult) {
+	state, err := u.store.Get(u.ctx, db)
+	if err == nil {
+		err = u.store.Save(u.ctx, db, state.apply(result))
+	}
+	if err != nil {
+		slog.Error("saving DB state failed", slog.String("db", db), slog.String("error", err.Error()))
+	}
 }
 
 func (u *Updater) installSeed(kind dbKind, seedDir string) {

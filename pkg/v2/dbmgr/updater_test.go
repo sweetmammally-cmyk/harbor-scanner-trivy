@@ -46,7 +46,7 @@ func startCountingRefuser(t *testing.T) (config.DBSource, *atomic.Int32) {
 // runUpdater starts Run in the background and stops it at the end of the test.
 func runUpdater(t *testing.T, cfg config.Config, cacheDir string) *Updater {
 	ctx, cancel := context.WithCancel(context.Background())
-	updater := NewUpdater(ctx, cfg, cacheDir)
+	updater := NewUpdater(ctx, cfg, cacheDir, NewMemoryStateStore())
 	stopped := make(chan struct{})
 	go func() {
 		updater.Run()
@@ -160,7 +160,7 @@ func TestUpdater_UpdateNow(t *testing.T) {
 		})
 		cfg := updateConfig
 		cfg.DBSources = []config.DBSource{f.source(t, "direct")}
-		updater := NewUpdater(context.Background(), cfg, cacheDir)
+		updater := NewUpdater(context.Background(), cfg, cacheDir, NewMemoryStateStore())
 
 		second := make(chan UpdateResults)
 		go func() {
@@ -189,7 +189,7 @@ func TestUpdater_UpdateNow(t *testing.T) {
 		})
 		cfg := updateConfig
 		cfg.DBSources = []config.DBSource{f.source(t, "direct")}
-		updater := NewUpdater(context.Background(), cfg, cacheDir)
+		updater := NewUpdater(context.Background(), cfg, cacheDir, NewMemoryStateStore())
 
 		waitCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
@@ -212,7 +212,7 @@ func TestUpdater_UpdateNow(t *testing.T) {
 		cfg.DBSources = []config.DBSource{mainDB.source(t, "direct")}
 
 		withoutJava := t.TempDir()
-		results, err := NewUpdater(context.Background(), cfg, withoutJava).UpdateNow(context.Background())
+		results, err := NewUpdater(context.Background(), cfg, withoutJava, NewMemoryStateStore()).UpdateNow(context.Background())
 		require.NoError(t, err)
 		assert.Nil(t, results.JavaDB)
 		assert.False(t, results.Degraded())
@@ -220,7 +220,7 @@ func TestUpdater_UpdateNow(t *testing.T) {
 
 		cfg.JavaDBSources = []config.DBSource{javaSource.source(t, "direct")}
 		withJava := t.TempDir()
-		results, err = NewUpdater(context.Background(), cfg, withJava).UpdateNow(context.Background())
+		results, err = NewUpdater(context.Background(), cfg, withJava, NewMemoryStateStore()).UpdateNow(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, results.JavaDB)
 		assert.True(t, results.JavaDB.Installed)
@@ -234,7 +234,7 @@ func TestUpdater_UpdateNow(t *testing.T) {
 		cfg.DBSources = []config.DBSource{mainDB.source(t, "direct")}
 		cfg.JavaDBSources = []config.DBSource{refused}
 
-		results, err := NewUpdater(context.Background(), cfg, t.TempDir()).UpdateNow(context.Background())
+		results, err := NewUpdater(context.Background(), cfg, t.TempDir(), NewMemoryStateStore()).UpdateNow(context.Background())
 
 		require.NoError(t, err)
 		assert.Equal(t, ModeNormal, results.DB.Mode)

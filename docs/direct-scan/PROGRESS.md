@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 4 (updater and freshness)
-- Last completed task: P4-1 (then the P3-10 revert and the install_error follow-up)
+- Last completed task: P4-2
 - In progress: none
-- Next task: P4-2 (state behind an interface, in memory first: last_upstream_check_at, last_confirmed_current_at, newer_available kept when no source answered, mode, active source; fed from `UpdateResults`)
+- Next task: P4-3 (freshness from the stored state: `Freshness(state.NewerAvailable, state.LastConfirmedCurrentAt, maxAge, now)`, plus `db_age`)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -131,6 +131,18 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P4-2  DB state store
+- Status: done
+- What changed: `pkg/v2/dbmgr/state.go`:
+  - `DBState` (mode, active source, manifest digest, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, `installed_at`, metadata, last per-source results) is the future `db_state` document and the data for `GET /api/v2/db`.
+  - `DBState.apply(UpdateResult)` holds the merge rules: when no source answered, the active source, the upstream check time and `newer_available` are kept; a confirmed or installed DB sets `last_confirmed_current_at`; an install sets `installed_at`.
+  - `StateStore` interface (`Get`, `Save`, keyed by "db" and "java-db") with `MemoryStateStore`; MongoDB comes in P5-6.
+  - `NewUpdater` now takes a store, and `runOnce` saves each DB's state after its update. A store error is logged as ERROR and does not stop the DB update (P5 decides how the Mongo hard dependency treats it).
+- Files: `pkg/v2/dbmgr/state.go`, `pkg/v2/dbmgr/state_test.go`, `pkg/v2/dbmgr/updater.go`, `pkg/v2/dbmgr/updater_test.go`
+- Tests run: `go test -short -race -count=10 ./pkg/v2/...` -> ok; `make test` -> ok; coverage dbmgr 89.6%. Cases: `apply` rules (no answer keeps the flag, source and times; newer sets the flag; confirmation clears it; install sets `installed_at` and the metadata); the memory store (zero state when missing, separate per DB); a three-run sequence through the updater and one store (newer not installed: degraded, flag, `stale`; no source answers: flag and upstream info kept; download works: normal, flag cleared, `ok`); no Java state without Java sources; a failing store logs ERROR and the DB is still installed.
+- Decisions / surprises: none.
+- Next: P4-3
 
 ### 2026-10-15  P3-6  Follow-up: disk check reverted, local write errors are install_error
 - Status: done
