@@ -68,15 +68,16 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P7-4 Platform discovery from all result types; `platforms_requested`/`found`/`not_found`; upsert `platforms`; set `has_more_platforms`
 - [x] P7-5 Stored finding shape (DEMAND 6.2), `SCANNER_SCAN_MAX_FINDINGS` with `truncated`; store inline or in GridFS
 - [x] P7-6 Log "triggering scan" and "scan done" (no findings); store timings, Trivy version, DB version; `trivy --version` at startup, readiness false without the binary
+- [ ] P7-8 Trivy 0.74.0 (the Dockerfile pin): regenerate fixtures, diff against 0.71.2, re-run the real-image checks; `SCANNER_SCAN_PLATFORM` (`--platform`, `scanned_platform`, `platform_not_found`)
 - [x] P7-7 Tests: canned Trivy JSON fixtures; fake trivy executable (env allowlist without SCANNER_* secrets, timeout kill including children, huge output, exit codes, stderr redaction); DB swap during a scan; two concurrent Trivy processes; one manual real-image run (`manual` tag)
 
 ## Phase 8: Queue
-- [ ] P8-1 Enqueue into `scans` (state queued); dedupe on digest plus options
-- [ ] P8-2 Worker pool with atomic claim, lease and heartbeat (add the queue-claim index); call the on-demand refresh (P4-4) before each scan
-- [ ] P8-3 Recovery of expired leases
-- [ ] P8-4 Max queue length (429), per-scan timeout, graceful shutdown
-- [ ] P8-5 Reserve the optional `priority` field (unused)
-- [ ] P8-6 Tests: concurrency, crash recovery, dedupe
+- [ ] P8-1 Enqueue into `scans` (state queued); dedupe with `active_key` and its unique partial index (schema version bump); idempotency on `request_id` (queued, scanning, done; a failed scan moves it to `prior_request_id`); queue full -> 429 with `Retry-After`; reserved `priority`
+- [ ] P8-2 Worker pool: claim with `findOneAndUpdate` and `$$NOW` leases, heartbeat, fenced writes on `_id` + `worker` + `attempt` (lost lease: discard and kill Trivy), poll with jitter plus in-process wake-up, no claim while not ready, on-demand refresh before each scan, completion retry up to 2 minutes
+- [ ] P8-3 Reaper every 30s on every replica: expired -> queued, after `SCANNER_QUEUE_MAX_ATTEMPTS` -> failed `worker_lost`
+- [ ] P8-4 Graceful shutdown: stop claiming, `SCANNER_SHUTDOWN_GRACE`, then kill and release leases without counting the attempt
+- [ ] P8-5 Queue metrics: depth, oldest queued age, claim latency, lease losses, reaper requeues (exposed in P10-4)
+- [ ] P8-6 Tests on real mongo:7 with several clients as replicas: claimed exactly once; ten identical POSTs give one scan; killed worker requeued and finished elsewhere; stale late completion rejected; poison job failed `worker_lost`; queue full 429; shutdown releases the lease; retry after a failure creates a new scan; no claim while not ready
 
 ## Phase 9: REST API v2
 - [ ] P9-1 Router and service-token auth middleware; wire `main.go`; log the fallback-interval WARN only when v2 is enabled; run the component tests (first `main.go` touch)
@@ -96,7 +97,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P10-5 Remove the FULL TRIVY REPORT debug log (`pkg/trivy/wrapper.go`) once v2 logging exists
 
 ## Phase 11: Hardening and acceptance
-- [ ] P11-1 End-to-end run in docker compose (scanner, Mongo, mirror or fake mirror)
+- [ ] P11-1 End-to-end run in docker compose (scanner, Mongo, mirror or fake mirror); `stop_grace_period` longer than `SCANNER_SHUTDOWN_GRACE`
 - [ ] P11-2 Walk the acceptance criteria below and record evidence in PROGRESS.md
 - [ ] P11-3 Harbor adapter regression: existing tests pass and one manual Harbor scan works
 - [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code. It must also say: Harbor robot usernames contain `$`, which needs escaping in compose files and shells. And: MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`); the service uses no multi-document transactions

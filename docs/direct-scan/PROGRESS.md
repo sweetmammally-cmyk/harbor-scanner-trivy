@@ -8,8 +8,8 @@ Newest changelog entries go at the top of the Changelog.
 - Phase: 7 done; Phase 8 (queue) next
 - Last completed task: P7-7
 - In progress: none
-- Next task: P8-1 (enqueue into `scans`, dedupe on digest plus options)
-- Blockers / questions for the user: Trivy version: the Dockerfile pins 0.74.0, the owner's message and the local binary say 0.71.2; which one is the target?
+- Next task: P7-8 (Trivy 0.74.0 checks, `SCANNER_SCAN_PLATFORM`), then P8-1 to P8-6
+- Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
 ## Repo facts (filled in by Phase 0)
@@ -64,6 +64,10 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
   - The fallback-interval WARN is logged only when v2 is enabled; fixed in P9-1.
   - P11-7 (low priority): working golangci-lint for Go 1.26. Run the component tests in P9-1 (first `main.go` touch) and again in Phase 11.
   - Pre-check HTTP/2 policy: HTTP/2 is required by default for a source to pass. Per-source opt-out, chosen by the owner from three proposals: optional third field `repo|route|options`, where options is a `;`-separated list. Only option today: `allow-http1`. Two-field entries keep working; unknown options are a startup error. The pre-check result always records the negotiated protocol. DEMAND sections 7.3 and 11 updated.
+- 2026-10-15 (owner, fourteenth round): DEMAND v0.16 (6, 6.2, 9, 11).
+  - Target Trivy is the Dockerfile pin, 0.74.0: regenerate the fixtures, diff against 0.71.2, re-run the real-image checks (task P7-8). A different Trivy version is a cache miss.
+  - `SCANNER_SCAN_PLATFORM` (default `linux/amd64`) goes to Trivy (`--platform`), is stored as `scanned_platform` and is part of the cache and dedupe keys; no manifest for it = `platform_not_found`. Multi-arch handling stays deferred.
+  - Phase 8: the scan document is the job; claim with `findOneAndUpdate`; leases on MongoDB's clock (`$$NOW`, MongoDB 4.2+); lease 60s, heartbeat 20s, writes fenced on `_id` + `worker` + `attempt`, a lost lease discards the result and kills Trivy; reaper every 30s, `SCANNER_QUEUE_MAX_ATTEMPTS` 3 then `worker_lost`; `active_key` with a unique partial index for dedupe (schema version bump); failed scans move `request_id` to `prior_request_id`; queue full 429 with `Retry-After`; poll 2s with jitter plus in-process wake-up, no change streams; no claim while not ready; on-demand refresh before each scan; SIGTERM grace `SCANNER_SHUTDOWN_GRACE` 30s then kill and release; completion retry up to 2 minutes; queue metrics; only the reserved `priority` field.
 - 2026-10-15 (owner, thirteenth round): DEMAND v0.15 (6.2, 7.5, 11).
   - A duplicate source in `SCANNER_DB_SOURCES` / `SCANNER_JAVA_DB_SOURCES` is rejected at parse time. The extra 401 per request of the shared OCI client is a known, accepted cost.
   - Scan runner rules (DEMAND 6.2): env allowlist; credentials in `TRIVY_USERNAME`/`TRIVY_PASSWORD`; per-worker cache dir with symlinks to the pinned version directory; version UpdatedAt and digest stored with the scan; one Trivy run with `--scanners vuln`, no `--severity`, JSON to a private 0600 file, `--timeout` below `SCANNER_SCAN_TIMEOUT` plus a process-group kill; `SCANNER_SCAN_MAX_OUTPUT` 256 MiB; last 8 KiB of stderr, redacted; failure classes `trivy_timeout`, `trivy_exit_error`, `output_too_large`, `output_invalid`, `db_missing`, `java_db_missing`; platform and severity validation; `platforms_requested`/`found`/`not_found`; stored finding fields; `SCANNER_SCAN_MAX_FINDINGS` 10000 with `truncated`; logging without findings; `trivy --version` at startup and readiness.

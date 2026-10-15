@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.15 (scan runner, duplicate DB sources, 2026-10-15)
+Status: DRAFT v0.16 (Trivy 0.74.0, scan platform, queue, 2026-10-15)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -150,7 +150,8 @@ POST /api/v2/scans
        - last_scan.db_updated_at >= current_db.UpdatedAt
        - last scan covered the requested platforms (superset)
        - last scan covered the requested severities (superset)
-       - same Trivy version / scan options version
+       - same Trivy version / scan options version (a different Trivy version is a cache miss)
+       - same scanned platform (`SCANNER_SCAN_PLATFORM`)
      => 200 cached result, flagged db_unchanged
   -> else: enqueue (dedupe on digest + options) => 202
 worker:
@@ -181,15 +182,16 @@ Notes:
 
 ### 6.2 Scan runner (Trivy)
 
-- Trivy runs once per scan on `registry/repository/name@digest` with `image --scanners vuln --format json --output <file> --list-all-pkgs=false --skip-db-update --skip-java-db-update --skip-version-check --image-src remote --cache-dir <worker dir> --timeout <slightly below SCANNER_SCAN_TIMEOUT>`, and `--insecure` for an `http://` registry. No `--severity` flag: Trivy reports every severity and we filter. `--image-src remote` makes Trivy pull from the registry, never from a local Docker daemon; `--skip-version-check` makes no other network call.
+- The target Trivy version is the one pinned in the Dockerfile (0.74.0).
+- Trivy runs once per scan on `registry/repository/name@digest` with `image --scanners vuln --format json --output <file> --list-all-pkgs=false --skip-db-update --skip-java-db-update --skip-version-check --image-src remote --cache-dir <worker dir> --timeout <slightly below SCANNER_SCAN_TIMEOUT>`, `--platform <SCANNER_SCAN_PLATFORM>` (default `linux/amd64`), and `--insecure` for an `http://` registry. The platform is stored as `scanned_platform` on every scan and is part of the cache and dedupe keys; an image with no manifest for that platform fails with `platform_not_found`. Full multi-architecture handling stays deferred (section 14). No `--severity` flag: Trivy reports every severity and we filter. `--image-src remote` makes Trivy pull from the registry, never from a local Docker daemon; `--skip-version-check` makes no other network call.
 - The child environment comes from an allowlist (`PATH`, `HOME`, `TMPDIR`, `TRIVY_*`, proxy variables), never the full environment. Registry credentials go in `TRIVY_USERNAME` / `TRIVY_PASSWORD`, never on the command line.
 - Each worker has its own Trivy cache directory. At scan start its `db` (and `java-db`) symlink points at the concrete version directory of the installed DB; that version's `UpdatedAt` and manifest digest are stored with the scan, and the version is pinned while the scan runs (pruning skips pinned versions).
 - The JSON goes to a private (0600) temporary file, which is stream-parsed and then deleted. Output above `SCANNER_SCAN_MAX_OUTPUT` fails the scan. Only the last 8 KiB of stderr is kept, redacted.
-- Failure classes: `trivy_timeout`, `trivy_exit_error`, `output_too_large`, `output_invalid`, `db_missing` (no vulnerability DB installed; Trivy is not started), `java_db_missing` (the image has `.jar` files and no Java DB is installed: Trivy 0.71.2 stops with "Unable to initialize the Java DB"; Trivy has no clean way to skip jar analysis, so this is a clear failure).
+- Failure classes: `trivy_timeout`, `trivy_exit_error`, `output_too_large`, `output_invalid`, `db_missing` (no vulnerability DB installed; Trivy is not started), `java_db_missing` (the image has `.jar` files and no Java DB is installed: Trivy stops with "Unable to initialize the Java DB"; Trivy has no clean way to skip jar analysis, so this is a clear failure), `platform_not_found`.
 - Requested platforms are matched against the result `Type`, case-insensitively. Platform strings: lowercase letters, digits, `-` and `_`, with a maximum count; severities: uppercase, from the fixed set UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL. Counts cover all severities of the requested platforms; details only the requested severities. Results carry `platforms_requested`, `platforms_found` and `platforms_not_found`: a requested platform that is not in the image must never look like a clean result. `has_more_platforms` is true when the image has other types. Every type found is upserted into `platforms`.
 - A stored finding has: id, package, installed version, fixed version, severity, title, primary URL, status, target, type. Descriptions, references and package lists are dropped. At most `SCANNER_SCAN_MAX_FINDINGS` are stored, with `truncated: true` beyond it.
 - Logging: "triggering scan" (scan_id, digest, customer ids, platforms, severities, Trivy version, db_updated_at) and "scan done" (durations, counts); findings are never logged. `trivy --version` runs at startup; the version is stored with each scan; readiness is false while the Trivy binary is missing.
-- Measured with Trivy 0.71.2: a result type with no findings still appears in the output with `--list-all-pkgs=false` (checked for an OS type and a language type), so package lists are not needed to discover types.
+- Measured with Trivy 0.71.2 and 0.74.0 (see PROGRESS): a result type with no findings still appears in the output with `--list-all-pkgs=false` (checked for an OS type and a language type), so package lists are not needed to discover types.
 
 ### 7.1 Always have a DB
 
@@ -277,11 +279,18 @@ Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format
 
 ## 9. Queue
 
-- Scans are queued, then executed by a configurable number of workers.
-- Config: worker count, max queue length (full queue returns 429), per-scan timeout.
-- Identical work (same digest and options) is deduplicated: callers share one `scan_id`.
-- Jobs survive restarts; a worker lease/heartbeat lets other replicas recover jobs from a dead worker.
-- Working assumption: the queue is stored in MongoDB (the `scans` collection is the job record).
+- The queue is the `scans` collection: each scan document is its job. No multi-document transactions. Requires MongoDB 4.2 or newer (pipeline updates and `$$NOW`).
+- Claim: `findOneAndUpdate` on `state: queued`, oldest `queued_at` first, setting `state: scanning`, `worker`, `lease_until` and `attempt + 1`. All lease times use MongoDB's clock (`$$NOW` in pipeline updates and `$expr` comparisons), never a replica's clock.
+- Lease `SCANNER_QUEUE_LEASE` (60s), heartbeat every third of it (20s). Every worker write (heartbeat, completion) is conditional on `_id` + `worker` + `attempt`; no match means the lease was lost: the result is discarded and the Trivy process group is killed.
+- Reaper on every replica every 30s: an expired `scanning` scan goes back to `queued`; after `SCANNER_QUEUE_MAX_ATTEMPTS` (3) it becomes `failed` with class `worker_lost`. Only lease loss is retried automatically.
+- Dedupe: `active_key` (hash of digest, sorted platforms, sorted severities, scanned platform and Trivy version) is set only while a scan is `queued` or `scanning` and removed when it finishes; a unique partial index on it (`{active_key: {$type: "string"}}`). A conflict returns the existing `scan_id`.
+- Idempotency covers queued, scanning and done scans. When a scan fails, its `request_id` moves to `prior_request_id`, so a retry with the same `request_id` creates a new scan.
+- Queue full: `queued` count >= `SCANNER_QUEUE_MAX_LENGTH` gives 429 with `Retry-After`.
+- Workers poll every `SCANNER_QUEUE_POLL_INTERVAL` (2s, with jitter) and are woken at once by an enqueue in the same process. No change streams.
+- Workers do not claim while MongoDB is not ready or no DB is installed. Before each scan they call the on-demand DB refresh (7.4).
+- Shutdown (SIGTERM): stop claiming, wait up to `SCANNER_SHUTDOWN_GRACE` (30s), then kill the running scans and release their leases at once (back to `queued`, `attempt` not counted). The container's stop grace period (compose `stop_grace_period`) must be longer.
+- A completion write is retried with backoff for up to 2 minutes; then an ERROR log with the `scan_id`, and the reaper requeues the scan.
+- Metrics: queue depth, oldest queued age, claim latency, lease losses, reaper requeues.
 - Priority levels are deferred: the owner will study Trivy's behaviour first (R&D). The schema reserves an optional `priority` field so adding it later is not a migration.
 
 ## 10. Data plane (MongoDB, draft)
@@ -355,6 +364,11 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | `SCANNER_ONDEMAND_REFRESH_WAIT` | How long a scan waits for an on-demand DB refresh before it proceeds with the old DB. Default 60s |
 | `SCANNER_ONDEMAND_REFRESH_MIN_GAP` | An update run that finished within this gap is reused instead of starting an on-demand refresh. Default 60s |
 | `SCANNER_QUEUE_WORKERS`, `SCANNER_QUEUE_MAX_LENGTH` | Queue settings. Defaults 1 and 100 |
+| `SCANNER_QUEUE_LEASE` | Lease of a running scan; heartbeat every third of it. Default 60s |
+| `SCANNER_QUEUE_MAX_ATTEMPTS` | Lease losses before a scan fails with `worker_lost`. Default 3 |
+| `SCANNER_QUEUE_POLL_INTERVAL` | How often idle workers look for work (with jitter). Default 2s |
+| `SCANNER_SHUTDOWN_GRACE` | How long running scans may finish after SIGTERM. Default 30s |
+| `SCANNER_SCAN_PLATFORM` | Platform scanned in a multi-platform image (`--platform`). Default `linux/amd64` |
 | `SCANNER_SCAN_TIMEOUT` | Per-scan timeout; Trivy gets a slightly shorter `--timeout`, then the whole process group is killed. Default 10m |
 | `SCANNER_SCAN_MAX_OUTPUT` | Largest Trivy JSON output read; above it the scan fails with `output_too_large`. Default 256 MiB |
 | `SCANNER_SCAN_MAX_FINDINGS` | Most findings stored per scan; above it the scan is marked `truncated: true` and the counts stay complete. Default 10000 |
