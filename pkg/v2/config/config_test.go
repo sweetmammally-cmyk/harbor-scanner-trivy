@@ -16,6 +16,7 @@ type Envs map[string]string
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	RegistryTimeout:             15 * time.Second,
 	DBStateRetention:            7 * 24 * time.Hour,
 	InstanceID:                  hostname(),
 	DBChecksRetention:           30 * 24 * time.Hour,
@@ -184,6 +185,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_REGISTRY_URL":                   "https://harbor.local",
 				"SCANNER_REGISTRY_USERNAME":              "robot$scanner",
 				"SCANNER_REGISTRY_PASSWORD":              "s3cret",
+				"SCANNER_REGISTRY_TIMEOUT":               "20s",
 				"SCANNER_DB_CHECK_INTERVAL":              "1d",
 				"SCANNER_DB_RETRY_INTERVAL":              "5m",
 				"SCANNER_DB_SOURCES":                     "mirror.local/aquasec/trivy-db:2|direct|allow-http1,ghcr.io/aquasecurity/trivy-db:2|socks5://proxy:1080",
@@ -221,6 +223,7 @@ func TestGetConfig(t *testing.T) {
 				RegistryURL:                 "https://harbor.local",
 				RegistryUsername:            "robot$scanner",
 				RegistryPassword:            "s3cret",
+				RegistryTimeout:             20 * time.Second,
 				DBCheckInterval:             24 * time.Hour,
 				DBRetryInterval:             5 * time.Minute,
 				DBSources: []DBSource{

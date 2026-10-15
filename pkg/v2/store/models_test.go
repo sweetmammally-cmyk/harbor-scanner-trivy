@@ -53,7 +53,7 @@ func TestScan_BSON(t *testing.T) {
 		RequestedAt:  at,
 		CustomerIDs:  []string{"cust-123"},
 		CustomerData: map[string]any{"app_id": "app-9", "env": "prod"},
-		Image:        Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:abc"},
+		Image:        Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:abc", MediaType: "application/vnd.oci.image.index.v1+json"},
 		Options:      ScanOptions{Platforms: []string{"npm", "jar"}, Severity: []string{"HIGH", "CRITICAL"}},
 		State:        ScanDone,
 		Trivy:        TrivyInfo{Version: "0.74.0", DBUpdatedAt: at.Add(-time.Hour), DBManifestDigest: "sha256:db"},
@@ -80,7 +80,7 @@ func TestScan_BSON(t *testing.T) {
 			"options", "state", "trivy", "platforms", "has_more_platforms", "summary", "report", "report_gridfs_id",
 			"queued_at", "started_at", "finished_at", "queue_wait_ms", "scan_ms", "total_ms", "worker", "lease_until"),
 			keysOf(t, done))
-		assert.Equal(t, sorted("repository", "name", "tag", "digest"), keysOf(t, done.Image))
+		assert.Equal(t, sorted("repository", "name", "tag", "digest", "media_type"), keysOf(t, done.Image))
 		assert.Equal(t, sorted("platforms", "severity"), keysOf(t, done.Options))
 		assert.Equal(t, sorted("version", "db_updated_at", "db_manifest_digest"), keysOf(t, done.Trivy))
 	})

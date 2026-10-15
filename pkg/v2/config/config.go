@@ -36,6 +36,8 @@ type Config struct {
 	RegistryURL      string `env:"SCANNER_REGISTRY_URL"`
 	RegistryUsername string `env:"SCANNER_REGISTRY_USERNAME"`
 	RegistryPassword string `env:"SCANNER_REGISTRY_PASSWORD"`
+	// RegistryTimeout bounds each registry request (HEAD, GET, token).
+	RegistryTimeout time.Duration `env:"SCANNER_REGISTRY_TIMEOUT" envDefault:"15s"`
 
 	// DBCheckInterval is read from SCANNER_DB_CHECK_INTERVAL by GetConfig,
 	// because it accepts days ("1d") and falls back to 3h when unset or invalid.

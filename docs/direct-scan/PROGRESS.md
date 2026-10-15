@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 6 (registry client)
-- Last completed task: P5-7 (and the P5-6 follow-ups)
-- In progress: P6-1 (`[~]`): the shared OCI client is done and committed; the Harbor registry client (`pkg/v2/registry`: name validation, HEAD resolve, GET + sha256 fallback, media type) is next
-- Next task: finish P6-1, then P6-2, P6-3
+- Last completed task: P6-1
+- In progress: none
+- Next task: P6-2 (error mapping, one retry on network errors and 5xx, per-request timeout), then P6-3
 - Blockers / questions for the user: none
 - Last updated: 2026-10-15
 
@@ -165,6 +165,19 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-15  P6-1  Part 2: Harbor registry client
+- Status: done (P6-1 complete)
+- What changed: new package `pkg/v2/registry`:
+  - `NewClient(cfg)` uses `SCANNER_REGISTRY_URL` (scheme and host only; `http://` allowed with a WARN) and an `oci.Client` with the robot account.
+  - `ValidateImage(Image)` checks the OCI distribution rules: path components `[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*`, tag `[A-Za-z0-9_][A-Za-z0-9._-]{0,127}`, repository/name at most 255 characters. These reject `..`, `%` and empty components; the error wraps `ErrInvalidName` (400 in P9-2).
+  - `Resolve(ctx, Image)` validates first (no request for an invalid name), sends `HEAD` on `/v2/<repository>/<name>/manifests/<tag>` with Accept = OCI index, Docker manifest list, OCI manifest, Docker v2 manifest, and takes `Docker-Content-Digest`. Without it, it sends `GET` and hashes the exact bytes. It returns the digest, the media type (parameters dropped) and `Reference` = `<host>/<repository>/<name>@<digest>` for the scan runner.
+  - `fetch` gives each request its own `SCANNER_REGISTRY_TIMEOUT` and reads at most 4 MiB.
+  - Config `RegistryTimeout` (`SCANNER_REGISTRY_TIMEOUT`, 15s). `store.Image` has `media_type`.
+- Files: `pkg/v2/registry/registry.go`, `pkg/v2/registry/registry_test.go`, `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`, `pkg/v2/store/models.go`, `pkg/v2/store/models_test.go`
+- Tests run: `go test -short -race -count=2 ./pkg/v2/registry/` -> ok, 86.0%; `make test` -> ok; integration `./test/integration/store/` -> ok. Fake Harbor: tokens only for the robot's basic credentials; a plain manifest (digest, media type without charset, reference by digest); an image index; no `Docker-Content-Digest` (GET + sha256 of the exact bytes); one token for all resolves. Validation table: 4 valid, 16 invalid (uppercase, `..`, `%2e`, empty components, leading separators, bad tags, too long). An invalid name sends no request. Bad registry URLs.
+- Decisions / surprises: error mapping and retry are P6-2; until then a non-200 status is a plain error.
+- Next: P6-2
 
 ### 2026-10-15  P6-1  Part 1: shared OCI client (`pkg/v2/oci`)
 - Status: partial (P6-1 continues with the registry client)

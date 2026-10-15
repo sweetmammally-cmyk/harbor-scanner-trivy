@@ -65,6 +65,9 @@ type Image struct {
 	Name       string `bson:"name"`
 	Tag        string `bson:"tag"`
 	Digest     string `bson:"digest"`
+	// MediaType is the manifest media type the tag resolved to (an image index
+	// for a multi-architecture image; its handling is deferred).
+	MediaType string `bson:"media_type,omitempty"`
 }
 
 // ScanOptions are what the request asked for.
