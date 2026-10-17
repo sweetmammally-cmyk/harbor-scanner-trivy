@@ -14,8 +14,22 @@ import (
 
 type Envs map[string]string
 
+// testToken is a valid service token (32 characters).
+const testToken = "0123456789abcdef0123456789abcdef"
+
+// setEnabled sets the minimal env of an enabled v2 API.
+func setEnabled(t *testing.T) {
+	t.Setenv("SCANNER_V2_API_ENABLED", "true")
+	t.Setenv("SCANNER_V2_AUTH_TOKEN", testToken)
+	t.Setenv("SCANNER_MONGO_URI", "mongodb://mongo:27017")
+	t.Setenv("SCANNER_MONGO_DB", "scanner")
+	t.Setenv("SCANNER_DB_SOURCES", "ghcr.io/aquasecurity/trivy-db:2|direct")
+}
+
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	MaxInflight:                 32,
+	CacheDir:                    "/home/scanner/.cache/scanner-v2",
 	QueueLease:                  60 * time.Second,
 	QueueMaxAttempts:            3,
 	QueuePollInterval:           2 * time.Second,
@@ -187,7 +201,9 @@ func TestGetConfig(t *testing.T) {
 			name: "Should read all values from env",
 			envs: Envs{
 				"SCANNER_V2_API_ENABLED":                 "true",
-				"SCANNER_V2_AUTH_TOKEN":                  "token",
+				"SCANNER_V2_AUTH_TOKEN":                  testToken,
+				"SCANNER_V2_MAX_INFLIGHT":                "8",
+				"SCANNER_V2_CACHE_DIR":                   "/data/v2",
 				"SCANNER_MONGO_URI":                      "mongodb://mongo:27017",
 				"SCANNER_INSTANCE_ID":                    "scanner-1",
 				"SCANNER_MONGO_DB":                       "scanner",
@@ -232,7 +248,9 @@ func TestGetConfig(t *testing.T) {
 			},
 			expectedConfig: Config{
 				Enabled:                     true,
-				AuthToken:                   "token",
+				AuthToken:                   testToken,
+				MaxInflight:                 8,
+				CacheDir:                    "/data/v2",
 				MongoURI:                    "mongodb://mongo:27017",
 				InstanceID:                  "scanner-1",
 				MongoDB:                     "scanner",
@@ -325,7 +343,9 @@ func TestGetConfig_DBCheckInterval(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 			defer slog.SetDefault(defaultLogger)
 
+			setEnabled(t)
 			t.Setenv("SCANNER_DB_CHECK_INTERVAL", tc.value)
+			t.Setenv("SCANNER_DB_STATE_RETENTION", "30d")
 			t.Setenv("SCANNER_INSTANCE_ID", "scanner-1") // only the interval may log here
 
 			cfg, err := GetConfig()
@@ -381,6 +401,7 @@ func hostname() string {
 }
 
 func TestGetConfig_InstanceIDDefaultsToHostname(t *testing.T) {
+	setEnabled(t)
 	t.Setenv("SCANNER_INSTANCE_ID", "")
 	var logs bytes.Buffer
 	defaultLogger := slog.Default()
@@ -397,6 +418,7 @@ func TestGetConfig_InstanceIDDefaultsToHostname(t *testing.T) {
 }
 
 func TestGetConfig_InstanceIDSetHasNoWarning(t *testing.T) {
+	setEnabled(t)
 	t.Setenv("SCANNER_INSTANCE_ID", "scanner-1")
 	t.Setenv("SCANNER_DB_CHECK_INTERVAL", "1h")
 	var logs bytes.Buffer
@@ -409,4 +431,51 @@ func TestGetConfig_InstanceIDSetHasNoWarning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "scanner-1", cfg.InstanceID)
 	assert.NotContains(t, logs.String(), "SCANNER_INSTANCE_ID")
+}
+
+func TestGetConfig_NoWarningsWhenDisabled(t *testing.T) {
+	t.Setenv("SCANNER_INSTANCE_ID", "")
+	t.Setenv("SCANNER_DB_CHECK_INTERVAL", "")
+	var logs bytes.Buffer
+	defaultLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(defaultLogger)
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	assert.False(t, cfg.Enabled)
+	assert.Equal(t, hostname(), cfg.InstanceID, "the defaults still apply")
+	assert.Equal(t, FallbackDBCheckInterval, cfg.DBCheckInterval)
+	assert.Empty(t, logs.String(), "the Harbor adapter alone logs no v2 warnings")
+}
+
+func TestGetConfig_AuthToken(t *testing.T) {
+	for name, token := range map[string]string{"missing": "", "short": "too-short-secret-1234567890"} {
+		t.Run(name, func(t *testing.T) {
+			setEnabled(t)
+			t.Setenv("SCANNER_V2_AUTH_TOKEN", token)
+
+			_, err := GetConfig()
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "SCANNER_V2_AUTH_TOKEN must be set to at least 32 characters")
+			if token != "" {
+				assert.NotContains(t, err.Error(), token, "the token is never in errors")
+			}
+		})
+	}
+
+	t.Run("not checked when disabled", func(t *testing.T) {
+		t.Setenv("SCANNER_V2_AUTH_TOKEN", "short")
+		_, err := GetConfig()
+		assert.NoError(t, err)
+	})
+
+	t.Run("max in-flight must be positive", func(t *testing.T) {
+		setEnabled(t)
+		t.Setenv("SCANNER_V2_MAX_INFLIGHT", "0")
+		_, err := GetConfig()
+		assert.ErrorContains(t, err, "SCANNER_V2_MAX_INFLIGHT")
+	})
 }

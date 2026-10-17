@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,6 +18,8 @@ import (
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/redisx"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/scan"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/trivy"
+	v2config "github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/service"
 )
 
 var (
@@ -70,6 +73,24 @@ func run(ctx context.Context, info etc.BuildInfo) error {
 	worker := queue.NewWorker(config.JobQueue, rdb, controller)
 
 	apiHandler := v1.NewAPIHandler(info, config, enqueuer, store, wrapper)
+
+	// The direct scan API (v2) is routed only when it is enabled.
+	v2Config, err := v2config.GetConfig()
+	if err != nil {
+		return fmt.Errorf("getting v2 config: %w", err)
+	}
+	var v2 *service.Service
+	if v2Config.Enabled {
+		v2, err = service.Start(v2Config, "trivy")
+		if err != nil {
+			return fmt.Errorf("starting the v2 service: %w", err)
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/api/v2/", v2.Handler())
+		mux.Handle("/", apiHandler)
+		apiHandler = mux
+	}
+
 	apiServer, err := api.NewServer(config.API, apiHandler)
 	if err != nil {
 		return fmt.Errorf("new api server: %w", err)
@@ -82,7 +103,13 @@ func run(ctx context.Context, info etc.BuildInfo) error {
 		captured := <-sigint
 		slog.Debug("Trapped os signal", slog.String("signal", captured.String()))
 
+		if v2 != nil {
+			v2.StopAccepting()
+		}
 		apiServer.Shutdown()
+		if v2 != nil {
+			v2.Stop()
+		}
 		worker.Stop()
 		_ = rdb.Close()
 

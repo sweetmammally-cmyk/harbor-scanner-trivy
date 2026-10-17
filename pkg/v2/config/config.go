@@ -16,8 +16,14 @@ import (
 // Config holds the settings of the direct scan API (v2).
 // See docs/direct-scan/DEMAND.md section 11.
 type Config struct {
-	Enabled   bool   `env:"SCANNER_V2_API_ENABLED" envDefault:"false"`
+	Enabled bool `env:"SCANNER_V2_API_ENABLED" envDefault:"false"`
+	// AuthToken is the service token of the v2 API (secret): never log it.
 	AuthToken string `env:"SCANNER_V2_AUTH_TOKEN"`
+	// MaxInflight is the most POSTs handled at once.
+	MaxInflight int `env:"SCANNER_V2_MAX_INFLIGHT" envDefault:"32"`
+	// CacheDir holds the v2 DBs and the per-worker Trivy caches, apart from the
+	// Harbor adapter's SCANNER_TRIVY_CACHE_DIR.
+	CacheDir string `env:"SCANNER_V2_CACHE_DIR" envDefault:"/home/scanner/.cache/scanner-v2"`
 
 	// MongoURI may hold a password: never log it or put it in errors.
 	MongoURI string `env:"SCANNER_MONGO_URI"`
@@ -97,6 +103,13 @@ var scanPlatformPattern = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9_]+(/[a-z0-9]+)?
 // FallbackDBCheckInterval is used when SCANNER_DB_CHECK_INTERVAL is unset or invalid.
 const FallbackDBCheckInterval = 3 * time.Hour
 
+// MinAuthTokenLength is the shortest SCANNER_V2_AUTH_TOKEN accepted.
+const MinAuthTokenLength = 32
+
+// GetConfig reads the v2 settings. The startup WARNs (fallback interval,
+// instance id) and the checks of required settings apply only when the v2 API
+// is enabled.
+
 func GetConfig() (Config, error) {
 	var cfg Config
 	err := env.Parse(&cfg)
@@ -107,11 +120,13 @@ func GetConfig() (Config, error) {
 	value := os.Getenv("SCANNER_DB_CHECK_INTERVAL")
 	interval, err := ParseDuration(value)
 	if err != nil || interval <= 0 {
-		slog.Warn("using fallback interval",
-			slog.String("env", "SCANNER_DB_CHECK_INTERVAL"),
-			slog.String("value", value),
-			slog.String("fallback", FallbackDBCheckInterval.String()),
-		)
+		if cfg.Enabled {
+			slog.Warn("using fallback interval",
+				slog.String("env", "SCANNER_DB_CHECK_INTERVAL"),
+				slog.String("value", value),
+				slog.String("fallback", FallbackDBCheckInterval.String()),
+			)
+		}
 		interval = FallbackDBCheckInterval
 	}
 	cfg.DBCheckInterval = interval
@@ -130,9 +145,11 @@ func GetConfig() (Config, error) {
 		if err != nil {
 			return cfg, fmt.Errorf("SCANNER_INSTANCE_ID is unset and the hostname is unknown: %w", err)
 		}
-		slog.Warn("SCANNER_INSTANCE_ID is not set, using the hostname; set it explicitly (for example in compose) "+
-			"so the instance keeps its DB state when its container is recreated",
-			slog.String("instance_id", cfg.InstanceID))
+		if cfg.Enabled {
+			slog.Warn("SCANNER_INSTANCE_ID is not set, using the hostname; set it explicitly (for example in compose) "+
+				"so the instance keeps its DB state when its container is recreated",
+				slog.String("instance_id", cfg.InstanceID))
+		}
 	}
 
 	retention := os.Getenv("SCANNER_DB_CHECKS_RETENTION")
@@ -180,6 +197,14 @@ func GetConfig() (Config, error) {
 		}
 		if len(cfg.DBSources) == 0 {
 			return cfg, errors.New("SCANNER_DB_SOURCES is required when SCANNER_V2_API_ENABLED is true")
+		}
+		// The error never contains the token.
+		if len(cfg.AuthToken) < MinAuthTokenLength {
+			return cfg, fmt.Errorf("SCANNER_V2_AUTH_TOKEN must be set to at least %d characters when SCANNER_V2_API_ENABLED is true",
+				MinAuthTokenLength)
+		}
+		if cfg.MaxInflight < 1 {
+			return cfg, errors.New("SCANNER_V2_MAX_INFLIGHT must be at least 1")
 		}
 	}
 

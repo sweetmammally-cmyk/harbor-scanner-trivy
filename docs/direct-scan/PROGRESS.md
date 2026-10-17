@@ -7,8 +7,8 @@ Newest changelog entries go at the top of the Changelog.
 
 - Phase: 9 (API)
 - Last completed task: P8-7 (Phase 9 decisions recorded)
-- In progress: none
-- Next task: P9-1
+- In progress: P9-1 (code committed; the v1 component test run is pending)
+- Next task: P9-2
 - Blockers / questions for the user: none
 - Last updated: 2026-10-17
 
@@ -181,6 +181,7 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 Touched by this plan:
 
 - `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` (P0-6): test expectations for `vendor_attributes.Trivy` (owner chose KEEP). Test-only. (Correction: missing from this list until P5-1.)
+- `cmd/scanner-trivy/main.go` (P9-1): reads the v2 config; when `SCANNER_V2_API_ENABLED` is true, starts `pkg/v2/service`, routes `/api/v2/` to its handler in front of the v1 router (an `http.ServeMux`), and at shutdown calls `StopAccepting` before and `Stop` after the HTTP server's `Shutdown`. With v2 disabled the v1 handler is served exactly as before.
 - `go.mod`, `go.sum` (P5-1): new dependency `go.mongodb.org/mongo-driver/v2 v2.9.1` and its indirect modules; minimum-version bumps it requires: `golang.org/x/crypto` 0.51.0 -> 0.53.0, `golang.org/x/sync` 0.20.0 -> 0.21.0, `golang.org/x/sys` 0.45.0 -> 0.46.0, `golang.org/x/text` 0.37.0 -> 0.39.0, `github.com/klauspost/compress` 1.17.4 -> 1.19.2 (all indirect). Upstream unit and integration tests pass with them.
 
 ## Changelog
@@ -196,6 +197,20 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P9-1  Router, auth, HTTP hygiene, wiring
+- Status: partial (code done; the v1 component test run is pending, see the next entry)
+- What changed:
+  - `pkg/v2/config`: `SCANNER_V2_AUTH_TOKEN` must have at least 32 characters when v2 is enabled (the error never contains the token); `SCANNER_V2_MAX_INFLIGHT` (32); `SCANNER_V2_CACHE_DIR` (`/home/scanner/.cache/scanner-v2`). The fallback-interval and instance-id WARNs are logged only when v2 is enabled (the defaults still apply).
+  - New `pkg/v2/api`: `Handler` with a gorilla/mux router behind a chain: request log (one line: method, route template, status, duration, request id; `X-Request-ID` accepted when valid, otherwise generated, always returned), bearer auth (SHA-256 hashes compared with `subtle.ConstantTimeCompare`, case-insensitive scheme, 401 `unauthorized` with `WWW-Authenticate: Bearer`, also for unknown routes), the in-flight cap for POSTs (429 `queue_full`, `Retry-After: 1`). `decodeJSON`: `application/json` only (415), `http.MaxBytesReader` 1 MiB (413), unknown fields and trailing data rejected (400). The error shape and codes of DEMAND 5.0; 404/405 use the same shape. `StopAccepting` for shutdown.
+  - New `pkg/v2/service`: `Start` (store client + monitor -> DB state store -> updater -> Trivy check -> worker pool and reaper -> handler; MongoDB down is not an error) and `StopAccepting`/`Stop` (pool: stop claiming, grace, release -> reaper -> updater -> monitor -> MongoDB disconnect with a 10s deadline). The DBs live in `<SCANNER_V2_CACHE_DIR>/trivy`, the worker caches in `<SCANNER_V2_CACHE_DIR>/workers`. Workers claim only while MongoDB is ready, a DB is installed and Trivy was found.
+  - `dbmgr.Updater.DBInstalled()`.
+  - `cmd/scanner-trivy/main.go`: see "Upstream files touched".
+  - Server timeouts: the upstream server sets read, write and idle timeouts from `SCANNER_API_SERVER_*`; Go uses the read timeout as the header timeout when none is set, so `server.go` is not touched.
+- Files: `pkg/v2/config/config.go`, `pkg/v2/config/config_test.go`, `pkg/v2/api/{handler,errors,middleware,middleware_test}.go`, `pkg/v2/service/{service,service_test}.go`, `pkg/v2/dbmgr/updater.go`, `cmd/scanner-trivy/main.go`
+- Tests run: `go test -short -race ./...` -> ok; `go vet ./...` -> ok. New cases: auth (missing, wrong, wrong scheme, no scheme, prefix of the token, lowercase scheme, unknown route, token not in logs); the request log line (route template, status, request id, no body), invalid X-Request-ID replaced; the in-flight cap (third POST 429 with `Retry-After: 1`, GETs not limited); decoding (unknown field, trailing data, not JSON, wrong type, oversized 413, wrong content type 415, charset accepted); config (no WARNs when disabled, token missing/short, not checked when disabled, max in-flight 0); the service starts with MongoDB unreachable and no Trivy, answers 401 without a token, and stops within the test deadline. `make test-component`: running (image build), result in the next entry.
+- Decisions / surprises: see Decisions 2026-10-17 (complete Phase 9).
+- Next: P9-2
 
 ### 2026-10-17  P8-7  One scan document per image tag
 - Status: done

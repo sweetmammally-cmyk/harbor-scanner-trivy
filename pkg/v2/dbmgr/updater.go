@@ -119,6 +119,12 @@ func (u *Updater) runOnce(run *updateRun) {
 	close(run.done)
 }
 
+// DBInstalled reports whether a Trivy DB is installed (scans and the API are
+// not ready without one).
+func (u *Updater) DBInstalled() bool {
+	return dbPresent(u.cacheDir, trivyDB.Name, trivyDB.Files[0])
+}
+
 // RefreshForScan is called by the scan worker before a scan (DEMAND section 7.4).
 // It returns the Trivy DB state and its freshness for the request's maxAge
 // (max_db_age). When the DB is stale for maxAge, it joins or starts an update run
