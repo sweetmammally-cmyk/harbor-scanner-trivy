@@ -169,5 +169,8 @@ func TestPool(t *testing.T) {
 		assert.Equal(t, "scanning", doc["state"], "nothing written by the worker that lost the lease")
 		assert.NotContains(t, doc, "failure_class")
 		assert.EqualValues(t, 7, doc["attempt"])
+		stats, err := q.Stats(ctx)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, stats.LeaseLosses)
 	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -31,6 +32,8 @@ var (
 func (q *Queue) Claim(ctx context.Context, worker string) (store.Scan, error) {
 	ctx, cancel := q.client.OperationContext(ctx)
 	defer cancel()
+	start := time.Now()
+	defer func() { q.metrics.claimed(time.Since(start)) }()
 	update := mongo.Pipeline{{{Key: "$set", Value: bson.D{
 		{Key: "state", Value: store.ScanScanning},
 		{Key: "worker", Value: literal(worker)},

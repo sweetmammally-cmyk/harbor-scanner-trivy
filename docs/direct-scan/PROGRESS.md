@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 8 (queue)
-- Last completed task: P8-4
+- Last completed task: P8-5
 - In progress: none
-- Next task: P8-5 (queue metrics)
+- Next task: P8-6 (remaining real-Mongo queue tests)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-17
 
@@ -178,6 +178,17 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P8-5  Queue metrics
+- Status: done
+- What changed: `pkg/v2/queue/metrics.go`: `Queue.Stats(ctx)` returns `Stats`:
+  - `Depth` and `OldestQueuedAge` from one aggregation on queued scans (`$sum`, `$min` of `queued_at`, age = `$$NOW - oldest`, so on MongoDB's clock); 0 when nothing is queued. Same value on every replica.
+  - Per-replica counters: `Claims` and `ClaimDuration` (number and total duration of `Claim` calls, including empty ones; latency = duration / claims, a Prometheus summary in P10-4), `LeaseLosses`, `ReaperRequeues`.
+  - `Claim` in `lease.go` now times itself.
+- Files: `pkg/v2/queue/metrics.go`, `pkg/v2/queue/lease.go`, `test/integration/queue/metrics_test.go`, `test/integration/queue/pool_test.go`
+- Tests run: `go test -race -count=1 -tags=integration ./test/integration/queue/` -> ok; `go build ./...` -> ok. Cases: empty queue gives 0/0; two queued scans, the oldest set ten minutes back, give depth 2 and age about 10m; a claim lowers the depth and counts one timed claim; a reaped scan counts one requeue; the pool's lost-lease test counts one lease loss.
+- Decisions / surprises: claim latency is the duration of the claim call (owner); the wait in the queue is already stored per scan as `queue_wait_ms`. Exposing these on `/metrics` is P10-4.
+- Next: P8-6
 
 ### 2026-10-17  P8-4  Graceful shutdown
 - Status: done
