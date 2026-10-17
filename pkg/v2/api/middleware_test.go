@@ -174,7 +174,7 @@ func TestLimitInflight(t *testing.T) {
 
 	w := serve(h, request(http.MethodPost, "/api/v2/echo/1", testToken, `{}`))
 	assert.Equal(t, http.StatusTooManyRequests, w.Code)
-	assert.Equal(t, CodeQueueFull, errorCode(t, w))
+	assert.Equal(t, CodeTooManyRequests, errorCode(t, w))
 	assert.Equal(t, "1", w.Header().Get("Retry-After"))
 
 	close(block)

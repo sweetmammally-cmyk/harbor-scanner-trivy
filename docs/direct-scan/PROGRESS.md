@@ -207,6 +207,14 @@ Touched by this plan:
 - Next: <next task ID>
 ```
 
+### 2026-10-17  P9-1  too_many_requests for the in-flight cap
+- Status: done (follow-up to P9-1, owner decision)
+- What changed: the in-flight cap answers 429 with the new code `too_many_requests` and `Retry-After: 1`; `queue_full` is only used for a full queue.
+- Files: `pkg/v2/api/{errors,middleware,middleware_test}.go`
+- Tests run: `go test -short -race ./pkg/v2/api/` -> ok (`TestLimitInflight` checks the new code)
+- Decisions / surprises: none.
+- Next: P10-1
+
 ### 2026-10-17  P9-8  API tests: handlers with fakes and the full stack
 - Status: partial (everything except the v1 component test run, which is blocked as in P9-1)
 - What changed: handler unit tests (fakes for the registry, readiness and DB state) and the MongoDB-backed handler tests were added with each task (P9-1 to P9-7). New `test/integration/apiv2/fullstack_test.go` starts the real `service.Start` on mongo:7 with an `httptest` registry (HEAD with `Docker-Content-Digest`, 404 for unknown tags, plain http so the WARN path and `--insecure` are used), a seed DB (the configured source is unreachable, so the updater is degraded but a DB is installed), and a fake `trivy` script that writes the real Trivy 0.74.0 fixture, counts its runs, can block on a file and can fail. Cases:

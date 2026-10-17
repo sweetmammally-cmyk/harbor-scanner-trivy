@@ -107,7 +107,7 @@ func (h *Handler) limitInflight(next http.Handler) http.Handler {
 			defer func() { <-h.inflight }()
 			next.ServeHTTP(w, r)
 		default:
-			writeError(w, http.StatusTooManyRequests, CodeQueueFull, "too many requests in flight", retryInflight)
+			writeError(w, http.StatusTooManyRequests, CodeTooManyRequests, "too many requests in flight", retryInflight)
 		}
 	})
 }

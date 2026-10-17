@@ -16,6 +16,7 @@ const (
 	CodeRegistryAuthFailed  = "registry_auth_failed"
 	CodeRegistryUnavailable = "registry_unavailable"
 	CodeQueueFull           = "queue_full"
+	CodeTooManyRequests     = "too_many_requests"
 	CodeScanInProgress      = "scan_in_progress"
 	CodeNotReady            = "not_ready"
 	CodeStoreUnavailable    = "store_unavailable"
