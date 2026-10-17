@@ -86,6 +86,7 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 	s.handler = api.NewHandler(cfg, api.Deps{
 		Queue:        q,
 		Scans:        store.NewMongoScans(client),
+		Lister:       store.NewMongoScans(client),
 		Reports:      reports,
 		Registry:     registryClient,
 		DBState:      dbState,

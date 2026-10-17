@@ -89,6 +89,7 @@ func (q *Queue) Enqueue(ctx context.Context, scan store.Scan) (store.Scan, bool,
 	scan.ID = store.ScanID(scan.Image)
 	scan.State = store.ScanQueued
 	scan.QueuedAt = time.Now()
+	scan.CreatedAt = scan.QueuedAt // used only when the document is created
 	scan.Attempt = 0
 
 	// A concurrent request can create or queue the document between our read and

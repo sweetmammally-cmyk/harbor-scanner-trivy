@@ -85,7 +85,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P9-2 `POST /api/v2/scans`: validation (DEMAND 5.1), order auth -> validate -> not ready -> resolve -> active-scan check -> cache -> enqueue; `received_at`; 202 / 200 covered active scan / 409 `scan_in_progress` / 429 / 503
 - [x] P9-3 Cache decision on the tag's document (renewal), copy hit from another document by `result.digest` (source may be active; GridFS copied; source file gone -> lookup once more, then miss); views filtered to the request
 - [x] P9-4 `GET /api/v2/scans/{id}`: id format, 404 `not_found`, `Retry-After: 2`, findings only when done, `previous` block, failed with class and fixed message, `platforms`/`severity` view filters
-- [ ] P9-5 `GET /api/v2/scans`: filters, immutable `created_at`, keyset pagination, projection; indexes (schema version bump); explain test; stable pagination while tags are inserted
+- [x] P9-5 `GET /api/v2/scans`: filters, immutable `created_at`, keyset pagination, projection; indexes (schema version bump); explain test; stable pagination while tags are inserted
 - [ ] P9-6 `GET /api/v2/db`: this instance's in-memory state per DB kind (works while MongoDB is down), sources redacted, other instances from MongoDB best effort
 - [ ] P9-7 `db` block in responses (stored values, local DB state while a tag has no result)
 - [ ] P9-8 Handler tests with fakes and a full-stack integration test (mongo:7, fake registry, fake trivy) covering DEMAND 5 and 6; v1 component tests

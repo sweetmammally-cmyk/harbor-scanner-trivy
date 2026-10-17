@@ -387,7 +387,7 @@ Schema setup ("ensure schema"):
 
 Indexes:
 
-- `scans(result.digest)` (cache copy lookup and the digest filter), `scans(image.digest)`, `scans(customer_ids, created_at)`, `scans(created_at)`, `scans(state, queued_at)` (queue claim and the state filter), `scans(state, lease_until)` (reaper). There is no unique index besides `_id` (schema version 4; nothing was deployed before it, so older development databases are recreated instead of migrated).
+- `scans(result.digest)` (cache copy lookup and the digest filter), `scans(image.digest)`, `scans(customer_ids, created_at desc, _id desc)`, `scans(created_at desc, _id desc)` (the list order), `scans(state, queued_at)` (queue claim and the state filter), `scans(state, lease_until)` (reaper). There is no unique index besides `_id` (schema version 4; nothing was deployed before it, so older development databases are recreated instead of migrated).
 - `db_checks.at`: TTL index (`at` is a BSON date), `expireAfterSeconds` from `SCANNER_DB_CHECKS_RETENTION`. When the retention changes, the index is updated with `collMod`, never dropped.
 
 Large reports: summary plus report inline; the full report moves to GridFS when its BSON-encoded size is above 8 MiB (a code constant; the BSON document limit is 16 MiB). The GridFS file is uploaded first (metadata `scan_id`, `uploaded_at`), then the scan document is saved; if that save fails, the new file is deleted at once (best effort) and the previous result keeps its file. After a successful save, the document's other files (the previous result's) are deleted (best effort). List queries (`GET /api/v2/scans`) never return the report (projection). Cleanup of old files is part of retention (section 14).

@@ -61,6 +61,7 @@ func TestScan_BSON(t *testing.T) {
 	priority := 1
 	done := Scan{
 		ID:            "scan-1",
+		CreatedAt:     at.Add(-time.Hour),
 		LastRequestID: "req-1",
 		RequestedAt:   at,
 		ReceivedAt:    at.Add(time.Second),
@@ -103,7 +104,7 @@ func TestScan_BSON(t *testing.T) {
 	}
 
 	t.Run("field names follow DEMAND section 10", func(t *testing.T) {
-		assert.Equal(t, sorted("_id", "last_request_id", "requested_at", "received_at", "customer_ids", "customer_data", "image",
+		assert.Equal(t, sorted("_id", "created_at", "last_request_id", "requested_at", "received_at", "customer_ids", "customer_data", "image",
 			"options", "reference", "state", "queued_at", "started_at", "finished_at", "queue_wait_ms", "scan_ms", "total_ms",
 			"worker", "lease_until", "attempt", "priority", "error", "failure_class", "result", "db", "confirmed_at"),
 			keysOf(t, done))

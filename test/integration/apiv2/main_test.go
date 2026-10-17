@@ -120,6 +120,7 @@ func newReplica(t *testing.T, cfg config.Config, client *store.Client) *env {
 	e.handler = api.NewHandler(cfg, api.Deps{
 		Queue:        e.queue,
 		Scans:        store.NewMongoScans(client),
+		Lister:       store.NewMongoScans(client),
 		Reports:      e.reports,
 		Registry:     e.registry,
 		DBState:      e.dbState,

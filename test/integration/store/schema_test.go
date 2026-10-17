@@ -111,8 +111,9 @@ func TestSchema(t *testing.T) {
 		assert.Equal(t, scansBefore, indexes(t, client, "scans"))
 		assert.Equal(t, checksBefore, indexes(t, client, "db_checks"))
 		assert.Equal(t, versionBefore, schemaVersion(t, client))
-		assert.Contains(t, scansBefore, "image_digest_state_finished_at")
-		assert.Contains(t, scansBefore, "customer_ids_finished_at")
+		for _, name := range []string{"result_digest", "image_digest", "customer_ids_created_at", "created_at"} {
+			assert.Contains(t, scansBefore, name)
+		}
 		assert.Contains(t, scansBefore, "state_queued_at")
 	})
 

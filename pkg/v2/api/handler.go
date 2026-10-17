@@ -25,6 +25,7 @@ type Resolver interface {
 type Deps struct {
 	Queue    *queue.Queue
 	Scans    store.ScanRepository
+	Lister   ScanLister
 	Reports  store.ReportStore
 	Registry Resolver
 	// DBState is this instance's DB state, from memory.
@@ -63,6 +64,7 @@ func NewHandler(cfg config.Config, deps Deps) *Handler {
 	})
 	h.router.Methods(http.MethodPost).Path("/api/v2/scans").HandlerFunc(h.createScan)
 	h.router.Methods(http.MethodGet).Path("/api/v2/scans/{id}").HandlerFunc(h.getScan)
+	h.router.Methods(http.MethodGet).Path("/api/v2/scans").HandlerFunc(h.listScans)
 	h.chain = h.logRequests(h.authenticate(h.limitInflight(h.router)))
 	return h
 }

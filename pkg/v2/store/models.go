@@ -41,6 +41,9 @@ func ScanID(image Image) string {
 // nil, so they are absent from the document.
 type Scan struct {
 	ID string `bson:"_id"`
+	// CreatedAt is set when the tag's document is created and never changes;
+	// it orders GET /api/v2/scans.
+	CreatedAt time.Time `bson:"created_at"`
 	// LastRequestID is the caller's optional correlation id of the last request
 	// (1-128 characters). It is logged, not unique.
 	LastRequestID string `bson:"last_request_id,omitempty"`

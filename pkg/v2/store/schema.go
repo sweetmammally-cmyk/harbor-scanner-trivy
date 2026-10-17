@@ -15,9 +15,10 @@ import (
 // SchemaVersion is the data plane schema version this code expects.
 // 2: the queue indexes (active_key_unique, state_lease_until).
 // 3: one scan document per image tag; no request_id_unique or active_key_unique.
-// Nothing was deployed before 3, so there is no migration: databases of older
+// 4: list indexes (result_digest, image_digest, customer_ids_created_at, created_at).
+// Nothing was deployed before 4, so there is no migration: databases of older
 // versions are recreated.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // CollectionSchemaVersion holds one document, _id "schema", with the stored version.
 const CollectionSchemaVersion = "schema_version"
@@ -54,16 +55,29 @@ type index struct {
 func scansIndexes() []index {
 	return []index{
 		{
-			// Also finds other tags with the same digest for the cache (prefix image.digest).
+			// The cache's copy lookup and the digest filter.
 			collection: CollectionScans,
-			name:       "image_digest_state_finished_at",
-			keys:       bson.D{{Key: "image.digest", Value: 1}, {Key: "state", Value: 1}, {Key: "finished_at", Value: 1}},
+			name:       "result_digest",
+			keys:       bson.D{{Key: "result.digest", Value: 1}},
 			options:    options.Index(),
 		},
 		{
 			collection: CollectionScans,
-			name:       "customer_ids_finished_at",
-			keys:       bson.D{{Key: "customer_ids", Value: 1}, {Key: "finished_at", Value: 1}},
+			name:       "image_digest",
+			keys:       bson.D{{Key: "image.digest", Value: 1}},
+			options:    options.Index(),
+		},
+		{
+			// The list order is created_at desc, _id desc.
+			collection: CollectionScans,
+			name:       "customer_ids_created_at",
+			keys:       bson.D{{Key: "customer_ids", Value: 1}, {Key: "created_at", Value: -1}, {Key: "_id", Value: -1}},
+			options:    options.Index(),
+		},
+		{
+			collection: CollectionScans,
+			name:       "created_at",
+			keys:       bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}},
 			options:    options.Index(),
 		},
 		{

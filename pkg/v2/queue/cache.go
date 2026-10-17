@@ -123,6 +123,7 @@ func (q *Queue) SaveCopy(ctx context.Context, copied store.Scan, exists bool) er
 	if !exists {
 		now := time.Now()
 		copied.ConfirmedAt = &now
+		copied.CreatedAt = now
 		_, err := q.scans.InsertOne(ctx, copied)
 		if mongo.IsDuplicateKeyError(err) {
 			return store.ErrNotFound

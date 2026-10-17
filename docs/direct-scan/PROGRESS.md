@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 9 (API)
-- Last completed task: P9-4
+- Last completed task: P9-5
 - In progress: P9-1 (code done; only the v1 component test run is missing)
-- Next task: P9-5
+- Next task: P9-6
 - Blockers / questions for the user: `make test-component` cannot start its `redis` container because a container named `redis` already exists on the dev machine (`goharbor/redis-photon:v2.11.2`, exited, from a local Harbor compose install). The test uses that fixed name; remove or rename the old container (owner's call), then rerun.
 - Last updated: 2026-10-17
 
@@ -197,6 +197,18 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P9-5  GET /api/v2/scans
+- Status: done
+- What changed:
+  - `store.Scan.CreatedAt` (`created_at`): set when the tag's document is inserted (enqueue or copy hit), never changed by requeue, renewal or completion.
+  - Schema version 4: indexes `result_digest`, `image_digest`, `customer_ids_created_at` (`customer_ids`, `created_at` desc, `_id` desc), `created_at` (`created_at` desc, `_id` desc); `image_digest_state_finished_at` and `customer_ids_finished_at` are no longer created (dev databases are recreated; nothing drops them automatically). The state filter uses the existing `state_queued_at`.
+  - `store.ScanFilter`, `store.ListQuery` (an `$and` of the given filters; `digest` is an `$or` of `result.digest` and `image.digest`; `from`/`to` inclusive on `created_at`; the keyset condition `created_at < t or (created_at = t and _id < id)`), `store.ListSort` and `MongoScans.List` (projection without `result.report`).
+  - `pkg/v2/api/list.go`: unknown query parameters, a bad state, limit outside 1-200, bad times and a bad cursor -> 400; one item more than the limit decides `next_cursor` (base64url JSON of the last item's `created_at` and `_id`). Items: scan_id, state, image (latest request), created_at, confirmed_at, customer fields, request_id, `result` (digest, scope, image types, summary, truncated, DB updated_at, freshness) and `error` (class + fixed message) for failed scans; never findings.
+- Files: `pkg/v2/store/{models,models_test,schema,repositories_mongo}.go`, `pkg/v2/queue/{queue,cache}.go`, `pkg/v2/api/{list,list_test,handler}.go`, `pkg/v2/service/service.go`, `test/integration/store/schema_test.go`, `test/integration/apiv2/{main_test,list_test}.go`, `docs/direct-scan/DEMAND.md` (index keys)
+- Tests run: `go test -short -race ./...` -> ok; store, queue and apiv2 integration -> ok. Cases: query parsing (all parameters, defaults, nine rejections); on mongo:7 every filter (customer, digest of the result and of the latest request on a moved tag, repository, name, state, a platform found in the image, request id, from, to, an empty value), newest first; no findings or report in items; seven tags paged by three while a new tag is inserted after every page: every original tag exactly once, in order; `explain` of the customer, digest and customer-with-cursor queries shows IXSCAN and no COLLSCAN.
+- Decisions / surprises: the list indexes include `_id` after `created_at` so the keyset order is served by the index (owner listed "created_at"; to confirm). `GET /api/v2/scans` and `GET /api/v2/scans/{id}` need only MongoDB up (no DB or schema check).
+- Next: P9-6
 
 ### 2026-10-17  P9-4  GET /api/v2/scans/{id}
 - Status: done
