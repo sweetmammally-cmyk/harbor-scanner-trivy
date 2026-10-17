@@ -127,6 +127,11 @@ func normalizeOptions(platforms, severity []string) ([]string, []string, error) 
 	slices.Sort(normalizedSeverity)
 	normalizedSeverity = slices.Compact(normalizedSeverity)
 
+	for _, value := range normalizedSeverity {
+		if !slices.Contains(runner.Severities, value) {
+			return nil, nil, fmt.Errorf("severity %q must be one of %s", value, strings.Join(runner.Severities, ", "))
+		}
+	}
 	if len(normalizedPlatforms) > 0 {
 		if err := runner.ValidateOptions(normalizedPlatforms, normalizedSeverity); err != nil {
 			return nil, nil, err

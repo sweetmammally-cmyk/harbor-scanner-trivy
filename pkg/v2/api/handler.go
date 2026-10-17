@@ -62,6 +62,7 @@ func NewHandler(cfg config.Config, deps Deps) *Handler {
 		writeError(w, http.StatusMethodNotAllowed, CodeInvalidRequest, "method not allowed", 0)
 	})
 	h.router.Methods(http.MethodPost).Path("/api/v2/scans").HandlerFunc(h.createScan)
+	h.router.Methods(http.MethodGet).Path("/api/v2/scans/{id}").HandlerFunc(h.getScan)
 	h.chain = h.logRequests(h.authenticate(h.limitInflight(h.router)))
 	return h
 }

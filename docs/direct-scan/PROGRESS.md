@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 9 (API)
-- Last completed task: P9-3
+- Last completed task: P9-4
 - In progress: P9-1 (code done; only the v1 component test run is missing)
-- Next task: P9-4
+- Next task: P9-5
 - Blockers / questions for the user: `make test-component` cannot start its `redis` container because a container named `redis` already exists on the dev machine (`goharbor/redis-photon:v2.11.2`, exited, from a local Harbor compose install). The test uses that fixed name; remove or rename the old container (owner's call), then rerun.
 - Last updated: 2026-10-17
 
@@ -197,6 +197,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P9-4  GET /api/v2/scans/{id}
+- Status: done
+- What changed: `pkg/v2/api/get.go`: an id that is not 64 lowercase hex -> 404 `{"state": "not_found"}` without echoing it; unknown -> 404 `{"scan_id", "state": "not_found"}`; MongoDB down -> 503 `store_unavailable`. `done` -> the result view (P9-3), by default for the full stored scope; optional `platforms` and `severity` query parameters (comma-separated, normalized like POST) filter it, and a filter outside the stored scope is 400. `queued`/`scanning` -> `{scan_id, state, image, db, previous?}` with `Retry-After: 2`; `failed` -> the same plus `error: {class, message}` with a fixed message per failure class (`failureMessages`; unknown classes "the scan failed"), never the stored detail. `previous` = `{confirmed_at, digest, summary}` of the last good result. `summaryFor` is shared with the result view. `normalizeOptions` now checks severities also without platforms.
+- Files: `pkg/v2/api/{get,get_test,handler,view,validate}.go`, `test/integration/apiv2/get_test.go`
+- Tests run: `go test -short -race ./...` -> ok; `go test -count=1 -race -tags=integration ./test/integration/apiv2/` -> ok. Unit: four malformed ids -> 404 without echo; a bad severity filter -> 400 before the store; MongoDB down -> 503; no token -> 401. Integration: unknown id -> 404; queued -> `Retry-After: 2`, no findings, no previous; done -> full scope, no `cached`, then a `JAR`/`critical` filter with the summary of jar only, and a filter outside the scope -> 400; a forced rescan shows `previous` while queued; after a failure (stored detail with a path and stderr) the response has the class and fixed message only, the previous block, and no findings.
+- Decisions / surprises: the view also returns `customer_ids`, `customer_data` and `request_id` (the last request's), so GET shows who asked last; to confirm.
+- Next: P9-5
 
 ### 2026-10-17  P9-3  Cache decision, renewal and copy hits
 - Status: done

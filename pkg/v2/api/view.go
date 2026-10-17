@@ -47,6 +47,20 @@ type timingView struct {
 	TotalMS     int64 `json:"total_ms"`
 }
 
+// summaryFor sums the result's counts over the platforms, at every severity.
+func summaryFor(result *store.ScanResult, platforms []string) map[string]int {
+	summary := map[string]int{}
+	for _, value := range runner.Severities {
+		summary[strings.ToLower(value)] = 0
+	}
+	for _, platform := range platforms {
+		for value, count := range result.SummaryByPlatform[platform] {
+			summary[value] += count
+		}
+	}
+	return summary
+}
+
 // storedFindings is the stored report.
 type storedFindings struct {
 	Findings []runner.Finding `bson:"findings"`
@@ -67,7 +81,6 @@ func newResultView(scan store.Scan, report bson.M, platforms, severity []string,
 		PlatformsFound:     []string{},
 		PlatformsNotFound:  []string{},
 		Severity:           severity,
-		Summary:            map[string]int{},
 		Truncated:          result.Truncated,
 		Vulnerabilities:    []runner.Finding{},
 		Timing:             timingView{QueueWaitMS: scan.QueueWaitMS, ScanMS: scan.ScanMS, TotalMS: scan.TotalMS},
@@ -76,13 +89,8 @@ func newResultView(scan store.Scan, report bson.M, platforms, severity []string,
 		RequestID:          scan.LastRequestID,
 	}
 
-	for _, value := range runner.Severities {
-		view.Summary[strings.ToLower(value)] = 0
-	}
+	view.Summary = summaryFor(result, platforms)
 	for _, platform := range platforms {
-		for value, count := range result.SummaryByPlatform[platform] {
-			view.Summary[value] += count
-		}
 		if slices.Contains(result.ImagePlatformTypes, platform) {
 			view.PlatformsFound = append(view.PlatformsFound, platform)
 		} else {
