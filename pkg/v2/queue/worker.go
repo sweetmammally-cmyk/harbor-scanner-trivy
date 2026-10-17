@@ -40,10 +40,15 @@ type Pool struct {
 	name string
 	// completionRetry is how long a completion write is retried. Tests shorten it.
 	completionRetry time.Duration
+	// jobs is the parent context of running scans; it is cancelled when the
+	// shutdown grace period is over, which kills the scans.
+	jobs       context.Context
+	cancelJobs context.CancelFunc
 }
 
 // NewPool returns the worker pool of this replica.
 func NewPool(queue *Queue, scanner Scanner, refresher Refresher, reports store.ReportStore, ready func() bool, name string) *Pool {
+	jobs, cancelJobs := context.WithCancel(context.Background())
 	return &Pool{
 		queue:           queue,
 		scanner:         scanner,
@@ -52,10 +57,15 @@ func NewPool(queue *Queue, scanner Scanner, refresher Refresher, reports store.R
 		ready:           ready,
 		name:            name,
 		completionRetry: 2 * time.Minute,
+		jobs:            jobs,
+		cancelJobs:      cancelJobs,
 	}
 }
 
-// Run runs the workers until ctx ends, then waits for them.
+// Run runs the workers until ctx ends (SIGTERM). Then no new scan is claimed;
+// running scans may finish within SCANNER_SHUTDOWN_GRACE, after which they are
+// killed and their leases released, so another replica takes them at once.
+// Run returns when every worker has stopped.
 func (p *Pool) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for i := 0; i < p.queue.cfg.QueueWorkers; i++ {
@@ -66,7 +76,25 @@ func (p *Pool) Run(ctx context.Context) {
 			p.work(ctx, worker)
 		}()
 	}
-	wg.Wait()
+	stopped := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+		return
+	case <-ctx.Done():
+	}
+	select {
+	case <-stopped:
+	case <-time.After(p.queue.cfg.ShutdownGrace):
+		slog.Warn("shutdown grace period over, killing running scans", slog.String("grace", p.queue.cfg.ShutdownGrace.String()))
+		p.cancelJobs()
+		<-stopped
+	}
+	p.cancelJobs()
 }
 
 // work claims and runs scans until ctx ends. It does not claim while the
@@ -108,7 +136,7 @@ func (p *Pool) wait(ctx context.Context) {
 // the result is discarded.
 func (p *Pool) process(scan store.Scan, worker string) {
 	logger := slog.With(slog.String("scan_id", scan.ID), slog.String("worker", worker), slog.Int("attempt", scan.Attempt))
-	jobCtx, cancelJob := context.WithCancel(context.Background())
+	jobCtx, cancelJob := context.WithCancel(p.jobs)
 	defer cancelJob()
 
 	var lost bool
@@ -150,6 +178,16 @@ func (p *Pool) process(scan store.Scan, worker string) {
 	if lost {
 		p.queue.metrics.leaseLost()
 		logger.Warn("the scan's lease was lost, its result is discarded")
+		return
+	}
+
+	// Killed at the end of the shutdown grace: back to the queue, attempt not counted.
+	if p.jobs.Err() != nil {
+		err := p.queue.Release(context.Background(), scan)
+		p.logWriteError(logger, err)
+		if err == nil {
+			logger.Info("scan released at shutdown, it goes back to the queue")
+		}
 		return
 	}
 

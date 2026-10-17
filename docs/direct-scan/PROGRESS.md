@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 8 (queue)
-- Last completed task: P8-3
+- Last completed task: P8-4
 - In progress: none
-- Next task: P8-4 (graceful shutdown)
+- Next task: P8-5 (queue metrics)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-17
 
@@ -178,6 +178,16 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P8-4  Graceful shutdown
+- Status: done
+- What changed:
+  - `Queue.Release(ctx, scan)` in `pkg/v2/queue/lease.go`: a fenced write that puts a claimed scan back to `queued` with `attempt - 1` (the attempt is not counted) and removes `worker`, `lease_until` and `started_at`. `request_id` and `active_key` stay, so it is still the active scan of its work.
+  - `Pool` in `pkg/v2/queue/worker.go`: running scans now derive their context from a pool-wide jobs context instead of `context.Background()`. When `Run`'s context ends (SIGTERM), the workers stop claiming at once; `Run` waits up to `SCANNER_SHUTDOWN_GRACE` for running scans; after that it logs a WARN and cancels the jobs context, which kills Trivy (process group, P7-2). A scan killed that way is released instead of failed or completed. `Run` returns when every worker has stopped.
+- Files: `pkg/v2/queue/lease.go`, `pkg/v2/queue/worker.go`, `test/integration/queue/shutdown_test.go`
+- Tests run: `go test -race -count=1 -tags=integration ./test/integration/queue/` -> ok; `go test -short -race ./pkg/v2/...` -> ok. Cases (grace 1s): a scan that ends within the grace is completed and `Run` returns before the grace is over; a scan still running at the end of the grace is killed, is back in `queued` with attempt 0, keeps `request_id` and `active_key`, has no worker/lease/started/failure fields, `Run` returns between 1s and 3s, and another pool then finishes it with attempt 1; no scan is claimed after shutdown starts.
+- Decisions / surprises: a scan that happens to finish just as the grace ends is released, not completed; it is scanned again by another replica. Compose `stop_grace_period` must be longer than `SCANNER_SHUTDOWN_GRACE` (P11-1).
+- Next: P8-5
 
 ### 2026-10-17  P8-3  Reaper
 - Status: done

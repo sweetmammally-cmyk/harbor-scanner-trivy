@@ -109,6 +109,18 @@ func (q *Queue) Fail(ctx context.Context, scan store.Scan, class, detail string)
 	})
 }
 
+// Release puts a claimed scan back in the queue at once, without counting the
+// attempt: the worker is shutting down, it did not fail.
+func (q *Queue) Release(ctx context.Context, scan store.Scan) error {
+	return q.fencedUpdate(ctx, scan, mongo.Pipeline{
+		{{Key: "$set", Value: bson.D{
+			{Key: "state", Value: store.ScanQueued},
+			{Key: "attempt", Value: bson.D{{Key: "$subtract", Value: bson.A{"$attempt", 1}}}},
+		}}},
+		{{Key: "$unset", Value: bson.A{"worker", "lease_until", "started_at"}}},
+	})
+}
+
 // fencedUpdate applies update only while the worker still owns the scan: same
 // _id, worker and attempt, still scanning.
 func (q *Queue) fencedUpdate(ctx context.Context, scan store.Scan, update mongo.Pipeline) error {
