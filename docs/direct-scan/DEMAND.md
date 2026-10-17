@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.18 (REST API v2 decisions, 2026-10-17)
+Status: DRAFT v0.19 (health, readiness, metrics, 2026-10-17)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -56,9 +56,9 @@ Problems today:
 
 - `/api/v2/` is routed only when `SCANNER_V2_API_ENABLED` is true; with v2 disabled nothing changes. `/probe/*` stays unauthenticated; every `/api/v2/...` endpoint, including `/api/v2/health` and `/api/v2/db`, requires the token.
 - Auth: `Authorization: Bearer <token>`, compared in constant time on the SHA-256 hashes. One token, `SCANNER_V2_AUTH_TOKEN`, at least 32 characters; startup fails when v2 is enabled and it is missing or shorter. A missing or wrong token gives 401 `unauthorized` with `WWW-Authenticate: Bearer`. Tokens are never logged. This is caller authentication only; registry access uses the robot account.
-- HTTP hygiene: request bodies at most 1 MiB (413 `invalid_request` above); `Content-Type: application/json` required on bodies (415 `invalid_request` otherwise); strict JSON decoding (unknown fields or trailing data give 400 `invalid_request`); the server's read, header, write and idle timeouts are set (`SCANNER_API_SERVER_*`; the header timeout is the read timeout; a POST extends its own write deadline to cover the synchronous digest resolution). At most `SCANNER_V2_MAX_INFLIGHT` (default 32) POSTs run at once; beyond it 429 `queue_full` with `Retry-After: 1`.
+- HTTP hygiene: request bodies at most 1 MiB (413 `invalid_request` above); `Content-Type: application/json` required on bodies (415 `invalid_request` otherwise); strict JSON decoding (unknown fields or trailing data give 400 `invalid_request`); the server's read, header, write and idle timeouts are set (`SCANNER_API_SERVER_*`; the header timeout is the read timeout; a POST extends its own write deadline to cover the synchronous digest resolution). At most `SCANNER_V2_MAX_INFLIGHT` (default 32) POSTs run at once; beyond it 429 `too_many_requests` with `Retry-After: 1`.
 - One log line per request: method, route template, status, duration and request id; never bodies or headers. `X-Request-ID` is accepted when it is 1-128 characters of `A-Za-z0-9._:-`, otherwise generated, and returned in the response.
-- One error shape: `{"error": {"code": "...", "message": "..."}}`. Codes: `invalid_request` (400/413/415), `unauthorized` (401), `image_not_found` (404), `registry_auth_failed` (502), `registry_unavailable` (503, `Retry-After`), `queue_full` (429, `Retry-After`), `scan_in_progress` (409, `Retry-After: 5`), `not_ready` (503: schema not ready or no DB installed), `store_unavailable` (503: MongoDB down or a MongoDB call failed), `internal` (500). Messages never contain secrets, paths or stderr.
+- One error shape: `{"error": {"code": "...", "message": "..."}}`. Codes: `invalid_request` (400/413/415), `unauthorized` (401), `image_not_found` (404), `registry_auth_failed` (502), `registry_unavailable` (503, `Retry-After`), `queue_full` (429, `Retry-After`; only for a full queue), `too_many_requests` (429, `Retry-After: 1`; the in-flight cap), `scan_in_progress` (409, `Retry-After: 5`), `not_ready` (503: schema not ready or no DB installed), `store_unavailable` (503: MongoDB down or a MongoDB call failed), `internal` (500). Messages never contain secrets, paths or stderr.
 - Not found: `GET /api/v2/scans/{scan_id}` answers 404 with `{"scan_id": "...", "state": "not_found"}`.
 
 ### 5.1 Trigger scan: `POST /api/v2/scans`
@@ -100,6 +100,7 @@ Order: auth -> body size, decoding and validation (400) -> not ready (503: Mongo
 | The tag is queued/scanning for another digest, or for a scope that does not cover the request | 409 | `scan_in_progress`, `Retry-After: 5` |
 | Cache hit (section 6) | 200 | the result view (5.2) with `"cached": true, "db_unchanged": true` |
 | Queue full | 429 | `queue_full`, `Retry-After` |
+| Too many POSTs in flight | 429 | `too_many_requests`, `Retry-After: 1` |
 | MongoDB unavailable / not ready | 503 | `store_unavailable` / `not_ready` |
 
 `cached` and `db_unchanged` appear only in POST hit responses; they are never stored.
@@ -165,8 +166,12 @@ This is the filtering Harbor cannot do.
 
 ### 5.5 Health
 
-- `GET /api/v2/health`: detailed health derived from stored data: Mongo connectivity, DB present, DB age and freshness, last upstream check, queue depth, recent scan durations and failure rate, last pre-check result per source. DB information is shown for every instance.
-- Liveness/readiness probes (existing Harbor-style probes kept). Readiness is false while Mongo is unreachable or no DB exists yet.
+- Liveness (`/probe/healthy`) stays trivial: the process answers. It never depends on MongoDB or the DB.
+- Readiness (`/probe/ready`), when v2 is enabled, is false while: MongoDB is down, the schema is not ready, no Trivy DB is installed, the trivy binary is missing, the service is shutting down, or a Java DB is required (`SCANNER_JAVA_DB_SOURCES` set) but missing. Degraded DB mode does not make it unready. MongoDB state comes from the background ping flag, never a direct MongoDB call. With v2 disabled the v1 probes are unchanged.
+- `GET /api/v2/health` (token required): `status` `ok` | `degraded` | `unhealthy`; HTTP 200 for ok and degraded, 503 for unhealthy.
+  - unhealthy: any readiness condition above, or no worker running.
+  - degraded: any DB kind in degraded mode or with `newer_available`; freshness `stale` (against `SCANNER_DB_MAX_AGE_DEFAULT`); a DB older than `SCANNER_DB_AGE_WARN`; the oldest queued scan older than `SCANNER_HEALTH_QUEUE_STUCK_AFTER` (default 10m) while workers run; more than 50% failures in the last 20 scans of this replica (at least 10 samples; in-memory window).
+  - Body: each check with its status and a short sanitized detail; this instance's DB states; queue depth and oldest queued age; recent-scan counts; every instance's DB state with its last-updated time (best effort from MongoDB). Never secrets, paths or stderr.
 
 ### 5.6 Startup and shutdown
 
@@ -428,6 +433,7 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | `SCANNER_QUEUE_MAX_ATTEMPTS` | Lease losses before a scan fails with `worker_lost`. Default 3 |
 | `SCANNER_QUEUE_POLL_INTERVAL` | How often idle workers look for work (with jitter). Default 2s |
 | `SCANNER_SHUTDOWN_GRACE` | How long running scans may finish after SIGTERM. Default 30s |
+| `SCANNER_HEALTH_QUEUE_STUCK_AFTER` | Health is `degraded` when the oldest queued scan is older than this while workers run. Default 10m |
 | `SCANNER_SCAN_PLATFORM` | Platform scanned in a multi-platform image (`--platform`). Default `linux/amd64` |
 | `SCANNER_SCAN_TIMEOUT` | Per-scan timeout; Trivy gets a slightly shorter `--timeout`, then the whole process group is killed. Default 10m |
 | `SCANNER_SCAN_MAX_OUTPUT` | Largest Trivy JSON output read; above it the scan fails with `output_too_large`. Default 256 MiB |
@@ -440,7 +446,9 @@ All defaults can be overridden by env. Existing Trivy variables keep their curre
 - Structured logs with `scan_id`, `digest`, `customer_ids`.
 - Required lines: "triggering scan", "scan done" with duration, "scan skipped (db unchanged)", DB source selection, each pre-check stage result, "using fallback interval", "all DB sources failed, scanning with existing DB".
 - Timings are also stored in MongoDB so health can be computed later.
-- Prometheus metrics: scans total (by result), cache hits, queue depth, scan duration, DB age, last upstream check age, pre-check failures per source.
+- Every required line has a log-capture test, and a test checks that no secret appears in any log, metric or health body.
+- Prometheus metrics on the adapter's existing `/metrics` (same listener, unauthenticated; the port must stay internal), prefix `scanner_v2_`: scans by result (`done`, `failed`, `hit`, `copy_hit`), scan duration and queue wait histograms, queue depth, oldest queued age, lease losses, reaper requeues, claim latency, `mongo_up` (from the ping flag), `db_age_seconds`, `db_confirmed_age_seconds`, `db_degraded`, `db_newer_available` (per DB kind), API requests by route template and status, in-flight requests, DB update runs and pre-check failures by class, build info (Trivy version, schema version). Labels never carry customer ids, digests, repositories or tags; a `source` label is the host only (no credentials); a `platform` label is one of Trivy's known types or `other`. Queue statistics are cached for 10s so a scrape does not query MongoDB each time.
+- The adapter's "FULL TRIVY REPORT" debug log is removed (P10-5); all other v1 behaviour, including `vendor_attributes.Trivy`, stays.
 
 ## 13. Acceptance criteria
 

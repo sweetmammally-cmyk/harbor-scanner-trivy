@@ -91,17 +91,17 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [~] P9-8 (done except the v1 component tests, blocked like P9-1) Handler tests with fakes and a full-stack integration test (mongo:7, fake registry, fake trivy) covering DEMAND 5 and 6; v1 component tests
 
 ## Phase 10: Health, logging, metrics
-- [ ] P10-1 `GET /api/v2/health` computed from stored data (includes `db_age`; DB information for every instance)
-- [ ] P10-2 Readiness and liveness: Mongo reachable (from the background ping flag, never a direct Mongo call), DB present
-- [ ] P10-3 Verify all required log lines from DEMAND section 12
-- [ ] P10-4 Prometheus metrics (including a `mongo_up` gauge from the ping flag)
-- [ ] P10-5 Remove the FULL TRIVY REPORT debug log (`pkg/trivy/wrapper.go`) once v2 logging exists
+- [ ] P10-1 `GET /api/v2/health`: ok/degraded/unhealthy (DEMAND 5.5), checks with sanitized details, DB states, queue, recent scans (in-memory window of 20), all instances; `SCANNER_HEALTH_QUEUE_STUCK_AFTER`
+- [ ] P10-2 Readiness (Mongo ping flag, schema, Trivy DB, trivy binary, shutting down, required Java DB; degraded mode stays ready) and trivial liveness; v1 probes unchanged when v2 is disabled
+- [ ] P10-3 Log-capture test for every required log line (DEMAND 12) and a test that no secret appears in logs, metrics or the health body
+- [ ] P10-4 Prometheus metrics on the adapter's `/metrics` (DEMAND 12 list, label rules, Queue.Stats cached 10s, a scrape does not query MongoDB)
+- [ ] P10-5 Remove the FULL TRIVY REPORT debug log (`pkg/trivy/wrapper.go`); everything else in v1 stays
 
 ## Phase 11: Hardening and acceptance
 - [ ] P11-1 End-to-end run in docker compose (scanner, Mongo, mirror or fake mirror); `stop_grace_period` longer than `SCANNER_SHUTDOWN_GRACE`
 - [ ] P11-2 Walk the acceptance criteria below and record evidence in PROGRESS.md
 - [ ] P11-3 Harbor adapter regression: existing tests pass and one manual Harbor scan works
-- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code. It must also say: Harbor robot usernames contain `$`, which needs escaping in compose files and shells. And: MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`); the service uses no multi-document transactions
+- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code. It must also say: Harbor robot usernames contain `$`, which needs escaping in compose files and shells. And: MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`); the service uses no multi-document transactions. Sizing: v2 keeps its DBs and worker caches in `SCANNER_V2_CACHE_DIR`, separate from v1's Trivy cache, so there are two DB copies on disk. The `/metrics` port must stay internal (unauthenticated)
 - [ ] P11-5 Secrets review: no tokens or passwords in logs, argv or MongoDB
 - [ ] P11-6 List the upstream files touched, for future merges; run the component tests again
 - [ ] P11-7 (low priority) Get a working golangci-lint for Go 1.26 and run `make lint`

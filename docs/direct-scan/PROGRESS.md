@@ -51,6 +51,14 @@ Newest changelog entries go at the top of the Changelog.
 
 Record decisions here with date and reason (package layout, Mongo test strategy, OCI client approach, DB swap mechanism, anything the user answered). If a decision changes the spec, also propose the edit to `DEMAND.md`.
 
+- 2026-10-17 (owner, Phase 10 and follow-ups; DEMAND v0.19 sections 5.0, 5.5, 11, 12):
+  - Component tests: the owner renames the local Harbor container `redis` to `redis-harbor-local` for the run and back afterwards; we never remove or modify it. On a failure, run the same tests in a separate worktree at the P0-6 commit to see whether it predates v2; `vendor_attributes.Trivy` (KEEP) failures are fixed in test expectations only. Tick P9-1/P9-8 when green or when a failure is proven older and documented.
+  - New error code `too_many_requests` (429, `Retry-After: 1`) for the in-flight cap; `queue_full` only for a full queue.
+  - P11-4 sizing: two DB copies on disk (v1's Trivy cache and `SCANNER_V2_CACHE_DIR`).
+  - Liveness trivial; readiness conditions (Mongo, schema, Trivy DB, trivy binary, shutting down, required Java DB; degraded mode stays ready); v1 probes unchanged with v2 disabled.
+  - `GET /api/v2/health` ok/degraded/unhealthy with the rules of DEMAND 5.5; `SCANNER_HEALTH_QUEUE_STUCK_AFTER` (10m); failure-rate window of the last 20 scans on this replica, at least 10 samples, over 50%.
+  - Metrics on the adapter's `/metrics` with the list and label rules of DEMAND 12; `Queue.Stats` cached 10s.
+  - P10-5 removes only the FULL TRIVY REPORT log. P10-3 adds log-capture tests and a no-secret test over logs, metrics and the health body.
 - 2026-10-17 (owner, complete Phase 9 decisions; supersede earlier Phase 9 messages; DEMAND v0.18 sections 5, 6, 10, 11, 13 and 14):
   - Corrections to P8-7: the copy-hit lookup matches `result.digest` only (own index); `image.digest` is the latest request's digest. A copy source may be queued/scanning; its GridFS content is copied to a new file; a vanished source file -> lookup once more, then a miss.
   - P9-1: bearer auth, constant-time compare of hashes, one token of at least 32 characters (startup fails otherwise when enabled), 401 with `WWW-Authenticate`, `/probe/*` open, `/api/v2/health` and `/api/v2/db` need the token. `/api/v2/` routed only when enabled. Both startup WARNs only when v2 is enabled. Startup order store -> schema -> updater -> workers -> HTTP; shutdown readiness false -> HTTP drain -> workers (grace, release) -> updater -> Mongo close. Hygiene: 1 MiB body, JSON content type, strict decoding, server timeouts, `SCANNER_V2_MAX_INFLIGHT` (32) -> 429 + `Retry-After`, one log line per request, `X-Request-ID`. Error shape `{"error": {"code", "message"}}` with the ten codes of DEMAND 5.0.
