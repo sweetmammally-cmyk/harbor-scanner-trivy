@@ -6,11 +6,11 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 8 (queue)
-- Last completed task: P8-2
+- Last completed task: P8-3
 - In progress: none
-- Next task: P8-3 (reaper)
+- Next task: P8-4 (graceful shutdown)
 - Blockers / questions for the user: none
-- Last updated: 2026-10-15
+- Last updated: 2026-10-17
 
 ## Repo facts (filled in by Phase 0)
 
@@ -178,6 +178,17 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P8-3  Reaper
+- Status: done
+- What changed: `pkg/v2/queue/reaper.go`:
+  - `Reap(ctx)` runs two `UpdateMany` calls on scans in `scanning` whose `lease_until` is before MongoDB's `$$NOW` (`$expr`). First, those with `attempt >= SCANNER_QUEUE_MAX_ATTEMPTS` become `failed`, class `worker_lost`, with `finished_at`, `total_ms` and `prior_request_id`; `request_id`, `active_key` and `lease_until` are removed. Then the others go back to `queued` (worker, `lease_until` and `started_at` removed; `active_key` kept, so they stay the active scan of their work).
+  - It returns (requeued, failed), counts requeues in the metrics and logs a WARN when it recovered anything.
+  - `RunReaper(ctx, interval)` runs it every interval (`ReapInterval` = 30s in production) and skips rounds while MongoDB is not ready.
+- Files: `pkg/v2/queue/reaper.go`, `pkg/v2/queue/metrics.go`, `test/integration/queue/reaper_test.go`
+- Tests run: `go test -race -tags=integration -run TestReap ./test/integration/queue/` -> ok (twice on 2026-10-15, again on 2026-10-17). Cases: a scan whose lease is valid is left alone; a scan claimed by a "dead" worker (no heartbeat, 200ms lease) is requeued by another replica, keeps its active key, and is finished by that replica's pool with attempt 2; a poison job with max attempts 2 fails with `worker_lost` after the second expiry, gives up its `request_id` and active key, is not claimed again, and a retry with the same `request_id` creates a new scan; `RunReaper` with a 100ms interval requeues an expired scan once the client's monitor reports MongoDB ready.
+- Decisions / surprises: Correction: the code and tests were committed by the owner as `acc55d1` (" Phase: 8 (queue)") before this documentation; this entry records them.
+- Next: P8-4
 
 ### 2026-10-15  P8-2  Claims, leases, fenced writes, worker pool
 - Status: done
