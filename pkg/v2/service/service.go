@@ -84,16 +84,17 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 	go q.RunReaper(reaperCtx, queue.ReapInterval)
 
 	s.handler = api.NewHandler(cfg, api.Deps{
-		Queue:        q,
-		Scans:        store.NewMongoScans(client),
-		Lister:       store.NewMongoScans(client),
-		Reports:      reports,
-		Registry:     registryClient,
-		DBState:      dbState,
-		StoreUp:      client.Up,
-		StoreReady:   client.Ready,
-		DBInstalled:  updater.DBInstalled,
-		TrivyVersion: scanner.Version,
+		Queue:         q,
+		Scans:         store.NewMongoScans(client),
+		Lister:        store.NewMongoScans(client),
+		Reports:       reports,
+		Registry:      registryClient,
+		DBState:       dbState,
+		OtherDBStates: dbState.Others,
+		StoreUp:       client.Up,
+		StoreReady:    client.Ready,
+		DBInstalled:   updater.DBInstalled,
+		TrivyVersion:  scanner.Version,
 	})
 	slog.Info("v2 direct scan service started", slog.String("instance_id", cfg.InstanceID),
 		slog.Int("workers", cfg.QueueWorkers))

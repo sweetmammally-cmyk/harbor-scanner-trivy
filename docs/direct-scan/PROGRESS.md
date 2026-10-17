@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 9 (API)
-- Last completed task: P9-5
+- Last completed task: P9-6
 - In progress: P9-1 (code done; only the v1 component test run is missing)
-- Next task: P9-6
+- Next task: P9-7
 - Blockers / questions for the user: `make test-component` cannot start its `redis` container because a container named `redis` already exists on the dev machine (`goharbor/redis-photon:v2.11.2`, exited, from a local Harbor compose install). The test uses that fixed name; remove or rename the old container (owner's call), then rerun.
 - Last updated: 2026-10-17
 
@@ -197,6 +197,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P9-6  GET /api/v2/db
+- Status: done
+- What changed: `pkg/v2/api/db.go`: `{instance_id, dbs, other_instances, other_instances_error?}`. `dbs` is this instance's state per kind (`db`, plus `java-db` when Java sources are configured) from the in-memory `DBStateStore`, so it answers while MongoDB is down: kind, mode, version, `updated_at`, `downloaded_at`, `installed_at`, manifest digest, active source, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, `db_age` (and seconds), freshness against `SCANNER_DB_MAX_AGE_DEFAULT`, `last_sources` (source names are already credential-free, `config.DBSource.String`). Unknown times are left out. Other instances come from `DBStateStore.Others` (new: `db_state` documents of other instance ids), grouped by instance with `state_updated_at`; while MongoDB is down or the read fails, `other_instances_error` says so and the request still succeeds.
+- Files: `pkg/v2/api/{db,db_test,handler}.go`, `pkg/v2/store/dbstate.go`, `pkg/v2/service/service.go`, `test/integration/apiv2/{main_test,db_test}.go`
+- Tests run: `go test -short -race ./...` -> ok; apiv2 integration -> ok. Unit (MongoDB down): 200 with the error note; a proxy source with user and password shows neither; degraded with newer available -> stale; `db_age` about 5h; `java-db` listed when configured, with an empty source list; no token -> 401. Integration: another instance's two documents are listed under it, this instance's stored document is not repeated.
+- Decisions / surprises: none.
+- Next: P9-7
 
 ### 2026-10-17  P9-5  GET /api/v2/scans
 - Status: done

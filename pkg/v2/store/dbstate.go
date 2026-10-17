@@ -243,3 +243,21 @@ func (s *DBStateStore) Load(ctx context.Context) error {
 }
 
 var _ dbmgr.StateStore = (*DBStateStore)(nil)
+
+// Others returns the stored DB states of the other instances, for GET
+// /api/v2/db (best effort: the caller shows an error while MongoDB is down).
+func (s *DBStateStore) Others(ctx context.Context) ([]DBStateDocument, error) {
+	ctx, cancel := s.client.OperationContext(ctx)
+	defer cancel()
+	cursor, err := s.client.Database().Collection(CollectionDBState).Find(ctx,
+		bson.D{{Key: "instance_id", Value: bson.D{{Key: "$ne", Value: s.instanceID}}}},
+		options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+	if err != nil {
+		return nil, fmt.Errorf("reading the DB states of other instances: %w", err)
+	}
+	var documents []DBStateDocument
+	if err = cursor.All(ctx, &documents); err != nil {
+		return nil, fmt.Errorf("reading the DB states of other instances: %w", err)
+	}
+	return documents, nil
+}

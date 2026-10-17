@@ -29,11 +29,13 @@ type Deps struct {
 	Reports  store.ReportStore
 	Registry Resolver
 	// DBState is this instance's DB state, from memory.
-	DBState      dbmgr.StateStore
-	StoreUp      func() bool
-	StoreReady   func() bool
-	DBInstalled  func() bool
-	TrivyVersion func() string
+	DBState dbmgr.StateStore
+	// OtherDBStates reads the other instances' DB states from MongoDB.
+	OtherDBStates func(ctx context.Context) ([]store.DBStateDocument, error)
+	StoreUp       func() bool
+	StoreReady    func() bool
+	DBInstalled   func() bool
+	TrivyVersion  func() string
 }
 
 // Handler serves /api/v2.
@@ -65,6 +67,7 @@ func NewHandler(cfg config.Config, deps Deps) *Handler {
 	h.router.Methods(http.MethodPost).Path("/api/v2/scans").HandlerFunc(h.createScan)
 	h.router.Methods(http.MethodGet).Path("/api/v2/scans/{id}").HandlerFunc(h.getScan)
 	h.router.Methods(http.MethodGet).Path("/api/v2/scans").HandlerFunc(h.listScans)
+	h.router.Methods(http.MethodGet).Path("/api/v2/db").HandlerFunc(h.getDB)
 	h.chain = h.logRequests(h.authenticate(h.limitInflight(h.router)))
 	return h
 }
