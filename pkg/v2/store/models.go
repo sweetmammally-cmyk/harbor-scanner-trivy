@@ -43,10 +43,13 @@ type Scan struct {
 	ID string `bson:"_id"`
 	// LastRequestID is the caller's optional correlation id of the last request
 	// (1-128 characters). It is logged, not unique.
-	LastRequestID string         `bson:"last_request_id,omitempty"`
-	RequestedAt   time.Time      `bson:"requested_at"`
-	CustomerIDs   []string       `bson:"customer_ids"`
-	CustomerData  map[string]any `bson:"customer_data,omitempty"`
+	LastRequestID string `bson:"last_request_id,omitempty"`
+	// RequestedAt is the caller's optional requested_at (audit only);
+	// ReceivedAt is when this service received the last request.
+	RequestedAt  time.Time      `bson:"requested_at"`
+	ReceivedAt   time.Time      `bson:"received_at"`
+	CustomerIDs  []string       `bson:"customer_ids"`
+	CustomerData map[string]any `bson:"customer_data,omitempty"`
 	// Image is the tag and the digest it resolved to at the last enqueue.
 	Image Image `bson:"image"`
 	// Options are the scope of the current attempt: the request's, or the union

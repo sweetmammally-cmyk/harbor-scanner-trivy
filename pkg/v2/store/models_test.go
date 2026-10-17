@@ -63,6 +63,7 @@ func TestScan_BSON(t *testing.T) {
 		ID:            "scan-1",
 		LastRequestID: "req-1",
 		RequestedAt:   at,
+		ReceivedAt:    at.Add(time.Second),
 		CustomerIDs:   []string{"cust-123"},
 		CustomerData:  map[string]any{"app_id": "app-9", "env": "prod"},
 		Image:         Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:abc", MediaType: "application/vnd.oci.image.index.v1+json"},
@@ -102,7 +103,7 @@ func TestScan_BSON(t *testing.T) {
 	}
 
 	t.Run("field names follow DEMAND section 10", func(t *testing.T) {
-		assert.Equal(t, sorted("_id", "last_request_id", "requested_at", "customer_ids", "customer_data", "image",
+		assert.Equal(t, sorted("_id", "last_request_id", "requested_at", "received_at", "customer_ids", "customer_data", "image",
 			"options", "reference", "state", "queued_at", "started_at", "finished_at", "queue_wait_ms", "scan_ms", "total_ms",
 			"worker", "lease_until", "attempt", "priority", "error", "failure_class", "result", "db", "confirmed_at"),
 			keysOf(t, done))

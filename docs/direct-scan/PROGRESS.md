@@ -6,10 +6,10 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 9 (API)
-- Last completed task: P8-7 (Phase 9 decisions recorded)
-- In progress: P9-1 (code committed; the v1 component test run is pending)
-- Next task: P9-2
-- Blockers / questions for the user: none
+- Last completed task: P9-2
+- In progress: P9-1 (code done; only the v1 component test run is missing)
+- Next task: P9-3
+- Blockers / questions for the user: `make test-component` cannot start its `redis` container because a container named `redis` already exists on the dev machine (`goharbor/redis-photon:v2.11.2`, exited, from a local Harbor compose install). The test uses that fixed name; remove or rename the old container (owner's call), then rerun.
 - Last updated: 2026-10-17
 
 ## Repo facts (filled in by Phase 0)
@@ -197,6 +197,18 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P9-2  POST /api/v2/scans
+- Status: done
+- What changed:
+  - `pkg/v2/api/validate.go`: `scanRequest` and `validate` (DEMAND 5.1): `request_id` pattern, `requested_at` RFC 3339 and at most 5 minutes ahead, image names by `registry.ValidateImage`, 1-100 `customer_ids` of 1-128 characters, `customer_data` an object of at most 64 KiB, platforms lowercased/deduplicated/sorted (1-20), severities uppercased/deduplicated/sorted (default CRITICAL, HIGH), `max_db_age` with `config.ParseDuration` between 1m and 30d (default `SCANNER_DB_MAX_AGE_DEFAULT`). `runner.MaxPlatforms` is 20.
+  - `pkg/v2/api/scans.go`: `createScan` in the decided order: decode/validate (400) -> readiness (503: stopping or schema not ready or no DB -> `not_ready`, MongoDB down -> `store_unavailable`) -> resolve (registry errors mapped; unknown errors 500 `internal` with the detail only logged) -> read the tag's document -> active scan: covered and same digest -> 200 with its state (also with `force`, document untouched), else 409 `scan_in_progress` `Retry-After: 5` -> enqueue: 202 `{scan_id, state, db}`, 429 `queue_full` `Retry-After: 10`, 409 when a racing request queued other work first, 200 when it queued the same work. A POST extends its own write deadline and has its own timeout (two registry tries plus four MongoDB calls). The `db` block: stored values when the tag has a result, else this instance's DB state (freshness against the request's `max_db_age`).
+  - `api.Deps` (queue, scans, reports, resolver, DB state, readiness and Trivy-version functions), wired in `pkg/v2/service`.
+  - `store.Scan.ReceivedAt` (`received_at`), written on insert and requeue.
+- Files: `pkg/v2/api/{handler,scans,scans_test,validate,validate_test,middleware_test}.go`, `pkg/v2/service/{service,service_test}.go`, `pkg/v2/store/{models,models_test}.go`, `pkg/v2/queue/queue.go`, `pkg/v2/runner/result.go`, `test/integration/apiv2/{main_test,post_test}.go`
+- Tests run: `go test -short -race ./...` -> ok; `go test -count=1 -race -tags=integration ./test/integration/apiv2/` -> ok; queue and store integration -> ok. Unit: every validation rule (20 rejections, normalization, defaults, limits accepted at 20 platforms and 30d); 400s and 503s come before any registry call; shutting down -> 503; registry error mapping without internal detail or paths. Integration (mongo:7, fake registry): 202 with the db block and stored normalized fields; a covered request while queued, also with `force`, gets 200 and leaves the document unchanged; an uncovered platform, a lower severity and a moved tag get 409 with `Retry-After: 5`; queue full 429 with `Retry-After: 10` while a covered request still joins; ten concurrent POSTs on two replicas give one document and exactly one 202.
+- Decisions / surprises: `make test-component` built the image (the build context had the P9-1 wiring) but failed before testing anything: Docker refused to create the test's `redis` container because a container with that name already exists (see Current state). Not a test failure of ours; not rerun.
+- Next: P9-3
 
 ### 2026-10-17  P9-1  Router, auth, HTTP hygiene, wiring
 - Status: partial (code done; the v1 component test run is pending, see the next entry)

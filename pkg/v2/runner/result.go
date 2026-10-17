@@ -12,7 +12,7 @@ import (
 )
 
 // MaxPlatforms is the most platforms one request may ask for.
-const MaxPlatforms = 50
+const MaxPlatforms = 20
 
 // Severities are Trivy's severities, the only values a request may use.
 var Severities = []string{"UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"}

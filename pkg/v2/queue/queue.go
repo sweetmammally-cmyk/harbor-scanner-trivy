@@ -157,6 +157,7 @@ func (q *Queue) requeue(ctx context.Context, scan store.Scan, existing store.Sca
 		{Key: "options", Value: scope},
 		{Key: "reference", Value: scan.Reference},
 		{Key: "requested_at", Value: scan.RequestedAt},
+		{Key: "received_at", Value: scan.ReceivedAt},
 		{Key: "customer_ids", Value: scan.CustomerIDs},
 		{Key: "queue_wait_ms", Value: 0},
 		{Key: "scan_ms", Value: 0},

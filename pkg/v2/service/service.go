@@ -14,6 +14,7 @@ import (
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/queue"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/registry"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/runner"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
@@ -42,6 +43,10 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 	client, err := store.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating the MongoDB client: %w", err)
+	}
+	registryClient, err := registry.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating the registry client: %w", err)
 	}
 	s := &Service{client: client, updaterDone: make(chan struct{}), poolDone: make(chan struct{})}
 
@@ -78,7 +83,17 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 	s.stopReaper = stopReaper
 	go q.RunReaper(reaperCtx, queue.ReapInterval)
 
-	s.handler = api.NewHandler(cfg)
+	s.handler = api.NewHandler(cfg, api.Deps{
+		Queue:        q,
+		Scans:        store.NewMongoScans(client),
+		Reports:      reports,
+		Registry:     registryClient,
+		DBState:      dbState,
+		StoreUp:      client.Up,
+		StoreReady:   client.Ready,
+		DBInstalled:  updater.DBInstalled,
+		TrivyVersion: scanner.Version,
+	})
 	slog.Info("v2 direct scan service started", slog.String("instance_id", cfg.InstanceID),
 		slog.Int("workers", cfg.QueueWorkers))
 	return s, nil

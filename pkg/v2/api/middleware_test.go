@@ -52,7 +52,7 @@ func echoHandler(t *testing.T, cfg config.Config, block chan struct{}) *Handler 
 	if cfg.MaxInflight == 0 {
 		cfg.MaxInflight = 32
 	}
-	h := NewHandler(cfg)
+	h := NewHandler(cfg, Deps{})
 	h.router.HandleFunc("/api/v2/echo/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if block != nil {
 			<-block

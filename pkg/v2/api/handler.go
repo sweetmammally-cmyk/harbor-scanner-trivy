@@ -2,17 +2,43 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sync/atomic"
 
 	"github.com/gorilla/mux"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/queue"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/registry"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
+
+// Resolver resolves a tag to its digest; registry.Client in the service.
+type Resolver interface {
+	Resolve(ctx context.Context, image registry.Image) (registry.Resolved, error)
+}
+
+// Deps are what the handler works with. The functions report readiness and
+// the Trivy version without calling MongoDB.
+type Deps struct {
+	Queue    *queue.Queue
+	Scans    store.ScanRepository
+	Reports  store.ReportStore
+	Registry Resolver
+	// DBState is this instance's DB state, from memory.
+	DBState      dbmgr.StateStore
+	StoreUp      func() bool
+	StoreReady   func() bool
+	DBInstalled  func() bool
+	TrivyVersion func() string
+}
 
 // Handler serves /api/v2.
 type Handler struct {
 	cfg      config.Config
+	deps     Deps
 	router   *mux.Router
 	chain    http.Handler
 	inflight chan struct{}
@@ -22,9 +48,10 @@ type Handler struct {
 
 // NewHandler returns the /api/v2 handler. Every request is logged and needs the
 // service token.
-func NewHandler(cfg config.Config) *Handler {
+func NewHandler(cfg config.Config, deps Deps) *Handler {
 	h := &Handler{
 		cfg:      cfg,
+		deps:     deps,
 		router:   mux.NewRouter(),
 		inflight: make(chan struct{}, cfg.MaxInflight),
 	}
@@ -34,6 +61,7 @@ func NewHandler(cfg config.Config) *Handler {
 	h.router.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, CodeInvalidRequest, "method not allowed", 0)
 	})
+	h.router.Methods(http.MethodPost).Path("/api/v2/scans").HandlerFunc(h.createScan)
 	h.chain = h.logRequests(h.authenticate(h.limitInflight(h.router)))
 	return h
 }

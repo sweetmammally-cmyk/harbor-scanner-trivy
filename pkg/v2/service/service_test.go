@@ -23,6 +23,7 @@ func TestStartStop(t *testing.T) {
 		InstanceID:                  "scanner-test",
 		MongoURI:                    "mongodb://127.0.0.1:1/?directConnection=true",
 		MongoDB:                     "scanner",
+		RegistryURL:                 "https://harbor.local",
 		MongoConnectTimeout:         200 * time.Millisecond,
 		MongoServerSelectionTimeout: 200 * time.Millisecond,
 		MongoOperationTimeout:       time.Second,
