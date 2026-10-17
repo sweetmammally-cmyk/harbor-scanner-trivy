@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -48,43 +49,58 @@ type dbView struct {
 // while MongoDB is down) and the other instances' from MongoDB, best effort.
 func (h *Handler) getDB(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
+	response := dbResponse{InstanceID: h.cfg.InstanceID}
+	var err error
+	response.DBs, err = h.localDBViews(r.Context(), now)
+	if err != nil {
+		h.writeStoreError(w, slog.Default(), err)
+		return
+	}
+	response.OtherInstances, response.OtherInstancesError = h.otherInstances(r.Context(), now)
+	writeJSON(w, http.StatusOK, response)
+}
+
+// localDBViews are this instance's DB states from memory: "db", and "java-db"
+// when Java sources are configured.
+func (h *Handler) localDBViews(ctx context.Context, now time.Time) ([]dbView, error) {
 	kinds := []string{"db"}
 	if len(h.cfg.JavaDBSources) > 0 {
 		kinds = append(kinds, "java-db")
 	}
-	response := dbResponse{InstanceID: h.cfg.InstanceID, DBs: []dbView{}, OtherInstances: []instanceView{}}
+	views := []dbView{}
 	for _, kind := range kinds {
-		state, err := h.deps.DBState.Get(r.Context(), kind)
+		state, err := h.deps.DBState.Get(ctx, kind)
 		if err != nil {
-			h.writeStoreError(w, slog.Default(), err)
-			return
+			return nil, err
 		}
-		response.DBs = append(response.DBs, h.newDBView(kind, state, now))
+		views = append(views, h.newDBView(kind, state, now))
 	}
+	return views, nil
+}
 
+// otherInstances reads the other instances' DB states from MongoDB, best
+// effort: while MongoDB is down it returns a short note instead.
+func (h *Handler) otherInstances(ctx context.Context, now time.Time) ([]instanceView, string) {
+	instances := []instanceView{}
 	if !h.deps.StoreUp() {
-		response.OtherInstancesError = "MongoDB is unavailable"
-		writeJSON(w, http.StatusOK, response)
-		return
+		return instances, "MongoDB is unavailable"
 	}
-	documents, err := h.deps.OtherDBStates(r.Context())
+	documents, err := h.deps.OtherDBStates(ctx)
 	if err != nil {
 		slog.Warn("reading other instances' DB states failed", slog.String("error", err.Error()))
-		response.OtherInstancesError = "MongoDB is unavailable"
-		writeJSON(w, http.StatusOK, response)
-		return
+		return instances, "MongoDB is unavailable"
 	}
 	for _, document := range documents {
 		view := h.newDBView(document.DB, document.DBState, now)
 		view.StateUpdatedAt = timeOrNil(document.UpdatedAt)
-		count := len(response.OtherInstances)
-		if count == 0 || response.OtherInstances[count-1].InstanceID != document.InstanceID {
-			response.OtherInstances = append(response.OtherInstances, instanceView{InstanceID: document.InstanceID})
+		count := len(instances)
+		if count == 0 || instances[count-1].InstanceID != document.InstanceID {
+			instances = append(instances, instanceView{InstanceID: document.InstanceID})
 			count++
 		}
-		response.OtherInstances[count-1].DBs = append(response.OtherInstances[count-1].DBs, view)
+		instances[count-1].DBs = append(instances[count-1].DBs, view)
 	}
-	writeJSON(w, http.StatusOK, response)
+	return instances, ""
 }
 
 func (h *Handler) newDBView(kind string, state dbmgr.DBState, now time.Time) dbView {

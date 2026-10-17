@@ -85,6 +85,9 @@ type Config struct {
 	QueueMaxAttempts int `env:"SCANNER_QUEUE_MAX_ATTEMPTS" envDefault:"3"`
 	// QueuePollInterval is how often idle workers look for work (with jitter).
 	QueuePollInterval time.Duration `env:"SCANNER_QUEUE_POLL_INTERVAL" envDefault:"2s"`
+	// HealthQueueStuckAfter: health is degraded when the oldest queued scan is
+	// older than this while workers run.
+	HealthQueueStuckAfter time.Duration `env:"SCANNER_HEALTH_QUEUE_STUCK_AFTER" envDefault:"10m"`
 	// ShutdownGrace is how long running scans may finish after SIGTERM.
 	ShutdownGrace  time.Duration `env:"SCANNER_SHUTDOWN_GRACE" envDefault:"30s"`
 	QueueMaxLength int           `env:"SCANNER_QUEUE_MAX_LENGTH" envDefault:"100"`

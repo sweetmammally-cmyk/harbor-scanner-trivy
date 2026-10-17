@@ -28,6 +28,7 @@ func setEnabled(t *testing.T) {
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	HealthQueueStuckAfter:       10 * time.Minute,
 	MaxInflight:                 32,
 	CacheDir:                    "/home/scanner/.cache/scanner-v2",
 	QueueLease:                  60 * time.Second,
@@ -240,6 +241,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_QUEUE_MAX_ATTEMPTS":             "5",
 				"SCANNER_QUEUE_POLL_INTERVAL":            "1s",
 				"SCANNER_SHUTDOWN_GRACE":                 "45s",
+				"SCANNER_HEALTH_QUEUE_STUCK_AFTER":       "5m",
 				"SCANNER_QUEUE_MAX_LENGTH":               "50",
 				"SCANNER_SCAN_TIMEOUT":                   "20m",
 				"SCANNER_SCAN_PLATFORM":                  "linux/arm64/v8",
@@ -292,6 +294,7 @@ func TestGetConfig(t *testing.T) {
 				QueueMaxAttempts:        5,
 				QueuePollInterval:       time.Second,
 				ShutdownGrace:           45 * time.Second,
+				HealthQueueStuckAfter:   5 * time.Minute,
 				QueueMaxLength:          50,
 				ScanTimeout:             20 * time.Minute,
 				ScanPlatform:            "linux/arm64/v8",

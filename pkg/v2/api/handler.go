@@ -38,6 +38,10 @@ type Deps struct {
 	// JavaDBInstalled is checked only when Java DB sources are configured.
 	JavaDBInstalled func() bool
 	TrivyVersion    func() string
+	// WorkersRunning, QueueStats and RecentScans feed the health check.
+	WorkersRunning func() int
+	QueueStats     func(ctx context.Context) (queue.Stats, error)
+	RecentScans    func() queue.Recent
 }
 
 // Handler serves /api/v2.
@@ -70,6 +74,7 @@ func NewHandler(cfg config.Config, deps Deps) *Handler {
 	h.router.Methods(http.MethodGet).Path("/api/v2/scans/{id}").HandlerFunc(h.getScan)
 	h.router.Methods(http.MethodGet).Path("/api/v2/scans").HandlerFunc(h.listScans)
 	h.router.Methods(http.MethodGet).Path("/api/v2/db").HandlerFunc(h.getDB)
+	h.router.Methods(http.MethodGet).Path("/api/v2/health").HandlerFunc(h.getHealth)
 	h.chain = h.logRequests(h.authenticate(h.limitInflight(h.router)))
 	return h
 }

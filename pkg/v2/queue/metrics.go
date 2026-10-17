@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -12,12 +13,69 @@ import (
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
 
+// RecentWindow is how many of this replica's last scans Recent covers.
+const RecentWindow = 20
+
+// statsCacheTTL is how long CachedStats reuses a Stats result, so health checks
+// and metric scrapes do not query MongoDB each time.
+const statsCacheTTL = 10 * time.Second
+
 // metrics are the queue's counters in this replica.
 type metrics struct {
 	claims         atomic.Int64
 	claimNanos     atomic.Int64
 	leaseLosses    atomic.Int64
 	reaperRequeues atomic.Int64
+
+	// recent holds the outcome of this replica's last scans (true = failed).
+	recentMu sync.Mutex
+	recent   []bool
+}
+
+// Recent counts the outcomes of this replica's last RecentWindow scans.
+type Recent struct {
+	Done   int
+	Failed int
+}
+
+func (m *metrics) scanFinished(failed bool) {
+	m.recentMu.Lock()
+	defer m.recentMu.Unlock()
+	m.recent = append(m.recent, failed)
+	if len(m.recent) > RecentWindow {
+		m.recent = m.recent[1:]
+	}
+}
+
+// Recent returns the outcomes of this replica's last RecentWindow scans.
+func (q *Queue) Recent() Recent {
+	q.metrics.recentMu.Lock()
+	defer q.metrics.recentMu.Unlock()
+	var recent Recent
+	for _, failed := range q.metrics.recent {
+		if failed {
+			recent.Failed++
+		} else {
+			recent.Done++
+		}
+	}
+	return recent
+}
+
+// CachedStats is Stats, reused for statsCacheTTL.
+func (q *Queue) CachedStats(ctx context.Context) (Stats, error) {
+	q.statsMu.Lock()
+	defer q.statsMu.Unlock()
+	if !q.statsAt.IsZero() && time.Since(q.statsAt) < statsCacheTTL {
+		return q.stats, nil
+	}
+	stats, err := q.Stats(ctx)
+	if err != nil {
+		return Stats{}, err
+	}
+	q.stats = stats
+	q.statsAt = time.Now()
+	return stats, nil
 }
 
 func (m *metrics) leaseLost() {

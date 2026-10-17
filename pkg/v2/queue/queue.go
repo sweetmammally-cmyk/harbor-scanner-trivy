@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -38,6 +39,11 @@ type Queue struct {
 	wake chan struct{}
 	// metrics are updated by the queue and read by the metrics endpoint.
 	metrics metrics
+
+	// The CachedStats cache.
+	statsMu sync.Mutex
+	stats   Stats
+	statsAt time.Time
 }
 
 // New returns the queue of this replica.

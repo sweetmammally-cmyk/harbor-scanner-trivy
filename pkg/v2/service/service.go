@@ -96,6 +96,9 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 		DBInstalled:     updater.DBInstalled,
 		JavaDBInstalled: updater.JavaDBInstalled,
 		TrivyVersion:    scanner.Version,
+		WorkersRunning:  pool.Running,
+		QueueStats:      q.CachedStats,
+		RecentScans:     q.Recent,
 	})
 	slog.Info("v2 direct scan service started", slog.String("instance_id", cfg.InstanceID),
 		slog.Int("workers", cfg.QueueWorkers))

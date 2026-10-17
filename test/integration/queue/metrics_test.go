@@ -54,3 +54,23 @@ func TestStats(t *testing.T) {
 	assert.EqualValues(t, 2, stats.Depth)
 	assert.EqualValues(t, 1, stats.ReaperRequeues)
 }
+
+func TestCachedStats(t *testing.T) {
+	ctx := context.Background()
+	q, _, _ := newQueue(t, nil)
+	_, _, err := q.Enqueue(ctx, newScan("", "sha256:a"))
+	require.NoError(t, err)
+
+	first, err := q.CachedStats(ctx)
+	require.NoError(t, err)
+	_, _, err = q.Enqueue(ctx, newScan("", "sha256:b"))
+	require.NoError(t, err)
+	cached, err := q.CachedStats(ctx)
+	require.NoError(t, err)
+
+	assert.EqualValues(t, 1, first.Depth)
+	assert.EqualValues(t, 1, cached.Depth, "reused for 10s: no MongoDB query")
+	fresh, err := q.Stats(ctx)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, fresh.Depth)
+}

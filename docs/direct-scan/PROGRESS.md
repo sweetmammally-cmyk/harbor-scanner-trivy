@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 10 (health, logging, metrics); Phase 9 complete except the v1 component test run
-- Last completed task: P10-2
+- Last completed task: P10-1
 - In progress: none
-- Next task: P10-1
+- Next task: P10-4
 - Blockers / questions for the user: the v1 component tests wait for the owner to rename the local Harbor container `redis` to `redis-harbor-local` (still named `redis` at the last check); P9-1 and P9-8 stay `[~]` until then.
 - Last updated: 2026-10-17
 
@@ -205,6 +205,17 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P10-1  GET /api/v2/health
+- Status: done
+- What changed:
+  - `pkg/v2/api/health.go`: `{status, instance_id, checks, dbs, queue, recent_scans, other_instances, other_instances_error?}`; 200 for ok/degraded, 503 for unhealthy. Checks: `ready` (unhealthy with the `NotReady` reasons), `workers` (unhealthy with none running), one per DB kind (degraded for degraded mode, `newer_available`, stale against `SCANNER_DB_MAX_AGE_DEFAULT`, or older than `SCANNER_DB_AGE_WARN`), `queue` (degraded when the oldest queued scan is older than `SCANNER_HEALTH_QUEUE_STUCK_AFTER` while workers run; left out while MongoDB is down), `recent_scans` (degraded above 50% failures with at least 10 of the last 20 scans). Details are fixed texts with numbers and durations only. `getDB` and health share `localDBViews` and `otherInstances`.
+  - `pkg/v2/queue`: `Pool.Running()`; `Queue.Recent()` (in-memory window of this replica's last 20 completed or failed scans, recorded after the write succeeded; lease losses and releases do not count); `Queue.CachedStats` (Stats reused for 10s; P10-4 uses it too).
+  - `SCANNER_HEALTH_QUEUE_STUCK_AFTER` (10m).
+- Files: `pkg/v2/api/{health,health_test,db,handler}.go`, `pkg/v2/queue/{metrics,metrics_test,queue,worker}.go`, `pkg/v2/config/{config,config_test}.go`, `pkg/v2/service/service.go`, `test/integration/queue/metrics_test.go`, `test/integration/apiv2/fullstack_test.go`
+- Tests run: `go test -short -race ./...` -> ok; queue and apiv2 integration -> ok. Cases: ok with queue figures; each degraded rule (degraded mode with a proxied source, newer available, stale, too old, stuck queue, 6 of 10 failed) gives 200 degraded on its own check and ok again when cleared, never with the proxy user or password in the body; 8 failures out of 9 scans stay ok; no workers -> 503 unhealthy; MongoDB down -> 503 unhealthy without queue figures, then ok again; no token -> 401; the recent window keeps the last 20; `CachedStats` returns the cached depth within 10s; full stack after one success and one failure: degraded (unreachable DB source), recent 1/1, one worker, no password or path in the body.
+- Decisions / surprises: none.
+- Next: P10-4
 
 ### 2026-10-17  P10-2  Readiness and liveness
 - Status: done

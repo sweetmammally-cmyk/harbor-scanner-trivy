@@ -295,6 +295,15 @@ func TestFullStack(t *testing.T) {
 		assert.Equal(t, map[string]any{"class": "trivy_exit_error", "message": "Trivy could not scan the image"}, response["error"])
 		assert.Equal(t, "sha256:1111", response["previous"].(map[string]any)["digest"])
 		assert.NotContains(t, w.Body.String(), "/home/scanner")
+
+		w = s.do(http.MethodGet, "/api/v2/health", "")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		health := decode(t, w)
+		assert.Equal(t, "degraded", health["status"], "the DB source is unreachable: degraded mode")
+		assert.Equal(t, map[string]any{"window": 20.0, "done": 1.0, "failed": 1.0}, health["recent_scans"])
+		assert.Equal(t, 1.0, health["queue"].(map[string]any)["workers"])
+		assert.NotContains(t, w.Body.String(), registryPassword)
+		assert.NotContains(t, w.Body.String(), "/home/scanner")
 	})
 
 	t.Run("not ready without a DB", func(t *testing.T) {

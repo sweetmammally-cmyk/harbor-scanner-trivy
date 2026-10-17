@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -40,6 +41,8 @@ type Pool struct {
 	name string
 	// completionRetry is how long a completion write is retried. Tests shorten it.
 	completionRetry time.Duration
+	// running counts the worker goroutines that are running.
+	running atomic.Int32
 	// jobs is the parent context of running scans; it is cancelled when the
 	// shutdown grace period is over, which kills the scans.
 	jobs       context.Context
@@ -71,8 +74,10 @@ func (p *Pool) Run(ctx context.Context) {
 	for i := 0; i < p.queue.cfg.QueueWorkers; i++ {
 		worker := fmt.Sprintf("%s/worker-%d", p.name, i)
 		wg.Add(1)
+		p.running.Add(1)
 		go func() {
 			defer wg.Done()
+			defer p.running.Add(-1)
 			p.work(ctx, worker)
 		}()
 	}
@@ -95,6 +100,11 @@ func (p *Pool) Run(ctx context.Context) {
 		<-stopped
 	}
 	p.cancelJobs()
+}
+
+// Running is the number of workers running (0 before Run and after it returns).
+func (p *Pool) Running() int {
+	return int(p.running.Load())
 }
 
 // work claims and runs scans until ctx ends. It does not claim while the
@@ -201,6 +211,9 @@ func (p *Pool) process(scan store.Scan, worker string) {
 		}
 		err = p.retry(func() error { return p.queue.Fail(context.Background(), finished, class, scanErr.Error()) })
 		p.logWriteError(logger, err)
+		if err == nil {
+			p.queue.metrics.scanFinished(true)
+		}
 		return
 	}
 
@@ -210,6 +223,9 @@ func (p *Pool) process(scan store.Scan, worker string) {
 	}
 	err = store.SaveWithReport(context.Background(), p.reports, finished, report, save)
 	p.logWriteError(logger, err)
+	if err == nil {
+		p.queue.metrics.scanFinished(false)
+	}
 }
 
 // retry runs a completion write until it succeeds, the lease is lost, or
