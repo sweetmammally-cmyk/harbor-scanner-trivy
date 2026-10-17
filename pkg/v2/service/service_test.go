@@ -46,9 +46,17 @@ func TestStartStop(t *testing.T) {
 	s, err := Start(cfg, "/nonexistent/trivy")
 	require.NoError(t, err)
 
-	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v2/scans", nil))
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	v1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	routes := s.Routes(v1)
+	get := func(path string) int {
+		w := httptest.NewRecorder()
+		routes.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		return w.Code
+	}
+	assert.Equal(t, http.StatusUnauthorized, get("/api/v2/scans"), "v2 needs the token")
+	assert.Equal(t, http.StatusServiceUnavailable, get("/probe/ready"), "MongoDB down, no DB, no trivy: not ready")
+	assert.Equal(t, http.StatusTeapot, get("/probe/healthy"), "liveness is v1's, up while MongoDB is down")
+	assert.Equal(t, http.StatusTeapot, get("/api/v1/metadata"), "v1 routes are unchanged")
 
 	stopped := make(chan struct{})
 	go func() {

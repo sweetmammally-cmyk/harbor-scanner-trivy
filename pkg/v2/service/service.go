@@ -84,17 +84,18 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 	go q.RunReaper(reaperCtx, queue.ReapInterval)
 
 	s.handler = api.NewHandler(cfg, api.Deps{
-		Queue:         q,
-		Scans:         store.NewMongoScans(client),
-		Lister:        store.NewMongoScans(client),
-		Reports:       reports,
-		Registry:      registryClient,
-		DBState:       dbState,
-		OtherDBStates: dbState.Others,
-		StoreUp:       client.Up,
-		StoreReady:    client.Ready,
-		DBInstalled:   updater.DBInstalled,
-		TrivyVersion:  scanner.Version,
+		Queue:           q,
+		Scans:           store.NewMongoScans(client),
+		Lister:          store.NewMongoScans(client),
+		Reports:         reports,
+		Registry:        registryClient,
+		DBState:         dbState,
+		OtherDBStates:   dbState.Others,
+		StoreUp:         client.Up,
+		StoreReady:      client.Ready,
+		DBInstalled:     updater.DBInstalled,
+		JavaDBInstalled: updater.JavaDBInstalled,
+		TrivyVersion:    scanner.Version,
 	})
 	slog.Info("v2 direct scan service started", slog.String("instance_id", cfg.InstanceID),
 		slog.Int("workers", cfg.QueueWorkers))
@@ -104,6 +105,17 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 // Handler serves /api/v2/.
 func (s *Service) Handler() http.Handler {
 	return s.handler
+}
+
+// Routes puts the v2 service in front of the Harbor adapter's handler v1:
+// /api/v2/ goes to v2, /probe/ready also needs v2 to be ready, and everything
+// else (liveness included) is v1's, unchanged.
+func (s *Service) Routes(v1 http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/api/v2/", s.handler)
+	mux.Handle("/probe/ready", s.handler.ReadyProbe(v1))
+	mux.Handle("/", v1)
+	return mux
 }
 
 // StopAccepting makes the API not ready. Call it before the HTTP server's Shutdown.

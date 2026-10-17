@@ -339,8 +339,16 @@ func TestFullStack(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(s.dir, "block"), nil, 0o644))
 		require.Equal(t, http.StatusAccepted, s.postReady(t, body("v1", `"alpine"`, "")).Code)
 		s.waitState(t, scanID("v1"), "scanning")
+		v1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+		ready := func() int {
+			w := httptest.NewRecorder()
+			s.service.Routes(v1).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/probe/ready", nil))
+			return w.Code
+		}
+		assert.Equal(t, http.StatusOK, ready(), "MongoDB, schema, seed DB and trivy are there; degraded DB mode is fine")
 
 		s.service.StopAccepting()
+		assert.Equal(t, http.StatusServiceUnavailable, ready())
 		w := s.do(http.MethodPost, "/api/v2/scans", body("v2", `"alpine"`, ""))
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 		assert.Equal(t, "not_ready", errorCode(t, w))

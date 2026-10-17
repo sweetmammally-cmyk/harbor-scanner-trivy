@@ -5,12 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 9 (API), complete except one blocked test run
-- Phase 9 status: all code and tests done; P9-1 and P9-8 stay `[~]` only for the v1 component test run (blocked, see below)
-- Last completed task: P9-8 (except the component run)
+- Phase: 10 (health, logging, metrics); Phase 9 complete except the v1 component test run
+- Last completed task: P10-2
 - In progress: none
-- Next task: rerun `make test-component` once the old `redis` container is out of the way, then Phase 10 (P10-1)
-- Blockers / questions for the user: `make test-component` cannot start its `redis` container because a container named `redis` already exists on the dev machine (`goharbor/redis-photon:v2.11.2`, exited, from a local Harbor compose install). The test uses that fixed name; remove or rename the old container (owner's call), then rerun.
+- Next task: P10-1
+- Blockers / questions for the user: the v1 component tests wait for the owner to rename the local Harbor container `redis` to `redis-harbor-local` (still named `redis` at the last check); P9-1 and P9-8 stay `[~]` until then.
 - Last updated: 2026-10-17
 
 ## Repo facts (filled in by Phase 0)
@@ -206,6 +205,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P10-2  Readiness and liveness
+- Status: done
+- What changed: `api.Handler.NotReady()` lists why v2 is not ready: shutting down, MongoDB down (ping flag), schema not ready, no Trivy DB, no Java DB while `SCANNER_JAVA_DB_SOURCES` is set, trivy binary missing; degraded DB mode is not a reason. `ReadyProbe(next)` answers 503 `not_ready` with the reasons, otherwise asks v1's probe. New `service.Routes(v1)` builds the mux that `main.go` now uses: `/api/v2/` -> v2, `/probe/ready` -> v2 readiness then v1, everything else (liveness `/probe/healthy` included) -> v1 unchanged. `dbmgr.Updater.JavaDBInstalled()`. With v2 disabled `main.go` serves v1 alone as before.
+- Files: `pkg/v2/api/{ready,ready_test,handler}.go`, `pkg/v2/service/{service,service_test}.go`, `pkg/v2/dbmgr/updater.go`, `cmd/scanner-trivy/main.go`, `test/integration/apiv2/fullstack_test.go`
+- Tests run: `go test -short -race ./...` -> ok; apiv2 integration -> ok. Cases: ready without a token; degraded with newer available stays ready; each of the five conditions makes it 503 with one reason and ready again when it clears; no Java sources -> no Java DB needed; shutting down -> 503. Service with MongoDB unreachable: readiness 503, liveness and v1 routes answered by v1, v2 needs the token. Full stack: ready while the DB updater is degraded, 503 after `StopAccepting`.
+- Decisions / surprises: none.
+- Next: P10-1
 
 ### 2026-10-17  P9-1  too_many_requests for the in-flight cap
 - Status: done (follow-up to P9-1, owner decision)

@@ -35,7 +35,9 @@ type Deps struct {
 	StoreUp       func() bool
 	StoreReady    func() bool
 	DBInstalled   func() bool
-	TrivyVersion  func() string
+	// JavaDBInstalled is checked only when Java DB sources are configured.
+	JavaDBInstalled func() bool
+	TrivyVersion    func() string
 }
 
 // Handler serves /api/v2.

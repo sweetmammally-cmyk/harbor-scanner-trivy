@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -85,10 +84,7 @@ func run(ctx context.Context, info etc.BuildInfo) error {
 		if err != nil {
 			return fmt.Errorf("starting the v2 service: %w", err)
 		}
-		mux := http.NewServeMux()
-		mux.Handle("/api/v2/", v2.Handler())
-		mux.Handle("/", apiHandler)
-		apiHandler = mux
+		apiHandler = v2.Routes(apiHandler)
 	}
 
 	apiServer, err := api.NewServer(config.API, apiHandler)
