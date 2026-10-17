@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 9 (API)
-- Last completed task: P9-6
+- Last completed task: P9-7
 - In progress: P9-1 (code done; only the v1 component test run is missing)
-- Next task: P9-7
+- Next task: P9-8
 - Blockers / questions for the user: `make test-component` cannot start its `redis` container because a container named `redis` already exists on the dev machine (`goharbor/redis-photon:v2.11.2`, exited, from a local Harbor compose install). The test uses that fixed name; remove or rename the old container (owner's call), then rerun.
 - Last updated: 2026-10-17
 
@@ -197,6 +197,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P9-7  db block in responses
+- Status: done
+- What changed: no new code; the block was built with P9-2 (`Handler.dbBlock`), P9-3 (renewal stores `db.freshness` for the hit's `max_db_age`) and P8-7 (the worker stores the freshness from the on-demand refresh at scan start). This task adds the tests that pin the rules: stored `updated_at`, `confirmed_at` and `freshness` are returned unchanged (never recomputed on read), `last_upstream_check_at` is this instance's, and a tag without a result shows the local DB state with freshness against the request's `max_db_age` (or the default).
+- Files: `pkg/v2/api/dbblock_test.go`, `test/integration/apiv2/dbblock_test.go`
+- Tests run: `go test -short -race ./pkg/v2/api/` -> ok; `go test -count=1 -tags=integration -run TestDBBlock ./test/integration/apiv2/` -> ok. Cases: a stored `stale` stays `stale` on GET while the local DB is fresh; hits with `max_db_age` 30m and 3h answer and store `stale` and `ok` (local DB confirmed 1h ago); a first POST shows the local DB `updated_at`, no `confirmed_at`, and `stale` for 30m.
+- Decisions / surprises: none.
+- Next: P9-8
 
 ### 2026-10-17  P9-6  GET /api/v2/db
 - Status: done
