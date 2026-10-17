@@ -88,7 +88,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P9-5 `GET /api/v2/scans`: filters, immutable `created_at`, keyset pagination, projection; indexes (schema version bump); explain test; stable pagination while tags are inserted
 - [x] P9-6 `GET /api/v2/db`: this instance's in-memory state per DB kind (works while MongoDB is down), sources redacted, other instances from MongoDB best effort
 - [x] P9-7 `db` block in responses (stored values, local DB state while a tag has no result)
-- [ ] P9-8 Handler tests with fakes and a full-stack integration test (mongo:7, fake registry, fake trivy) covering DEMAND 5 and 6; v1 component tests
+- [~] P9-8 (done except the v1 component tests, blocked like P9-1) Handler tests with fakes and a full-stack integration test (mongo:7, fake registry, fake trivy) covering DEMAND 5 and 6; v1 component tests
 
 ## Phase 10: Health, logging, metrics
 - [ ] P10-1 `GET /api/v2/health` computed from stored data (includes `db_age`; DB information for every instance)

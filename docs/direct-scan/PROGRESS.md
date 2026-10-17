@@ -5,10 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 9 (API)
-- Last completed task: P9-7
-- In progress: P9-1 (code done; only the v1 component test run is missing)
-- Next task: P9-8
+- Phase: 9 (API), complete except one blocked test run
+- Phase 9 status: all code and tests done; P9-1 and P9-8 stay `[~]` only for the v1 component test run (blocked, see below)
+- Last completed task: P9-8 (except the component run)
+- In progress: none
+- Next task: rerun `make test-component` once the old `redis` container is out of the way, then Phase 10 (P10-1)
 - Blockers / questions for the user: `make test-component` cannot start its `redis` container because a container named `redis` already exists on the dev machine (`goharbor/redis-photon:v2.11.2`, exited, from a local Harbor compose install). The test uses that fixed name; remove or rename the old container (owner's call), then rerun.
 - Last updated: 2026-10-17
 
@@ -197,6 +198,20 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P9-8  API tests: handlers with fakes and the full stack
+- Status: partial (everything except the v1 component test run, which is blocked as in P9-1)
+- What changed: handler unit tests (fakes for the registry, readiness and DB state) and the MongoDB-backed handler tests were added with each task (P9-1 to P9-7). New `test/integration/apiv2/fullstack_test.go` starts the real `service.Start` on mongo:7 with an `httptest` registry (HEAD with `Docker-Content-Digest`, 404 for unknown tags, plain http so the WARN path and `--insecure` are used), a seed DB (the configured source is unreachable, so the updater is degraded but a DB is installed), and a fake `trivy` script that writes the real Trivy 0.74.0 fixture, counts its runs, can block on a file and can fail. Cases:
+  - POST -> queued -> scanning (blocked Trivy) -> done with timings and the digest; while scanning, a covered request gets 200 and an uncovered one 409; then a narrower request is a hit (critical only, `confirmed_at` renewed, Trivy not started: AC2), a new tag with the same digest is a copy hit without Trivy (AC5), `force` (AC4) and a broader severity (AC13) start Trivy again.
+  - Eight concurrent POSTs for a new tag while another scan runs: exactly one 202 and one Trivy run for that tag; queue full -> 429.
+  - A forced rescan that fails: GET shows `failed`, the class with its fixed message, the previous result, and no path from stderr.
+  - No seed DB: once MongoDB is up, POST answers 503 `not_ready`; `GET /api/v2/db` still answers.
+  - Whole stack: missing and wrong tokens 401, an unknown field 400, a 2 MiB body 413, an unknown tag 404 `image_not_found`.
+  - Graceful shutdown: with a scan running, `StopAccepting` makes POST 503 `not_ready`; `Stop` returns within the grace plus a little, and the scan is back in `queued` with attempt 0 and no worker; the logs have the request lines and "scan released at shutdown", and contain neither the registry password nor the service token.
+- Files: `test/integration/apiv2/{fullstack_test,main_test}.go`
+- Tests run: `go vet ./...` and with tags -> ok; `go test -short -race ./...` -> ok; `go test -count=1 -tags=integration ./test/integration/...` -> ok (api v1, apiv2, redis, queue, store); `go test -count=3 -race -tags=integration ./test/integration/apiv2/` -> ok. `make test-component`: not run again (blocked, see Current state).
+- Decisions / surprises: none.
+- Next: rerun the component tests when unblocked; Phase 10
 
 ### 2026-10-17  P9-7  db block in responses
 - Status: done

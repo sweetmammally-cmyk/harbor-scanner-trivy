@@ -118,17 +118,17 @@ func newReplica(t *testing.T, cfg config.Config, client *store.Client) *env {
 		Metadata: dbmgr.Metadata{Version: 2, UpdatedAt: installed.Add(-time.Hour)},
 	}))
 	e.handler = api.NewHandler(cfg, api.Deps{
-		Queue:        e.queue,
-		Scans:        store.NewMongoScans(client),
-		Lister:       store.NewMongoScans(client),
-		Reports:      e.reports,
-		Registry:     e.registry,
+		Queue:         e.queue,
+		Scans:         store.NewMongoScans(client),
+		Lister:        store.NewMongoScans(client),
+		Reports:       e.reports,
+		Registry:      e.registry,
 		DBState:       e.dbState,
 		OtherDBStates: store.NewDBStateStore(client, "scanner-1", t.TempDir()).Others,
-		StoreUp:      func() bool { return true },
-		StoreReady:   func() bool { return true },
-		DBInstalled:  func() bool { return true },
-		TrivyVersion: func() string { return "0.74.0" },
+		StoreUp:       func() bool { return true },
+		StoreReady:    func() bool { return true },
+		DBInstalled:   func() bool { return true },
+		TrivyVersion:  func() string { return "0.74.0" },
 	})
 	return e
 }
