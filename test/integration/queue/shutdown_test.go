@@ -45,6 +45,8 @@ func TestShutdown(t *testing.T) {
 		scanner := &fakeScanner{scan: func(ctx context.Context, scan store.Scan) (store.Scan, bson.M, error) {
 			close(started)
 			time.Sleep(300 * time.Millisecond)
+			scan.Result = &store.ScanResult{Digest: scan.Image.Digest}
+			scan.DB = &store.ScanDB{}
 			return scan, bson.M{"findings": bson.A{}}, nil
 		}}
 		scan, _, err := q.Enqueue(ctx, newScan("", "sha256:a"))
@@ -66,7 +68,9 @@ func TestShutdown(t *testing.T) {
 			<-ctx.Done() // like Trivy, killed when the context ends
 			return scan, nil, ctx.Err()
 		}}
-		scan, _, err := q.Enqueue(ctx, newScan("req-1", "sha256:a"))
+		request := newScan("", "sha256:a")
+		request.LastRequestID = "req-1"
+		scan, _, err := q.Enqueue(ctx, request)
 		require.NoError(t, err)
 		stop := startPool(q, scanner)
 		<-started
@@ -78,8 +82,7 @@ func TestShutdown(t *testing.T) {
 		doc := rawScan(t, client, scan.ID)
 		assert.Equal(t, "queued", doc["state"], "back in the queue at once, no lease expiry needed")
 		assert.EqualValues(t, 0, doc["attempt"], "the attempt is not counted")
-		assert.Equal(t, "req-1", doc["request_id"])
-		assert.NotEmpty(t, doc["active_key"])
+		assert.Equal(t, "req-1", doc["last_request_id"])
 		for _, field := range []string{"worker", "lease_until", "started_at", "failure_class", "finished_at"} {
 			assert.NotContains(t, doc, field)
 		}

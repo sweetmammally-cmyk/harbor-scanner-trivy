@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -24,42 +26,35 @@ const (
 	ScanFailed   = "failed"
 )
 
-// Scan is a document of the scans collection. It is also the queue's job record.
-// Times that are not known yet are nil, so they are absent from the document.
+// ScanID is the _id of an image tag's scan document, and the scan_id of the
+// API: the lowercase hex sha256 of "<repository>/<name>:<tag>". There is one
+// document per tag; a new scan of the tag overwrites the previous result.
+func ScanID(image Image) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(image.Repository+"/"+image.Name+":"+image.Tag)))
+}
+
+// Scan is a document of the scans collection: the current state of one image
+// tag (see ScanID). It is also the queue's job record. The state, options,
+// timings and queue fields describe the current attempt; Result, DB and
+// ConfirmedAt describe the last successful scan and are replaced only when a new
+// scan succeeds (or a cache hit renews them). Times that are not known yet are
+// nil, so they are absent from the document.
 type Scan struct {
 	ID string `bson:"_id"`
-	// RequestID is omitted when empty, so scans without one do not collide on the
-	// partial unique index.
-	RequestID    string         `bson:"request_id,omitempty"`
-	RequestedAt  time.Time      `bson:"requested_at"`
-	CustomerIDs  []string       `bson:"customer_ids"`
-	CustomerData map[string]any `bson:"customer_data,omitempty"`
-	Image        Image          `bson:"image"`
-	Options      ScanOptions    `bson:"options"`
+	// LastRequestID is the caller's optional correlation id of the last request
+	// (1-128 characters). It is logged, not unique.
+	LastRequestID string         `bson:"last_request_id,omitempty"`
+	RequestedAt   time.Time      `bson:"requested_at"`
+	CustomerIDs   []string       `bson:"customer_ids"`
+	CustomerData  map[string]any `bson:"customer_data,omitempty"`
+	// Image is the tag and the digest it resolved to at the last enqueue.
+	Image Image `bson:"image"`
+	// Options are the scope of the current attempt: the request's, or the union
+	// with the stored result's scope when the digest is the same.
+	Options ScanOptions `bson:"options"`
 	// Reference is what the scan runner scans: host/repository/name@digest.
 	Reference string `bson:"reference"`
-	// ScannedPlatform is the platform scanned in a multi-platform image
-	// (SCANNER_SCAN_PLATFORM); part of the cache and dedupe keys.
-	ScannedPlatform string    `bson:"scanned_platform"`
-	State           string    `bson:"state"`
-	Trivy           TrivyInfo `bson:"trivy"`
-
-	// Platforms are all result types found in the image. PlatformsFound and
-	// PlatformsNotFound split the requested ones (Options.Platforms) by whether the
-	// image has them: a requested platform that is not there is not a clean result.
-	Platforms         []string `bson:"platforms"`
-	PlatformsFound    []string `bson:"platforms_found,omitempty"`
-	PlatformsNotFound []string `bson:"platforms_not_found,omitempty"`
-	HasMorePlatforms  bool     `bson:"has_more_platforms"`
-	// Summary counts the findings of the requested platforms by lowercase severity.
-	Summary map[string]int `bson:"summary,omitempty"`
-	// Truncated is set when more findings were found than SCANNER_SCAN_MAX_FINDINGS;
-	// the summary counts stay complete.
-	Truncated bool `bson:"truncated,omitempty"`
-	// Report holds the stored findings; its shape is set by the scan runner (P7).
-	// It is empty when the report is too large and stored in GridFS instead.
-	Report         bson.M         `bson:"report,omitempty"`
-	ReportGridFSID *bson.ObjectID `bson:"report_gridfs_id,omitempty"`
+	State     string `bson:"state"`
 
 	QueuedAt    time.Time  `bson:"queued_at"`
 	StartedAt   *time.Time `bson:"started_at,omitempty"`
@@ -70,22 +65,59 @@ type Scan struct {
 
 	Worker     string     `bson:"worker,omitempty"`
 	LeaseUntil *time.Time `bson:"lease_until,omitempty"`
-	// Attempt counts the claims of the scan; it fences the worker's writes.
+	// Attempt counts the claims of the current attempt; it fences the worker's writes.
 	Attempt int `bson:"attempt"`
-	// ActiveKey is set while the scan is queued or scanning (see queue.ActiveKey);
-	// a unique partial index makes identical work share one scan.
-	ActiveKey string `bson:"active_key,omitempty"`
-	// PriorRequestID keeps the request_id of a failed scan, so a retry with the
-	// same request_id creates a new scan.
-	PriorRequestID string `bson:"prior_request_id,omitempty"`
 	// Priority is reserved for queue priorities, which are deferred (DEMAND section 14).
-	Priority *int   `bson:"priority,omitempty"`
-	Error    string `bson:"error,omitempty"`
-	// FailureClass is set on a failed scan (for example trivy_timeout).
+	Priority *int `bson:"priority,omitempty"`
+	// Error and FailureClass are set when the current attempt failed (for
+	// example trivy_timeout). The last good result stays in place.
+	Error        string `bson:"error,omitempty"`
 	FailureClass string `bson:"failure_class,omitempty"`
+
+	// Result is the last successful scan; nil until the first one.
+	Result *ScanResult `bson:"result,omitempty"`
+	// DB is the DB the result's findings come from, with its freshness against
+	// the max_db_age of the request that produced or last renewed the result.
+	DB *ScanDB `bson:"db,omitempty"`
+	// ConfirmedAt is when the result was produced or last renewed by a cache hit.
+	ConfirmedAt *time.Time `bson:"confirmed_at,omitempty"`
 }
 
-// Image is the scanned image. Digest is the cache key.
+// ScanResult is the last successful scan of a tag.
+type ScanResult struct {
+	// Digest is the image digest that was scanned (the tag may have moved since).
+	Digest string `bson:"digest"`
+	// Platforms and Severity are the scope that was scanned; a request is covered
+	// when they contain all of its platforms and severities.
+	Platforms       []string `bson:"platforms"`
+	Severity        []string `bson:"severity"`
+	ScannedPlatform string   `bson:"scanned_platform"`
+	TrivyVersion    string   `bson:"trivy_version"`
+	// ImagePlatformTypes are all result types found in the image, scanned or not.
+	ImagePlatformTypes []string `bson:"image_platform_types"`
+	// Summary counts the findings of the scanned platforms by lowercase severity,
+	// at every severity; SummaryByPlatform splits it by platform (only the
+	// scanned platforms that the image has).
+	Summary           map[string]int            `bson:"summary"`
+	SummaryByPlatform map[string]map[string]int `bson:"summary_by_platform"`
+	// Truncated is set when more findings were found than SCANNER_SCAN_MAX_FINDINGS;
+	// the summary counts stay complete.
+	Truncated bool `bson:"truncated,omitempty"`
+	// Report holds the findings ({"findings": [...]}). It is empty when the
+	// report is too large and stored in GridFS instead.
+	Report         bson.M         `bson:"report,omitempty"`
+	ReportGridFSID *bson.ObjectID `bson:"report_gridfs_id,omitempty"`
+}
+
+// ScanDB is the DB block of a scan document.
+type ScanDB struct {
+	UpdatedAt      time.Time `bson:"updated_at"`
+	ManifestDigest string    `bson:"manifest_digest"`
+	// Freshness is dbmgr.FreshnessOK or dbmgr.FreshnessStale.
+	Freshness string `bson:"freshness"`
+}
+
+// Image is the scanned image tag.
 type Image struct {
 	Repository string `bson:"repository"`
 	Name       string `bson:"name"`
@@ -96,19 +128,13 @@ type Image struct {
 	MediaType string `bson:"media_type,omitempty"`
 }
 
-// ScanOptions are what the request asked for.
+// ScanOptions are the scope of a scan.
 type ScanOptions struct {
 	Platforms []string `bson:"platforms"`
 	Severity  []string `bson:"severity"`
-	// MaxDBAge is the request's max_db_age, for the on-demand DB refresh.
+	// MaxDBAge is the request's max_db_age, for the on-demand DB refresh and the
+	// stored freshness.
 	MaxDBAge time.Duration `bson:"max_db_age,omitempty"`
-}
-
-// TrivyInfo records the Trivy and DB versions a scan used.
-type TrivyInfo struct {
-	Version          string    `bson:"version"`
-	DBUpdatedAt      time.Time `bson:"db_updated_at"`
-	DBManifestDigest string    `bson:"db_manifest_digest"`
 }
 
 // Platform is a document of the platforms collection: one per Trivy result type

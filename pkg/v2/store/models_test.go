@@ -43,33 +43,32 @@ func sorted(keys ...string) []string {
 // BSON stores times in milliseconds and UTC.
 var at = time.Date(2026, 10, 15, 10, 0, 0, 123000000, time.UTC)
 
+func TestScanID(t *testing.T) {
+	id := ScanID(Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:ignored"})
+
+	// echo -n "customer-123/app:v1.2.0" | sha256sum
+	assert.Equal(t, "d14d146c132c1135daaa524162a756801961683ac87eb127b68d121a96b1660b", id)
+	assert.Equal(t, id, ScanID(Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:other"}),
+		"the digest is not part of the id: one document per tag")
+	assert.NotEqual(t, id, ScanID(Image{Repository: "customer-123", Name: "app", Tag: "v1.2.1"}))
+	assert.Regexp(t, "^[0-9a-f]{64}$", id)
+}
+
 func TestScan_BSON(t *testing.T) {
 	started := at.Add(time.Second)
 	finished := at.Add(5 * time.Second)
 	gridFSID := bson.NewObjectID()
+	priority := 1
 	done := Scan{
-		ID:              "scan-1",
-		RequestID:       "req-1",
-		RequestedAt:     at,
-		CustomerIDs:     []string{"cust-123"},
-		CustomerData:    map[string]any{"app_id": "app-9", "env": "prod"},
-		Image:           Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:abc", MediaType: "application/vnd.oci.image.index.v1+json"},
-		Options:         ScanOptions{Platforms: []string{"npm", "jar"}, Severity: []string{"HIGH", "CRITICAL"}},
-		ScannedPlatform: "linux/amd64",
-		Reference:       "harbor.local/customer-123/app@sha256:abc",
-		Attempt:         1,
-		PriorRequestID:  "req-0",
-		State:           ScanDone,
-		Trivy:           TrivyInfo{Version: "0.74.0", DBUpdatedAt: at.Add(-time.Hour), DBManifestDigest: "sha256:db"},
-
-		Platforms:         []string{"npm", "debian"},
-		PlatformsFound:    []string{"npm"},
-		PlatformsNotFound: []string{"jar"},
-		HasMorePlatforms:  true,
-		Truncated:         true,
-		Summary:           map[string]int{"critical": 1, "high": 2},
-		Report:            bson.M{"vulnerabilities": "stored by P7"},
-		ReportGridFSID:    &gridFSID,
+		ID:            "scan-1",
+		LastRequestID: "req-1",
+		RequestedAt:   at,
+		CustomerIDs:   []string{"cust-123"},
+		CustomerData:  map[string]any{"app_id": "app-9", "env": "prod"},
+		Image:         Image{Repository: "customer-123", Name: "app", Tag: "v1.2.0", Digest: "sha256:abc", MediaType: "application/vnd.oci.image.index.v1+json"},
+		Options:       ScanOptions{Platforms: []string{"npm", "jar"}, Severity: []string{"HIGH", "CRITICAL"}, MaxDBAge: time.Hour},
+		Reference:     "harbor.local/customer-123/app@sha256:abc",
+		State:         ScanDone,
 
 		QueuedAt:    at,
 		StartedAt:   &started,
@@ -77,28 +76,50 @@ func TestScan_BSON(t *testing.T) {
 		QueueWaitMS: 1000,
 		ScanMS:      4000,
 		TotalMS:     5000,
-		Worker:      "worker-1",
-		LeaseUntil:  &finished,
-		Error:       "",
+
+		Worker:       "worker-1",
+		LeaseUntil:   &finished,
+		Attempt:      1,
+		Priority:     &priority,
+		Error:        "an earlier failure",
+		FailureClass: "trivy_timeout",
+
+		Result: &ScanResult{
+			Digest:             "sha256:abc",
+			Platforms:          []string{"npm", "jar"},
+			Severity:           []string{"HIGH", "CRITICAL"},
+			ScannedPlatform:    "linux/amd64",
+			TrivyVersion:       "0.74.0",
+			ImagePlatformTypes: []string{"debian", "npm"},
+			Summary:            map[string]int{"critical": 1, "high": 2},
+			SummaryByPlatform:  map[string]map[string]int{"npm": {"critical": 1, "high": 2}},
+			Truncated:          true,
+			Report:             bson.M{"findings": bson.A{"stored by P7"}},
+			ReportGridFSID:     &gridFSID,
+		},
+		DB:          &ScanDB{UpdatedAt: at.Add(-time.Hour), ManifestDigest: "sha256:db", Freshness: "ok"},
+		ConfirmedAt: &finished,
 	}
 
 	t.Run("field names follow DEMAND section 10", func(t *testing.T) {
-		assert.Equal(t, sorted("_id", "request_id", "requested_at", "customer_ids", "customer_data", "image",
-			"options", "reference", "scanned_platform", "attempt", "prior_request_id", "state", "trivy", "platforms", "platforms_found", "platforms_not_found", "has_more_platforms", "truncated", "summary", "report", "report_gridfs_id",
-			"queued_at", "started_at", "finished_at", "queue_wait_ms", "scan_ms", "total_ms", "worker", "lease_until"),
+		assert.Equal(t, sorted("_id", "last_request_id", "requested_at", "customer_ids", "customer_data", "image",
+			"options", "reference", "state", "queued_at", "started_at", "finished_at", "queue_wait_ms", "scan_ms", "total_ms",
+			"worker", "lease_until", "attempt", "priority", "error", "failure_class", "result", "db", "confirmed_at"),
 			keysOf(t, done))
 		assert.Equal(t, sorted("repository", "name", "tag", "digest", "media_type"), keysOf(t, done.Image))
-		assert.Equal(t, sorted("platforms", "severity"), keysOf(t, done.Options))
-		assert.Equal(t, sorted("version", "db_updated_at", "db_manifest_digest"), keysOf(t, done.Trivy))
+		assert.Equal(t, sorted("platforms", "severity", "max_db_age"), keysOf(t, done.Options))
+		assert.Equal(t, sorted("digest", "platforms", "severity", "scanned_platform", "trivy_version", "image_platform_types",
+			"summary", "summary_by_platform", "truncated", "report", "report_gridfs_id"), keysOf(t, done.Result))
+		assert.Equal(t, sorted("updated_at", "manifest_digest", "freshness"), keysOf(t, done.DB))
 	})
 
-	t.Run("a queued scan has no times that are not known yet", func(t *testing.T) {
+	t.Run("a first queued scan has no result and no times that are not known yet", func(t *testing.T) {
 		queued := Scan{ID: "scan-2", State: ScanQueued, QueuedAt: at}
 
 		keys := keysOf(t, queued)
 
-		// No request_id field either: an empty string would collide on the unique index.
-		for _, absent := range []string{"request_id", "started_at", "finished_at", "lease_until", "worker", "error", "report", "report_gridfs_id"} {
+		for _, absent := range []string{"last_request_id", "started_at", "finished_at", "lease_until", "worker", "error",
+			"failure_class", "result", "db", "confirmed_at", "priority"} {
 			assert.NotContains(t, keys, absent)
 		}
 		assert.Contains(t, keys, "queued_at")

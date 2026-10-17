@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 8 (queue) done; next is Phase 9 (API)
-- Last completed task: P8-6
+- Phase: 9 (API) next; Phase 8 (queue) done, including the one-document-per-tag model change (P8-7)
+- Last completed task: P8-7
 - In progress: none
 - Next task: P9-1
-- Blockers / questions for the user: none
+- Blockers / questions for the user: the owner's earlier "Phase 9 message" (items 1-16, partly replaced on 2026-10-17) never reached this session and is not recorded anywhere; it is needed before P9-1. Open point for P9-3: whether the copy-hit source document may itself be queued/scanning.
 - Last updated: 2026-10-17
 
 ## Repo facts (filled in by Phase 0)
@@ -50,6 +50,15 @@ Newest changelog entries go at the top of the Changelog.
 
 Record decisions here with date and reason (package layout, Mongo test strategy, OCI client approach, DB swap mechanism, anything the user answered). If a decision changes the spec, also propose the edit to `DEMAND.md`.
 
+- 2026-10-17 (owner): data model "current state only, one record per image tag" (replaces Phase 9 items 1, 7, 8, 10, 12 and 16 of a message this session never received; recorded in DEMAND v0.17 sections 4, 5, 6, 9, 10, 11, 13 and 14).
+  - `scans` holds one document per tag, `_id` = scan_id = lowercase hex sha256 of `"<repository>/<name>:<tag>"`; no history; nothing deployed, so no migration (schema version 3, dev databases recreated).
+  - Removed: `active_key` and its unique index, the `request_id` unique index, `prior_request_id`, the fingerprint/409 idea. `request_id` is an optional correlation id (1-128 chars) stored as `last_request_id`.
+  - Enqueue = insert the first time, then a conditional update only when the state is not queued/scanning; the last result stays until a new scan succeeds. While queued/scanning: same digest and covered -> 200 with that state, otherwise 409 `scan_in_progress` with `Retry-After`. Same digest: scope = union of stored and requested platforms/severities; moved tag: the request's scope.
+  - Success replaces the result and deletes the previous GridFS file (best effort, after the save); failure sets failed with class and sanitized message and keeps the last good result.
+  - Cache (P9-3): POST order auth -> validate -> not ready -> resolve -> cache -> enqueue; hit conditions on the tag's document; a hit renews `confirmed_at`, `db.freshness` and the request fields (no new document); else copy hit from another document with the same digest (copies independent). `cached`/`db_unchanged` only in POST responses. Validity by the DB version rule, never by time.
+  - `db` block: `updated_at`, `last_upstream_check_at`, `confirmed_at`, `freshness`; stored values, not recomputed on read; the local DB state while a tag has no result.
+  - Auth: one `SCANNER_V2_AUTH_TOKEN`, constant-time compare, at least 32 characters; no `_PREVIOUS` token.
+  - Implementation choices (ours, to confirm): the last successful scan is a `result` sub-document (`digest`, `platforms`, `severity`, `scanned_platform`, `trivy_version`, `image_platform_types`, `summary`, `summary_by_platform`, `truncated`, `report`/`report_gridfs_id`) next to top-level `db` and `confirmed_at`, so a failed attempt cannot touch it; `image.digest` is the digest of the last enqueue and `result.digest` the scanned one (the copy-hit lookup matches both); the existing `image_digest_state_finished_at` index serves the digest lookup; `platforms_found`/`platforms_not_found`/`has_more_platforms` are no longer stored but derived per request from `image_platform_types` (the stored scope can be wider than a request).
 - 2026-10-15 (owner): settings and DB download, now in DEMAND v0.5 sections 7.3, 7.4 and 11.
   - `SCANNER_MONGO_URI` and `SCANNER_MONGO_DB` are required, with no defaults; when v2 is enabled and either is missing, startup fails with a clear error.
   - Defaults: workers 1, max queue length 100, `SCANNER_SCAN_TIMEOUT` 10m, `max_db_age` 6h, pre-check timeouts DNS 5s, CONNECT 5s, TLS 5s, HTTP 10s, MANIFEST 10s, TOTAL 30s. All overridable by env.
@@ -178,6 +187,18 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P8-7  One scan document per image tag
+- Status: done
+- What changed:
+  - `pkg/v2/store/models.go`: `ScanID(image)`; `Scan` reorganized: request fields with `LastRequestID`, the current attempt (state, options, reference, timings, queue fields, error), and the last successful scan in `Result *ScanResult` plus `DB *ScanDB` and `ConfirmedAt`. `TrivyInfo`, `RequestID`, `PriorRequestID`, `ActiveKey`, top-level `ScannedPlatform`, `Platforms`, `PlatformsFound/NotFound`, `HasMorePlatforms`, `Summary`, `Truncated`, `Report`, `ReportGridFSID` removed.
+  - `pkg/v2/store`: `ScanRepository` keeps `Create` and `Get` (`GetByRequestID`, `LastDone`, `ErrDuplicateRequestID` removed; the cache queries come with P9-3). Schema version 3 without `request_id_unique` and `active_key_unique`. `ReportStore`: reports live on `scan.Result`; `Attach` copies the result (no aliasing through the pointer) and no longer deletes earlier files; new `DiscardOthers`; `SaveWithReport` deletes the document's other files after a successful save.
+  - `pkg/v2/runner`: `Scan` fills `Result` (scanned digest and scope, scanned platform, Trivy version, image platform types, summary, new `SummaryByPlatform`) and `DB`; `parseResult` counts per platform.
+  - `pkg/v2/queue`: `Enqueue` inserts the tag's document or requeues it with a `findOneAndUpdate` filtered on state not queued/scanning (up to 3 decisions when racing); `ErrScanInProgress`; `Covers` (exported for P9-3) and scope union; `ActiveKey` removed. `Complete` sets `result`, `db`, `confirmed_at` (`$$NOW`); `Fail` and the reaper keep the result. The pool stores the freshness from the on-demand refresh on `db.freshness`. Claim, leases, fencing, reaper, `Release` and shutdown unchanged.
+- Files: `pkg/v2/store/{models,models_test,repository,repositories_mongo,memory,reports,schema}.go`, `pkg/v2/store/storetest/storetest.go`, `pkg/v2/runner/{result,result_test,scan,scan_test,manual_test}.go`, `pkg/v2/queue/{queue,lease,reaper,worker}.go`, `test/integration/store/{mongo,repositories,schema}_test.go`, `test/integration/queue/{enqueue,lease,pool,reaper,shutdown,tag}_test.go`
+- Tests run: `go vet ./...` and with tags integration and manual -> ok; `go test -short -race ./...` -> ok; `go test -race -count=2 -tags=integration ./test/integration/queue/ ./test/integration/store/` -> ok. New cases on mongo:7: first scan creates the tag document (id = `ScanID`); while queued, a covered request joins and another digest/platform/severity gets `scan_in_progress` (also while scanning); ten concurrent requests for one tag on three replica clients create one document and one claimable scan; queue full refuses a new tag but a covered request joins; rescan of the same digest widens to the union, keeps the result, clears the old error, overwrites the request fields; a moved tag uses the request's scope and keeps the old result; through the pool with GridFS: the same tag scanned twice keeps one document and one (new) file, a failed rescan keeps the last good result and its file, the scanner gets the union scope. All earlier queue tests (claim, lease, fencing, reaper, release, shutdown, metrics) pass on the new identity. `TestManualScan` compiles; not run again (needs Docker Hub and a DB).
+- Decisions / surprises: see Decisions 2026-10-17. Cache hits (renewal, copy across tags) and their tests are P9-3; the auth token rules are P9-1.
+- Next: P9-1 (after the owner resends the Phase 9 message)
 
 ### 2026-10-17  P8-6  Queue tests on real MongoDB
 - Status: done

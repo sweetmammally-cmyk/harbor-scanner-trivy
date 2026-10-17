@@ -6,24 +6,16 @@ import (
 	"time"
 )
 
-var (
-	// ErrNotFound is returned when a document does not exist.
-	ErrNotFound = errors.New("not found")
-	// ErrDuplicateRequestID is returned when a scan with the same request_id exists.
-	ErrDuplicateRequestID = errors.New("duplicate request_id")
-)
+// ErrNotFound is returned when a document does not exist.
+var ErrNotFound = errors.New("not found")
 
-// ScanRepository stores scans. The queue operations come with the queue (P8)
-// and the list queries with the API (P9).
+// ScanRepository stores scans. The queue (pkg/v2/queue) does the queue writes;
+// the cache and list queries come with the API (P9).
 type ScanRepository interface {
-	// Create stores a new scan. A scan with the same request_id gives
-	// ErrDuplicateRequestID. Scans without request_id never collide.
+	// Create stores a new scan document; a document with the same _id (the same
+	// image tag) is an error.
 	Create(ctx context.Context, scan Scan) error
 	Get(ctx context.Context, id string) (Scan, error)
-	GetByRequestID(ctx context.Context, requestID string) (Scan, error)
-	// LastDone returns the most recently finished successful scan of an image
-	// digest, for the scan cache (DEMAND section 6).
-	LastDone(ctx context.Context, digest string) (Scan, error)
 }
 
 // PlatformRepository stores the platforms (Trivy result types) seen in scans.

@@ -27,11 +27,6 @@ func (m *MemoryScans) Create(_ context.Context, scan Scan) error {
 	if _, found := m.scans[scan.ID]; found {
 		return fmt.Errorf("scan %s already exists", scan.ID)
 	}
-	for _, existing := range m.scans {
-		if scan.RequestID != "" && existing.RequestID == scan.RequestID {
-			return ErrDuplicateRequestID
-		}
-	}
 	m.scans[scan.ID] = scan
 	return nil
 }
@@ -44,37 +39,6 @@ func (m *MemoryScans) Get(_ context.Context, id string) (Scan, error) {
 		return Scan{}, ErrNotFound
 	}
 	return scan, nil
-}
-
-func (m *MemoryScans) GetByRequestID(_ context.Context, requestID string) (Scan, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, scan := range m.scans {
-		if requestID != "" && scan.RequestID == requestID {
-			return scan, nil
-		}
-	}
-	return Scan{}, ErrNotFound
-}
-
-func (m *MemoryScans) LastDone(_ context.Context, digest string) (Scan, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var last Scan
-	found := false
-	for _, scan := range m.scans {
-		if scan.Image.Digest != digest || scan.State != ScanDone || scan.FinishedAt == nil {
-			continue
-		}
-		if !found || scan.FinishedAt.After(*last.FinishedAt) {
-			last = scan
-			found = true
-		}
-	}
-	if !found {
-		return Scan{}, ErrNotFound
-	}
-	return last, nil
 }
 
 // MemoryPlatforms is an in-memory PlatformRepository.

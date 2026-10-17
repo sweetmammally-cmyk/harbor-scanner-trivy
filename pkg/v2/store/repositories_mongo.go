@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,10 +24,6 @@ func (r *MongoScans) Create(ctx context.Context, scan Scan) error {
 	ctx, cancel := r.client.OperationContext(ctx)
 	defer cancel()
 	_, err := r.client.Database().Collection(CollectionScans).InsertOne(ctx, scan)
-	// The partial unique index request_id_unique names itself in the error.
-	if mongo.IsDuplicateKeyError(err) && strings.Contains(err.Error(), "request_id_unique") {
-		return ErrDuplicateRequestID
-	}
 	if err != nil {
 		return fmt.Errorf("creating scan %s: %w", scan.ID, err)
 	}
@@ -36,28 +31,10 @@ func (r *MongoScans) Create(ctx context.Context, scan Scan) error {
 }
 
 func (r *MongoScans) Get(ctx context.Context, id string) (Scan, error) {
-	return r.findOne(ctx, bson.D{{Key: "_id", Value: id}}, nil)
-}
-
-func (r *MongoScans) GetByRequestID(ctx context.Context, requestID string) (Scan, error) {
-	return r.findOne(ctx, bson.D{{Key: "request_id", Value: requestID}}, nil)
-}
-
-func (r *MongoScans) LastDone(ctx context.Context, digest string) (Scan, error) {
-	return r.findOne(ctx,
-		bson.D{{Key: "image.digest", Value: digest}, {Key: "state", Value: ScanDone}},
-		bson.D{{Key: "finished_at", Value: -1}})
-}
-
-func (r *MongoScans) findOne(ctx context.Context, filter bson.D, sort bson.D) (Scan, error) {
 	ctx, cancel := r.client.OperationContext(ctx)
 	defer cancel()
-	opts := options.FindOne()
-	if sort != nil {
-		opts.SetSort(sort)
-	}
 	var scan Scan
-	err := r.client.Database().Collection(CollectionScans).FindOne(ctx, filter, opts).Decode(&scan)
+	err := r.client.Database().Collection(CollectionScans).FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&scan)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return Scan{}, ErrNotFound
 	}

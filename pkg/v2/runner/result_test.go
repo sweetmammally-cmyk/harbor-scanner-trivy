@@ -43,6 +43,7 @@ func TestParseResult(t *testing.T) {
 			assert.NotEmpty(t, finding.InstalledVersion)
 			assert.Equal(t, "node:22-alpine3.20 (alpine 3.20.6)", finding.Target)
 		}
+		assert.Equal(t, map[string]map[string]int{"alpine": result.Summary}, result.SummaryByPlatform)
 		assert.Equal(t, []string{"alpine"}, result.PlatformsFound)
 		assert.Empty(t, result.PlatformsNotFound)
 		assert.Equal(t, []string{"alpine", "node-pkg", "pip"}, result.ImagePlatforms)
@@ -98,6 +99,15 @@ func TestParseResult(t *testing.T) {
 		assert.Equal(t, []string{"npm"}, result.PlatformsNotFound)
 		assert.Len(t, result.Findings, 4)
 		assert.Equal(t, 3, result.Summary["high"])
+		assert.Len(t, result.SummaryByPlatform, 3, "one per requested platform that the image has")
+		assert.NotContains(t, result.SummaryByPlatform, "npm")
+		for severity, count := range result.Summary {
+			total := 0
+			for _, summary := range result.SummaryByPlatform {
+				total += summary[severity]
+			}
+			assert.Equal(t, count, total, "the platforms add up to the summary for %s", severity)
+		}
 	})
 
 	t.Run("more findings than the limit: truncated, counts complete", func(t *testing.T) {

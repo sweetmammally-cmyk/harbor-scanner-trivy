@@ -168,7 +168,9 @@ func (p *Pool) process(scan store.Scan, worker string) {
 	if maxAge == 0 {
 		maxAge = p.queue.cfg.DBMaxAgeDefault
 	}
-	if _, _, err := p.refresher.RefreshForScan(jobCtx, maxAge); err != nil {
+	// The freshness at scan start, against the request's max_db_age, is stored with the result.
+	_, freshness, err := p.refresher.RefreshForScan(jobCtx, maxAge)
+	if err != nil {
 		logger.Warn("on-demand DB refresh failed, scanning with the current DB", slog.String("error", err.Error()))
 	}
 	finished, report, scanErr := p.scanner.Scan(jobCtx, worker, scan, scan.Reference)
@@ -183,7 +185,7 @@ func (p *Pool) process(scan store.Scan, worker string) {
 
 	// Killed at the end of the shutdown grace: back to the queue, attempt not counted.
 	if p.jobs.Err() != nil {
-		err := p.queue.Release(context.Background(), scan)
+		err = p.queue.Release(context.Background(), scan)
 		p.logWriteError(logger, err)
 		if err == nil {
 			logger.Info("scan released at shutdown, it goes back to the queue")
@@ -197,15 +199,16 @@ func (p *Pool) process(scan store.Scan, worker string) {
 		if errors.As(scanErr, &classified) {
 			class = classified.Class
 		}
-		err := p.retry(func() error { return p.queue.Fail(context.Background(), finished, class, scanErr.Error()) })
+		err = p.retry(func() error { return p.queue.Fail(context.Background(), finished, class, scanErr.Error()) })
 		p.logWriteError(logger, err)
 		return
 	}
 
+	finished.DB.Freshness = freshness
 	save := func(ctx context.Context, scan store.Scan) error {
 		return p.retry(func() error { return p.queue.Complete(ctx, scan) })
 	}
-	err := store.SaveWithReport(context.Background(), p.reports, finished, report, save)
+	err = store.SaveWithReport(context.Background(), p.reports, finished, report, save)
 	p.logWriteError(logger, err)
 }
 

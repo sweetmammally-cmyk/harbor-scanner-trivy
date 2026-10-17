@@ -1,27 +1,33 @@
 // Package queue runs scans as jobs stored in the scans collection (DEMAND
-// section 9): enqueue with dedupe and idempotency, claims and leases on
-// MongoDB's clock, a reaper for lost workers, and the worker pool.
+// section 9): one document per image tag, enqueued again for each new scan;
+// claims and leases on MongoDB's clock, a reaper for lost workers, and the
+// worker pool.
 package queue
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
 
-// ErrQueueFull is returned by Enqueue when SCANNER_QUEUE_MAX_LENGTH scans are
-// queued (429 with Retry-After).
-var ErrQueueFull = errors.New("the scan queue is full")
+var (
+	// ErrQueueFull is returned by Enqueue when SCANNER_QUEUE_MAX_LENGTH scans are
+	// queued (429 with Retry-After).
+	ErrQueueFull = errors.New("the scan queue is full")
+	// ErrScanInProgress is returned by Enqueue when the tag is queued or scanning
+	// for another digest, or for a scope that does not cover the request (409
+	// scan_in_progress with Retry-After).
+	ErrScanInProgress = errors.New("a scan of this image tag is in progress")
+)
 
 // Queue is the scan queue of one scanner replica.
 type Queue struct {
@@ -44,80 +50,157 @@ func New(client *store.Client, cfg config.Config) *Queue {
 	}
 }
 
-// ActiveKey identifies identical work: the same digest scanned for the same
-// platforms and severities, on the same scan platform, with the same Trivy
-// version. While a scan with this key is queued or scanning, a request for the
-// same work gets that scan instead of a new one.
-func ActiveKey(scan store.Scan) string {
-	platforms := slices.Clone(scan.Options.Platforms)
-	slices.Sort(platforms)
-	severities := slices.Clone(scan.Options.Severity)
-	slices.Sort(severities)
-	key := strings.Join([]string{
-		scan.Image.Digest,
-		strings.Join(platforms, ","),
-		strings.Join(severities, ","),
-		scan.ScannedPlatform,
-		scan.Trivy.Version,
-	}, "\n")
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
+// Covers reports whether scope has every platform and severity of request.
+func Covers(scope, request store.ScanOptions) bool {
+	for _, platform := range request.Platforms {
+		if !slices.Contains(scope.Platforms, platform) {
+			return false
+		}
+	}
+	for _, severity := range request.Severity {
+		if !slices.Contains(scope.Severity, severity) {
+			return false
+		}
+	}
+	return true
 }
 
-// Enqueue queues a new scan, or returns the existing scan for the same work.
-// created is false when an existing scan was returned:
-//   - a scan with the same request_id (queued, scanning or done; a failed scan
-//     gave up its request_id, so a retry creates a new scan);
-//   - a queued or scanning scan with the same ActiveKey.
+// union returns the values of a and b, sorted, each once.
+func union(a, b []string) []string {
+	values := append(slices.Clone(a), b...)
+	slices.Sort(values)
+	return slices.Compact(values)
+}
+
+// Enqueue queues a scan of the image tag (DEMAND section 9). The tag has one
+// document (_id store.ScanID); it keeps its last result until a new scan
+// succeeds. created is false when the running scan of the tag is returned.
+//   - No document yet: it is inserted, queued.
+//   - The tag is queued or scanning: for the same digest with a scope that
+//     covers the request, that scan is returned; otherwise ErrScanInProgress.
+//   - Otherwise the document is queued again with the request's fields. When
+//     the last result is for the same digest, the scope is the union of the
+//     result's and the request's platforms and severities; when the tag moved
+//     to another digest, it is the request's.
 //
-// The caller sets ID, the request fields, the image with its digest and
-// reference, Options, ScannedPlatform and Trivy.Version.
+// The caller sets the request fields, the image with its digest and the
+// reference, and Options.
 func (q *Queue) Enqueue(ctx context.Context, scan store.Scan) (store.Scan, bool, error) {
-	scan.ActiveKey = ActiveKey(scan)
+	scan.ID = store.ScanID(scan.Image)
 	scan.State = store.ScanQueued
 	scan.QueuedAt = time.Now()
 	scan.Attempt = 0
 
-	if scan.RequestID != "" {
-		existing, err := q.findOne(ctx, bson.D{{Key: "request_id", Value: scan.RequestID}})
-		if err == nil || !errors.Is(err, store.ErrNotFound) {
-			return existing, false, err
+	// A concurrent request can create or queue the document between our read and
+	// our write; the write then does not apply and we decide again.
+	for try := 0; try < 3; try++ {
+		existing, err := q.findOne(ctx, bson.D{{Key: "_id", Value: scan.ID}})
+		found := err == nil
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return store.Scan{}, false, err
 		}
-	}
-	existing, err := q.findOne(ctx, bson.D{{Key: "active_key", Value: scan.ActiveKey}})
-	if err == nil || !errors.Is(err, store.ErrNotFound) {
-		return existing, false, err
-	}
-
-	queued, err := q.queuedCount(ctx)
-	if err != nil {
-		return store.Scan{}, false, err
-	}
-	if queued >= int64(q.cfg.QueueMaxLength) {
-		return store.Scan{}, false, ErrQueueFull
-	}
-
-	opCtx, cancel := q.client.OperationContext(ctx)
-	_, err = q.scans.InsertOne(opCtx, scan)
-	cancel()
-	if mongo.IsDuplicateKeyError(err) {
-		// Another request for the same work won the race: return its scan.
-		filter := bson.D{{Key: "active_key", Value: scan.ActiveKey}}
-		if strings.Contains(err.Error(), "request_id_unique") {
-			filter = bson.D{{Key: "request_id", Value: scan.RequestID}}
+		if found && (existing.State == store.ScanQueued || existing.State == store.ScanScanning) {
+			if existing.Image.Digest == scan.Image.Digest && Covers(existing.Options, scan.Options) {
+				return existing, false, nil
+			}
+			return store.Scan{}, false, ErrScanInProgress
 		}
-		existing, err = q.findOne(ctx, filter)
-		return existing, false, err
+
+		queued, err := q.queuedCount(ctx)
+		if err != nil {
+			return store.Scan{}, false, err
+		}
+		if queued >= int64(q.cfg.QueueMaxLength) {
+			return store.Scan{}, false, ErrQueueFull
+		}
+
+		if !found {
+			opCtx, cancel := q.client.OperationContext(ctx)
+			_, err = q.scans.InsertOne(opCtx, scan)
+			cancel()
+			if mongo.IsDuplicateKeyError(err) {
+				continue
+			}
+			if err != nil {
+				return store.Scan{}, false, fmt.Errorf("enqueueing scan %s: %w", scan.ID, err)
+			}
+			q.wakeWorker()
+			return scan, true, nil
+		}
+
+		requeued, err := q.requeue(ctx, scan, existing)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return store.Scan{}, false, err
+		}
+		q.wakeWorker()
+		return requeued, true, nil
 	}
-	if err != nil {
-		return store.Scan{}, false, fmt.Errorf("enqueueing scan %s: %w", scan.ID, err)
+	return store.Scan{}, false, fmt.Errorf("enqueueing scan %s: the document kept changing", scan.ID)
+}
+
+// requeue queues the tag's finished document again, unless another request did
+// it first (store.ErrNotFound). The last result stays in place.
+func (q *Queue) requeue(ctx context.Context, scan store.Scan, existing store.Scan) (store.Scan, error) {
+	scope := scan.Options
+	if existing.Result != nil && existing.Result.Digest == scan.Image.Digest {
+		scope.Platforms = union(existing.Result.Platforms, scan.Options.Platforms)
+		scope.Severity = union(existing.Result.Severity, scan.Options.Severity)
+	}
+	set := bson.D{
+		{Key: "state", Value: store.ScanQueued},
+		{Key: "queued_at", Value: scan.QueuedAt},
+		{Key: "attempt", Value: 0},
+		{Key: "image", Value: scan.Image},
+		{Key: "options", Value: scope},
+		{Key: "reference", Value: scan.Reference},
+		{Key: "requested_at", Value: scan.RequestedAt},
+		{Key: "customer_ids", Value: scan.CustomerIDs},
+		{Key: "queue_wait_ms", Value: 0},
+		{Key: "scan_ms", Value: 0},
+		{Key: "total_ms", Value: 0},
+	}
+	unset := bson.D{}
+	for _, field := range []string{"worker", "lease_until", "started_at", "finished_at", "error", "failure_class"} {
+		unset = append(unset, bson.E{Key: field, Value: ""})
+	}
+	if scan.CustomerData != nil {
+		set = append(set, bson.E{Key: "customer_data", Value: scan.CustomerData})
+	} else {
+		unset = append(unset, bson.E{Key: "customer_data", Value: ""})
+	}
+	if scan.LastRequestID != "" {
+		set = append(set, bson.E{Key: "last_request_id", Value: scan.LastRequestID})
+	} else {
+		unset = append(unset, bson.E{Key: "last_request_id", Value: ""})
 	}
 
-	// Wake an idle worker of this replica; others find the scan when they poll.
+	ctx, cancel := q.client.OperationContext(ctx)
+	defer cancel()
+	filter := bson.D{
+		{Key: "_id", Value: scan.ID},
+		{Key: "state", Value: bson.D{{Key: "$nin", Value: bson.A{store.ScanQueued, store.ScanScanning}}}},
+	}
+	update := bson.D{{Key: "$set", Value: set}, {Key: "$unset", Value: unset}}
+	var requeued store.Scan
+	err := q.scans.FindOneAndUpdate(ctx, filter, update, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&requeued)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return store.Scan{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.Scan{}, fmt.Errorf("enqueueing scan %s: %w", scan.ID, err)
+	}
+	return requeued, nil
+}
+
+// wakeWorker wakes an idle worker of this replica; others find the scan when they poll.
+func (q *Queue) wakeWorker() {
 	select {
 	case q.wake <- struct{}{}:
 	default:
 	}
-	return scan, true, nil
 }
 
 func (q *Queue) findOne(ctx context.Context, filter bson.D) (store.Scan, error) {

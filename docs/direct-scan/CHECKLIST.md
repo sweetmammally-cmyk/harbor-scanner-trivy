@@ -77,16 +77,17 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P8-3 Reaper every 30s on every replica: expired -> queued, after `SCANNER_QUEUE_MAX_ATTEMPTS` -> failed `worker_lost`
 - [x] P8-4 Graceful shutdown: stop claiming, `SCANNER_SHUTDOWN_GRACE`, then kill and release leases without counting the attempt
 - [x] P8-5 Queue metrics: depth, oldest queued age, claim latency, lease losses, reaper requeues (exposed in P10-4)
+- [x] P8-7 One scan document per image tag (`_id` = sha256 of `<repository>/<name>:<tag>`, the scan_id): remove `active_key`, the `request_id` unique index and `prior_request_id` (schema version 3); `last_request_id`; result sub-document replaced only on success; enqueue = insert or conditional requeue (`scan_in_progress` when not covered); scope union for the same digest; old GridFS file deleted after a successful save; queue tests on the new identity
 - [x] P8-6 Tests on real mongo:7 with several clients as replicas: claimed exactly once; ten identical POSTs give one scan; killed worker requeued and finished elsewhere; stale late completion rejected; poison job failed `worker_lost`; queue full 429; shutdown releases the lease; retry after a failure creates a new scan; no claim while not ready
 
 ## Phase 9: REST API v2
-- [ ] P9-1 Router and service-token auth middleware; wire `main.go`; log the fallback-interval WARN only when v2 is enabled; run the component tests (first `main.go` touch)
-- [ ] P9-2 `POST /api/v2/scans`: validation (400 for `customer_data` > 64 KiB or > 100 `customer_ids`) and `request_id` idempotency
-- [ ] P9-3 Cache decision (all conditions in DEMAND section 6) and cached response with `cached` and `db_unchanged`
-- [ ] P9-4 `GET /api/v2/scans/{id}` with `not_found` (404), `queued`, `scanning`, `done`, `failed`
+- [ ] P9-1 Router and service-token auth middleware (one `SCANNER_V2_AUTH_TOKEN`, constant-time compare, at least 32 characters); wire `main.go`; log the fallback-interval WARN only when v2 is enabled; run the component tests (first `main.go` touch)
+- [ ] P9-2 `POST /api/v2/scans`: validation (400 for `customer_data` > 64 KiB or > 100 `customer_ids`; `request_id` an optional correlation id of 1-128 characters), order auth -> validate -> not ready -> resolve -> cache -> enqueue; 409 `scan_in_progress` with `Retry-After`
+- [ ] P9-3 Cache decision (all conditions in DEMAND section 6) on the tag's document, then copy hit from another document with the same digest (GridFS content copied); a hit renews `confirmed_at`, freshness and the request fields; response with `cached` and `db_unchanged`
+- [ ] P9-4 `GET /api/v2/scans/{id}` with `not_found` (404, also for an id that is not 64 lowercase hex), `queued`, `scanning`, `done`, `failed`
 - [ ] P9-5 `GET /api/v2/scans` filters and paging (project out the report)
 - [ ] P9-6 `GET /api/v2/db` (includes `db_age`)
-- [ ] P9-7 `db` block in responses (updated_at, last_upstream_check_at, freshness)
+- [ ] P9-7 `db` block in responses (updated_at, last_upstream_check_at, confirmed_at, freshness; stored values, the local DB state while a tag has no result)
 - [ ] P9-8 API tests covering every row of the DEMAND response tables
 
 ## Phase 10: Health, logging, metrics

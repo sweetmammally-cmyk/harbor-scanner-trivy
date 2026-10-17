@@ -14,7 +14,10 @@ import (
 
 // SchemaVersion is the data plane schema version this code expects.
 // 2: the queue indexes (active_key_unique, state_lease_until).
-const SchemaVersion = 2
+// 3: one scan document per image tag; no request_id_unique or active_key_unique.
+// Nothing was deployed before 3, so there is no migration: databases of older
+// versions are recreated.
+const SchemaVersion = 3
 
 // CollectionSchemaVersion holds one document, _id "schema", with the stored version.
 const CollectionSchemaVersion = "schema_version"
@@ -48,18 +51,10 @@ type index struct {
 }
 
 // scansIndexes are the indexes of the scans collection (DEMAND section 10).
-// The queue-claim index is added with the queue (P8).
 func scansIndexes() []index {
 	return []index{
 		{
-			collection: CollectionScans,
-			name:       "request_id_unique",
-			keys:       bson.D{{Key: "request_id", Value: 1}},
-			// Partial: scans without a request_id do not collide.
-			options: options.Index().SetUnique(true).
-				SetPartialFilterExpression(bson.D{{Key: "request_id", Value: bson.D{{Key: "$type", Value: "string"}}}}),
-		},
-		{
+			// Also finds other tags with the same digest for the cache (prefix image.digest).
 			collection: CollectionScans,
 			name:       "image_digest_state_finished_at",
 			keys:       bson.D{{Key: "image.digest", Value: 1}, {Key: "state", Value: 1}, {Key: "finished_at", Value: 1}},
@@ -76,14 +71,6 @@ func scansIndexes() []index {
 			name:       "state_queued_at",
 			keys:       bson.D{{Key: "state", Value: 1}, {Key: "queued_at", Value: 1}},
 			options:    options.Index(),
-		},
-		{
-			collection: CollectionScans,
-			name:       "active_key_unique",
-			keys:       bson.D{{Key: "active_key", Value: 1}},
-			// Partial: only queued and scanning scans have an active_key.
-			options: options.Index().SetUnique(true).
-				SetPartialFilterExpression(bson.D{{Key: "active_key", Value: bson.D{{Key: "$type", Value: "string"}}}}),
 		},
 		{
 			// For the reaper: expired leases of scanning scans.

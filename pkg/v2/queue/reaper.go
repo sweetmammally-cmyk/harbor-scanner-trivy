@@ -40,9 +40,8 @@ func (q *Queue) Reap(ctx context.Context) (int64, int64, error) {
 				{Key: "error", Value: literal(fmt.Sprintf("the scan's worker stopped %d times (lease expired)", q.cfg.QueueMaxAttempts))},
 				{Key: "finished_at", Value: "$$NOW"},
 				{Key: "total_ms", Value: bson.D{{Key: "$subtract", Value: bson.A{"$$NOW", "$queued_at"}}}},
-				{Key: "prior_request_id", Value: "$request_id"},
 			}}},
-			{{Key: "$unset", Value: bson.A{"request_id", "active_key", "lease_until"}}},
+			{{Key: "$unset", Value: bson.A{"lease_until"}}},
 		})
 	if err != nil {
 		return 0, 0, fmt.Errorf("failing scans of lost workers: %w", err)

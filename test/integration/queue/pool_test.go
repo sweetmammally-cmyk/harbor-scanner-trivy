@@ -35,8 +35,9 @@ func (f *fakeScanner) Scan(ctx context.Context, worker string, scan store.Scan, 
 // doneScanner finishes every scan at once with one finding.
 func doneScanner() *fakeScanner {
 	return &fakeScanner{scan: func(ctx context.Context, scan store.Scan) (store.Scan, bson.M, error) {
-		scan.Summary = map[string]int{"high": 1}
-		scan.Trivy.DBManifestDigest = "sha256:db"
+		scan.Result = &store.ScanResult{Digest: scan.Image.Digest, Platforms: scan.Options.Platforms, Severity: scan.Options.Severity,
+			Summary: map[string]int{"high": 1}}
+		scan.DB = &store.ScanDB{ManifestDigest: "sha256:db"}
 		return scan, bson.M{"findings": bson.A{bson.M{"id": "CVE-1"}}}, nil
 	}}
 }
@@ -56,8 +57,13 @@ func (f *fakeRefresher) RefreshForScan(ctx context.Context, maxAge time.Duration
 
 // runPool runs a pool until the end of the test.
 func runPool(t *testing.T, q *queue.Queue, scanner queue.Scanner, refresher queue.Refresher, ready func() bool) {
+	runPoolWithReports(t, q, scanner, refresher, ready, store.NewMemoryReports(store.ReportInlineLimit))
+}
+
+func runPoolWithReports(t *testing.T, q *queue.Queue, scanner queue.Scanner, refresher queue.Refresher, ready func() bool,
+	reports store.ReportStore) {
 	ctx, cancel := context.WithCancel(context.Background())
-	pool := queue.NewPool(q, scanner, refresher, store.NewMemoryReports(store.ReportInlineLimit), ready, "replica-1")
+	pool := queue.NewPool(q, scanner, refresher, reports, ready, "replica-1")
 	stopped := make(chan struct{})
 	go func() {
 		pool.Run(ctx)
@@ -93,8 +99,9 @@ func TestPool(t *testing.T) {
 		require.Eventually(t, func() bool {
 			return stateOf(t, client, first.ID) == "done" && stateOf(t, client, second.ID) == "done"
 		}, 10*time.Second, 20*time.Millisecond)
-		doc := rawScan(t, client, first.ID)
-		assert.Equal(t, "sha256:db", doc["trivy"].(bson.D)[2].Value)
+		done := getScan(t, client, first.ID)
+		assert.Equal(t, &store.ScanDB{ManifestDigest: "sha256:db", Freshness: "ok", UpdatedAt: done.DB.UpdatedAt}, done.DB,
+			"the freshness from the on-demand refresh is stored")
 		refresher.mu.Lock()
 		assert.ElementsMatch(t, []time.Duration{time.Hour, 6 * time.Hour}, refresher.maxAges,
 			"the request's max_db_age, or the default")
@@ -106,7 +113,7 @@ func TestPool(t *testing.T) {
 		scanner := &fakeScanner{scan: func(ctx context.Context, scan store.Scan) (store.Scan, bson.M, error) {
 			return scan, nil, &runner.ScanError{Class: runner.FailureJavaDBMissing, Detail: "no Java DB"}
 		}}
-		scan, _, err := q.Enqueue(ctx, newScan("req-1", "sha256:a"))
+		scan, _, err := q.Enqueue(ctx, newScan("", "sha256:a"))
 		require.NoError(t, err)
 
 		runPool(t, q, scanner, &fakeRefresher{}, always)
@@ -114,7 +121,7 @@ func TestPool(t *testing.T) {
 		require.Eventually(t, func() bool { return stateOf(t, client, scan.ID) == "failed" }, 10*time.Second, 20*time.Millisecond)
 		doc := rawScan(t, client, scan.ID)
 		assert.Equal(t, "java_db_missing", doc["failure_class"])
-		assert.Equal(t, "req-1", doc["prior_request_id"])
+		assert.NotContains(t, doc, "result")
 	})
 
 	t.Run("workers do not claim while not ready", func(t *testing.T) {
@@ -148,7 +155,7 @@ func TestPool(t *testing.T) {
 		scanner := &fakeScanner{scan: func(ctx context.Context, scan store.Scan) (store.Scan, bson.M, error) {
 			<-ctx.Done() // like Trivy, killed when the context ends
 			close(cancelled)
-			scan.Summary = map[string]int{"critical": 99}
+			scan.Result = &store.ScanResult{Summary: map[string]int{"critical": 99}}
 			return scan, bson.M{}, errors.New("killed")
 		}}
 		scan, _, err := q.Enqueue(ctx, newScan("", "sha256:a"))

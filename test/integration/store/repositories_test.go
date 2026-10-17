@@ -64,12 +64,12 @@ func TestMongoRepositories(t *testing.T) {
 		report := bson.M{"vulnerabilities": strings.Repeat("CVE-2026-0001 HIGH openssl 3.0.1 ", 600_000)} // about 20 MB
 		now := time.Now().UTC().Truncate(time.Millisecond)
 
-		inline := store.Scan{ID: "inline", State: store.ScanDone, QueuedAt: now, Report: report}
+		inline := store.Scan{ID: "inline", State: store.ScanDone, QueuedAt: now, Result: &store.ScanResult{Report: report}}
 		assert.Error(t, scans.Create(context.Background(), inline), "MongoDB refuses it inline")
 
-		scan := store.Scan{ID: "large", State: store.ScanDone, QueuedAt: now}
+		scan := store.Scan{ID: "large", State: store.ScanDone, QueuedAt: now, Result: &store.ScanResult{}}
 		require.NoError(t, reports.Attach(context.Background(), &scan, report))
-		require.NotNil(t, scan.ReportGridFSID)
+		require.NotNil(t, scan.Result.ReportGridFSID)
 		require.NoError(t, scans.Create(context.Background(), scan))
 
 		stored, err := scans.Get(context.Background(), "large")
@@ -80,15 +80,19 @@ func TestMongoRepositories(t *testing.T) {
 		assert.Equal(t, report, loaded)
 	})
 
-	t.Run("GridFS files carry scan_id and uploaded_at, one file per scan after a retry", func(t *testing.T) {
+	t.Run("GridFS files carry scan_id and uploaded_at; after a save only the new result's file is left", func(t *testing.T) {
 		client := freshClient(t, mongoAddr)
 		reports := store.NewMongoReports(client, 100)
 		report := bson.M{"vulnerabilities": strings.Repeat("CVE-2026-0001 ", 50)}
 		before := time.Now().Add(-time.Second)
 
+		var saved store.Scan
 		for attempt := 0; attempt < 3; attempt++ {
-			scan := store.Scan{ID: "scan-1", State: store.ScanDone}
-			require.NoError(t, reports.Attach(context.Background(), &scan, report))
+			scan := store.Scan{ID: "scan-1", State: store.ScanDone, Result: &store.ScanResult{}}
+			require.NoError(t, store.SaveWithReport(context.Background(), reports, scan, report, func(ctx context.Context, scan store.Scan) error {
+				saved = scan
+				return nil
+			}))
 		}
 
 		ctx, cancel := client.OperationContext(context.Background())
@@ -96,13 +100,15 @@ func TestMongoRepositories(t *testing.T) {
 		cursor, err := client.Database().Collection(store.ReportBucket+".files").Find(ctx, bson.M{"metadata.scan_id": "scan-1"})
 		require.NoError(t, err)
 		var files []struct {
+			ID       bson.ObjectID `bson:"_id"`
 			Metadata struct {
 				ScanID     string    `bson:"scan_id"`
 				UploadedAt time.Time `bson:"uploaded_at"`
 			} `bson:"metadata"`
 		}
 		require.NoError(t, cursor.All(ctx, &files))
-		require.Len(t, files, 1, "earlier attempts were deleted")
+		require.Len(t, files, 1, "the files of the earlier results were deleted")
+		assert.Equal(t, *saved.Result.ReportGridFSID, files[0].ID)
 		assert.Equal(t, "scan-1", files[0].Metadata.ScanID)
 		assert.True(t, files[0].Metadata.UploadedAt.After(before), "uploaded_at is set")
 	})

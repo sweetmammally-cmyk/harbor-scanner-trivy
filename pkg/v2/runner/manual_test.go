@@ -62,8 +62,8 @@ func TestManualScan(t *testing.T) {
 		return
 	}
 	t.Logf("scan took %s; trivy %s, DB updated %s (%s)", time.Since(start).Round(time.Millisecond),
-		scan.Trivy.Version, scan.Trivy.DBUpdatedAt, scan.Trivy.DBManifestDigest)
-	t.Logf("image platforms %v; found %v; not found %v; has more %v",
-		scan.Platforms, scan.PlatformsFound, scan.PlatformsNotFound, scan.HasMorePlatforms)
-	t.Logf("summary %v; findings stored %d; truncated %v", scan.Summary, len(report["findings"].([]Finding)), scan.Truncated)
+		scan.Result.TrivyVersion, scan.DB.UpdatedAt, scan.DB.ManifestDigest)
+	t.Logf("image platforms %v", scan.Result.ImagePlatformTypes)
+	t.Logf("summary %v; by platform %v; findings stored %d; truncated %v", scan.Result.Summary, scan.Result.SummaryByPlatform,
+		len(report["findings"].([]Finding)), scan.Result.Truncated)
 }

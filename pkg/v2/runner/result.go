@@ -70,8 +70,10 @@ type Result struct {
 	ImagePlatforms   []string
 	HasMorePlatforms bool
 	// Summary counts the findings of the requested platforms at every severity,
-	// by lowercase severity name.
-	Summary map[string]int
+	// by lowercase severity name. SummaryByPlatform splits it by platform, for
+	// the requested platforms that the image has.
+	Summary           map[string]int
+	SummaryByPlatform map[string]map[string]int
 	// Findings are those of the requested platforms and severities, at most
 	// maxFindings; Truncated is set when more were left out.
 	Findings  []Finding
@@ -98,10 +100,7 @@ type trivyResult struct {
 // request asked for: platforms (matched case-insensitively against the result
 // type) and severities. Malformed output is an output_invalid ScanError.
 func parseResult(output io.Reader, platforms, severities []string, maxFindings int) (Result, error) {
-	result := Result{Summary: map[string]int{}}
-	for _, severity := range Severities {
-		result.Summary[strings.ToLower(severity)] = 0
-	}
+	result := Result{Summary: zeroSummary(), SummaryByPlatform: map[string]map[string]int{}}
 	imageTypes := map[string]bool{}
 
 	decoder := json.NewDecoder(output)
@@ -135,8 +134,12 @@ func parseResult(output io.Reader, platforms, severities []string, maxFindings i
 				if !slices.Contains(platforms, resultType) {
 					continue
 				}
+				if result.SummaryByPlatform[resultType] == nil {
+					result.SummaryByPlatform[resultType] = zeroSummary()
+				}
 				for _, vulnerability := range trivyResult.Vulnerabilities {
 					result.Summary[strings.ToLower(vulnerability.Severity)]++
+					result.SummaryByPlatform[resultType][strings.ToLower(vulnerability.Severity)]++
 					if !slices.Contains(severities, vulnerability.Severity) {
 						continue
 					}
@@ -190,6 +193,15 @@ func parseResult(output io.Reader, platforms, severities []string, maxFindings i
 	}
 	sort.Strings(result.ImagePlatforms)
 	return result, nil
+}
+
+// zeroSummary has every severity, by lowercase name, at 0.
+func zeroSummary() map[string]int {
+	summary := map[string]int{}
+	for _, severity := range Severities {
+		summary[strings.ToLower(severity)] = 0
+	}
+	return summary
 }
 
 func expectDelim(decoder *json.Decoder, want json.Delim) error {

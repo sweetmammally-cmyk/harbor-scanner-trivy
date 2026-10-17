@@ -22,24 +22,28 @@ const ReportInlineLimit = 8 << 20
 // and reports.chunks).
 const ReportBucket = "reports"
 
-// ReportStore keeps a scan's report inline or in GridFS, depending on its size.
-// Use SaveWithReport, which keeps the order: upload, save, clean up on failure.
+// ReportStore keeps a scan result's report inline or in GridFS, depending on
+// its size. Use SaveWithReport, which keeps the order: upload, save, clean up.
 type ReportStore interface {
-	// Attach puts the report on the scan: in scan.Report when its BSON size is
-	// within the limit, otherwise in a GridFS file (metadata scan_id and
-	// uploaded_at) whose id goes to scan.ReportGridFSID. Earlier files of the
-	// same scan_id (from a retry) are deleted first.
+	// Attach puts the report on scan.Result (which must be set): in
+	// Result.Report when its BSON size is within the limit, otherwise in a new
+	// GridFS file (metadata scan_id and uploaded_at) whose id goes to
+	// Result.ReportGridFSID. Files of the previous result are left alone.
 	Attach(ctx context.Context, scan *Scan, report bson.M) error
-	// Discard deletes the scan's GridFS file, if it has one.
+	// Discard deletes the GridFS file of the scan's result, if it has one.
 	Discard(ctx context.Context, scan Scan) error
-	// Load returns the report of a scan from the document or from GridFS; nil
-	// when the scan has no report.
+	// DiscardOthers deletes every GridFS file of the scan's _id except the one of
+	// its result: the previous result's file, and files of attempts that failed.
+	DiscardOthers(ctx context.Context, scan Scan) error
+	// Load returns the report of a scan's result from the document or from
+	// GridFS; nil when there is no report.
 	Load(ctx context.Context, scan Scan) (bson.M, error)
 }
 
-// SaveWithReport attaches the report to the scan, then saves the scan document
-// with save. When the save fails, the GridFS file uploaded for it is deleted at
-// once (best effort), so no file is left without its scan.
+// SaveWithReport attaches the report to the scan's result, then saves the scan
+// document with save. When the save fails, the GridFS file uploaded for it is
+// deleted at once and the previous result keeps its file. When the save
+// succeeds, the previous result's file is deleted. Both deletes are best effort.
 func SaveWithReport(ctx context.Context, reports ReportStore, scan Scan, report bson.M,
 	save func(ctx context.Context, scan Scan) error) error {
 	if err := reports.Attach(ctx, &scan, report); err != nil {
@@ -51,6 +55,10 @@ func SaveWithReport(ctx context.Context, reports ReportStore, scan Scan, report 
 				slog.String("scan_id", scan.ID), slog.String("error", discardErr.Error()))
 		}
 		return err
+	}
+	if err := reports.DiscardOthers(ctx, scan); err != nil {
+		slog.Warn("could not delete the GridFS report of the previous result",
+			slog.String("scan_id", scan.ID), slog.String("error", err.Error()))
 	}
 	return nil
 }
@@ -70,68 +78,81 @@ func NewMongoReports(client *Client, limit int) *MongoReports {
 }
 
 func (r *MongoReports) Attach(ctx context.Context, scan *Scan, report bson.M) error {
+	// A copy, so the caller's result is not changed through the pointer.
+	result := *scan.Result
+	scan.Result = &result
 	data, err := bson.Marshal(report)
 	if err != nil {
 		return fmt.Errorf("encoding report of scan %s: %w", scan.ID, err)
 	}
 	if len(data) <= r.limit {
-		scan.Report = report
-		scan.ReportGridFSID = nil
+		scan.Result.Report = report
+		scan.Result.ReportGridFSID = nil
 		return nil
 	}
 
 	ctx, cancel := r.client.OperationContext(ctx)
 	defer cancel()
-
-	// A retry of the same scan: delete the files of the earlier attempt first.
-	cursor, err := r.bucket.Find(ctx, bson.D{{Key: "metadata.scan_id", Value: scan.ID}})
-	if err != nil {
-		return fmt.Errorf("finding earlier reports of scan %s: %w", scan.ID, err)
-	}
-	var earlier []struct {
-		ID bson.ObjectID `bson:"_id"`
-	}
-	if err = cursor.All(ctx, &earlier); err != nil {
-		return fmt.Errorf("finding earlier reports of scan %s: %w", scan.ID, err)
-	}
-	for _, file := range earlier {
-		if err = r.bucket.Delete(ctx, file.ID); err != nil {
-			return fmt.Errorf("deleting earlier report of scan %s: %w", scan.ID, err)
-		}
-	}
-
 	metadata := bson.D{{Key: "scan_id", Value: scan.ID}, {Key: "uploaded_at", Value: time.Now()}}
 	id, err := r.bucket.UploadFromStream(ctx, scan.ID, bytes.NewReader(data),
 		options.GridFSUpload().SetMetadata(metadata))
 	if err != nil {
 		return fmt.Errorf("storing report of scan %s in GridFS: %w", scan.ID, err)
 	}
-	scan.Report = nil
-	scan.ReportGridFSID = &id
+	scan.Result.Report = nil
+	scan.Result.ReportGridFSID = &id
 	return nil
 }
 
 func (r *MongoReports) Discard(ctx context.Context, scan Scan) error {
-	if scan.ReportGridFSID == nil {
+	if scan.Result == nil || scan.Result.ReportGridFSID == nil {
 		return nil
 	}
 	ctx, cancel := r.client.OperationContext(ctx)
 	defer cancel()
-	if err := r.bucket.Delete(ctx, *scan.ReportGridFSID); err != nil {
+	if err := r.bucket.Delete(ctx, *scan.Result.ReportGridFSID); err != nil {
 		return fmt.Errorf("deleting report of scan %s: %w", scan.ID, err)
 	}
 	return nil
 }
 
+func (r *MongoReports) DiscardOthers(ctx context.Context, scan Scan) error {
+	ctx, cancel := r.client.OperationContext(ctx)
+	defer cancel()
+	filter := bson.D{{Key: "metadata.scan_id", Value: scan.ID}}
+	if scan.Result != nil && scan.Result.ReportGridFSID != nil {
+		filter = append(filter, bson.E{Key: "_id", Value: bson.D{{Key: "$ne", Value: *scan.Result.ReportGridFSID}}})
+	}
+	cursor, err := r.bucket.Find(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("finding old reports of scan %s: %w", scan.ID, err)
+	}
+	var files []struct {
+		ID bson.ObjectID `bson:"_id"`
+	}
+	if err = cursor.All(ctx, &files); err != nil {
+		return fmt.Errorf("finding old reports of scan %s: %w", scan.ID, err)
+	}
+	for _, file := range files {
+		if err = r.bucket.Delete(ctx, file.ID); err != nil {
+			return fmt.Errorf("deleting old report of scan %s: %w", scan.ID, err)
+		}
+	}
+	return nil
+}
+
 func (r *MongoReports) Load(ctx context.Context, scan Scan) (bson.M, error) {
-	if scan.ReportGridFSID == nil {
-		return scan.Report, nil
+	if scan.Result == nil {
+		return nil, nil
+	}
+	if scan.Result.ReportGridFSID == nil {
+		return scan.Result.Report, nil
 	}
 
 	ctx, cancel := r.client.OperationContext(ctx)
 	defer cancel()
 	var data bytes.Buffer
-	if _, err := r.bucket.DownloadToStream(ctx, *scan.ReportGridFSID, &data); err != nil {
+	if _, err := r.bucket.DownloadToStream(ctx, *scan.Result.ReportGridFSID, &data); err != nil {
 		return nil, fmt.Errorf("reading report of scan %s from GridFS: %w", scan.ID, err)
 	}
 	var report bson.M
@@ -159,45 +180,58 @@ func NewMemoryReports(limit int) *MemoryReports {
 }
 
 func (m *MemoryReports) Attach(_ context.Context, scan *Scan, report bson.M) error {
+	// A copy, so the caller's result is not changed through the pointer.
+	result := *scan.Result
+	scan.Result = &result
 	data, err := bson.Marshal(report)
 	if err != nil {
 		return fmt.Errorf("encoding report of scan %s: %w", scan.ID, err)
 	}
 	if len(data) <= m.limit {
-		scan.Report = report
-		scan.ReportGridFSID = nil
+		scan.Result.Report = report
+		scan.Result.ReportGridFSID = nil
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for id, file := range m.files {
-		if file.scanID == scan.ID {
-			delete(m.files, id)
-		}
-	}
 	id := bson.NewObjectID()
 	m.files[id] = memoryFile{scanID: scan.ID, data: data}
-	scan.Report = nil
-	scan.ReportGridFSID = &id
+	scan.Result.Report = nil
+	scan.Result.ReportGridFSID = &id
 	return nil
 }
 
 func (m *MemoryReports) Discard(_ context.Context, scan Scan) error {
-	if scan.ReportGridFSID == nil {
+	if scan.Result == nil || scan.Result.ReportGridFSID == nil {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.files, *scan.ReportGridFSID)
+	delete(m.files, *scan.Result.ReportGridFSID)
+	return nil
+}
+
+func (m *MemoryReports) DiscardOthers(_ context.Context, scan Scan) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, file := range m.files {
+		current := scan.Result != nil && scan.Result.ReportGridFSID != nil && *scan.Result.ReportGridFSID == id
+		if file.scanID == scan.ID && !current {
+			delete(m.files, id)
+		}
+	}
 	return nil
 }
 
 func (m *MemoryReports) Load(_ context.Context, scan Scan) (bson.M, error) {
-	if scan.ReportGridFSID == nil {
-		return scan.Report, nil
+	if scan.Result == nil {
+		return nil, nil
+	}
+	if scan.Result.ReportGridFSID == nil {
+		return scan.Result.Report, nil
 	}
 	m.mu.Lock()
-	file, found := m.files[*scan.ReportGridFSID]
+	file, found := m.files[*scan.Result.ReportGridFSID]
 	m.mu.Unlock()
 	if !found {
 		return nil, fmt.Errorf("reading report of scan %s: %w", scan.ID, ErrNotFound)

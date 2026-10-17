@@ -56,11 +56,12 @@ func (r *Runner) Ready() bool {
 }
 
 // Scan runs one scan of reference (host/repository/name@digest) for the scan's
-// requested platforms and severities (DEMAND sections 6 and 6.2). It records
-// every platform of the image in the platforms collection, and returns the scan
-// with its result and the report to store with store.SaveWithReport. On failure
-// the error is a *ScanError with its class. The queue sets the state and the
-// other timings.
+// platforms and severities (DEMAND sections 6 and 6.2). It records every
+// platform of the image in the platforms collection, and returns the scan with
+// its new Result and DB (without freshness) and the report to store with
+// store.SaveWithReport. On failure the error is a *ScanError with its class and
+// the scan is returned unchanged. The queue sets the state, the freshness and
+// the other timings.
 func (r *Runner) Scan(ctx context.Context, worker string, scan store.Scan, reference string) (store.Scan, bson.M, error) {
 	logger := slog.With(
 		slog.String("scan_id", scan.ID),
@@ -98,14 +99,18 @@ func (r *Runner) Scan(ctx context.Context, worker string, scan store.Scan, refer
 		logger.Error("recording the image's platforms failed", slog.String("error", err.Error()))
 	}
 
-	scan.Trivy = store.TrivyInfo{Version: r.Version(), DBUpdatedAt: db.UpdatedAt, DBManifestDigest: db.ManifestDigest}
-	scan.ScannedPlatform = r.cfg.ScanPlatform
-	scan.Platforms = result.ImagePlatforms
-	scan.PlatformsFound = result.PlatformsFound
-	scan.PlatformsNotFound = result.PlatformsNotFound
-	scan.HasMorePlatforms = result.HasMorePlatforms
-	scan.Summary = result.Summary
-	scan.Truncated = result.Truncated
+	scan.Result = &store.ScanResult{
+		Digest:             scan.Image.Digest,
+		Platforms:          scan.Options.Platforms,
+		Severity:           scan.Options.Severity,
+		ScannedPlatform:    r.cfg.ScanPlatform,
+		TrivyVersion:       r.Version(),
+		ImagePlatformTypes: result.ImagePlatforms,
+		Summary:            result.Summary,
+		SummaryByPlatform:  result.SummaryByPlatform,
+		Truncated:          result.Truncated,
+	}
+	scan.DB = &store.ScanDB{UpdatedAt: db.UpdatedAt, ManifestDigest: db.ManifestDigest}
 	scan.ScanMS = time.Since(start).Milliseconds()
 
 	findings := result.Findings

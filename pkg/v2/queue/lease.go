@@ -61,42 +61,28 @@ func (q *Queue) Heartbeat(ctx context.Context, scan store.Scan) error {
 	}}}})
 }
 
-// Complete stores the result of a claimed scan (filled in by the scan runner,
-// with its report or GridFS id) and marks it done. The active_key is removed,
-// so the same work can be queued again. ErrLeaseLost means the result must be
-// discarded.
+// Complete stores the new result of a claimed scan (filled in by the scan
+// runner, with its report or GridFS id, and the DB block) in place of the
+// previous one, sets confirmed_at and marks the scan done. ErrLeaseLost means
+// the result must be discarded.
 func (q *Queue) Complete(ctx context.Context, scan store.Scan) error {
-	set := bson.D{
-		{Key: "state", Value: store.ScanDone},
-		{Key: "finished_at", Value: "$$NOW"},
-		{Key: "trivy", Value: literal(scan.Trivy)},
-		{Key: "scanned_platform", Value: literal(scan.ScannedPlatform)},
-		{Key: "platforms", Value: literal(scan.Platforms)},
-		{Key: "platforms_found", Value: literal(scan.PlatformsFound)},
-		{Key: "platforms_not_found", Value: literal(scan.PlatformsNotFound)},
-		{Key: "has_more_platforms", Value: literal(scan.HasMorePlatforms)},
-		{Key: "summary", Value: literal(scan.Summary)},
-		{Key: "truncated", Value: literal(scan.Truncated)},
-		{Key: "scan_ms", Value: literal(scan.ScanMS)},
-		{Key: "queue_wait_ms", Value: bson.D{{Key: "$subtract", Value: bson.A{"$started_at", "$queued_at"}}}},
-		{Key: "total_ms", Value: bson.D{{Key: "$subtract", Value: bson.A{"$$NOW", "$queued_at"}}}},
-	}
-	unset := bson.A{"active_key", "lease_until"}
-	if scan.ReportGridFSID != nil {
-		set = append(set, bson.E{Key: "report_gridfs_id", Value: literal(*scan.ReportGridFSID)})
-		unset = append(unset, "report")
-	} else {
-		set = append(set, bson.E{Key: "report", Value: literal(scan.Report)})
-		unset = append(unset, "report_gridfs_id")
-	}
 	return q.fencedUpdate(ctx, scan, mongo.Pipeline{
-		{{Key: "$set", Value: set}},
-		{{Key: "$unset", Value: unset}},
+		{{Key: "$set", Value: bson.D{
+			{Key: "state", Value: store.ScanDone},
+			{Key: "finished_at", Value: "$$NOW"},
+			{Key: "confirmed_at", Value: "$$NOW"},
+			{Key: "result", Value: literal(scan.Result)},
+			{Key: "db", Value: literal(scan.DB)},
+			{Key: "scan_ms", Value: literal(scan.ScanMS)},
+			{Key: "queue_wait_ms", Value: bson.D{{Key: "$subtract", Value: bson.A{"$started_at", "$queued_at"}}}},
+			{Key: "total_ms", Value: bson.D{{Key: "$subtract", Value: bson.A{"$$NOW", "$queued_at"}}}},
+		}}},
+		{{Key: "$unset", Value: bson.A{"lease_until"}}},
 	})
 }
 
-// Fail marks a claimed scan failed with its failure class. Its request_id moves
-// to prior_request_id, so a retry with the same request_id creates a new scan.
+// Fail marks a claimed scan failed with its failure class and a sanitized
+// message. The last good result stays in place.
 func (q *Queue) Fail(ctx context.Context, scan store.Scan, class, detail string) error {
 	return q.fencedUpdate(ctx, scan, mongo.Pipeline{
 		{{Key: "$set", Value: bson.D{
@@ -106,9 +92,8 @@ func (q *Queue) Fail(ctx context.Context, scan store.Scan, class, detail string)
 			{Key: "finished_at", Value: "$$NOW"},
 			{Key: "scan_ms", Value: literal(scan.ScanMS)},
 			{Key: "total_ms", Value: bson.D{{Key: "$subtract", Value: bson.A{"$$NOW", "$queued_at"}}}},
-			{Key: "prior_request_id", Value: "$request_id"},
 		}}},
-		{{Key: "$unset", Value: bson.A{"request_id", "active_key", "lease_until"}}},
+		{{Key: "$unset", Value: bson.A{"lease_until"}}},
 	})
 }
 

@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.16 (Trivy 0.74.0, scan platform, queue, 2026-10-15)
+Status: DRAFT v0.17 (one scan document per image tag, 2026-10-17)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -39,6 +39,7 @@ Problems today:
 | Registry credentials | One system-level, pull-only robot account configured on the scanner. The scanner runs in the same Docker network as Harbor. Never sent in requests. |
 | MongoDB | Hard dependency. If it is down, the service is not ready and the API returns 503. The DB updater keeps running while MongoDB is down: its state stays in memory and is written to MongoDB when it is reachable again. |
 | Cache key | Image digest (not tag). Layers are often shared across images. |
+| Stored scans | Current state only: one document per image tag (`_id` = scan_id = sha256 of `<repository>/<name>:<tag>`). A new scan of the tag overwrites the previous result; there is no history. |
 | Skip rule | Skip only if last scan's DB `UpdatedAt` >= current DB `UpdatedAt`. |
 | Cached response | Return the stored result with a flag saying the DB did not change for this image. |
 | DB failure policy | Log, try configured fallback mirrors, then scan with the old DB until fixed. |
@@ -71,7 +72,7 @@ All endpoints require a service token in the `Authorization: Bearer` header. Thi
 
 Fields:
 
-- `request_id`: idempotency key (important for Temporal retries).
+- `request_id`: optional correlation id (1-128 characters), stored as `last_request_id` and logged. It is not unique and not an idempotency key: idempotency comes from the document identity (one document per tag), so a Temporal retry finds the same document.
 - `image`: `repository`, `name` and `tag` must follow the OCI distribution rules (path components `[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*`, tag `[A-Za-z0-9_][A-Za-z0-9._-]{0,127}`; no `..`, no encoded characters); otherwise 400. The tag is resolved to a digest synchronously in this request.
 - `platforms`: required. The Trivy result types (npm, jar, pip, ...) the caller wants reported.
 - `severity`: optional, default `["HIGH","CRITICAL"]`.
@@ -82,30 +83,38 @@ Fields:
 
 Responses:
 
+The `scan_id` is the lowercase hex sha256 of `"<repository>/<name>:<tag>"`: the id of the tag's document.
+
 | Case | HTTP | Body |
 |---|---|---|
 | Scan queued | 202 | `{ "scan_id", "state": "queued" }` |
 | Cache hit (see 6) | 200 | the stored result with `"cached": true, "db_unchanged": true` |
-| Same digest+options already queued/running | 200 | existing `scan_id` and its state |
-| Same `request_id` again | 200 | the original response |
+| The tag is queued/scanning for the same digest, and its scope covers the request | 200 | its `scan_id` and state |
+| The tag is queued/scanning for another digest, or for a scope that does not cover the request | 409 | error `scan_in_progress` with `Retry-After` |
 | Queue full | 429 | error with retry hint |
 | Mongo unavailable | 503 | error |
+
+`cached` and `db_unchanged` appear only in POST responses; they are not stored. `scan_in_progress` is one of the API error codes.
 
 Every response that includes a DB section carries:
 
 ```json
-"db": { "updated_at": "...", "last_upstream_check_at": "...", "freshness": "ok|stale" }
+"db": { "updated_at": "...", "last_upstream_check_at": "...", "confirmed_at": "...", "freshness": "ok|stale" }
 ```
+
+`updated_at`, `confirmed_at` and `freshness` are the values stored on the document (section 10); nothing is recomputed on read. While a tag has no result yet (its first scan is queued or scanning), the block shows the current local DB state.
 
 ### 5.2 Scan state: `GET /api/v2/scans/{scan_id}`
 
 | `state` | HTTP | Meaning for the caller |
 |---|---|---|
-| `not_found` | 404 | Scan is not here. Submit again. |
+| `not_found` | 404 | Scan is not here. Submit again. A `scan_id` that is not 64 lowercase hex characters is also `not_found`. |
 | `queued` | 200 | Waiting in the queue. |
 | `scanning` | 200 | Trivy is running. |
 | `done` | 200 | Finished. Result is included. |
-| `failed` | 200 | Finished with an error. `error` is included. |
+| `failed` | 200 | Finished with an error. `error` is included. The last successful result of the tag stays in place. |
+
+The state describes the tag's current attempt; the result is the tag's last successful scan.
 
 A `done` result contains:
 
@@ -115,7 +124,7 @@ A `done` result contains:
   "state": "done",
   "cached": false,
   "image": { "repository": "", "name": "", "tag": "", "digest": "sha256:..." },
-  "db": { "updated_at": "", "last_upstream_check_at": "", "freshness": "ok" },
+  "db": { "updated_at": "", "last_upstream_check_at": "", "confirmed_at": "", "freshness": "ok" },
   "summary": { "critical": 0, "high": 0 },
   "platforms": [ { "type": "node", "name": "..." } ],
   "has_more_platforms": true,
@@ -141,19 +150,23 @@ Current DB version, `updated_at`, `downloaded_at`, `db_age`, `last_upstream_chec
 
 ```
 POST /api/v2/scans
-  -> auth + validate, idempotency on request_id
-  -> resolve digest for repository/name:tag (registry call with robot account, see 6.1)
-  -> look up the last successful scan for this digest in the `scans` collection
-  -> cache hit if ALL are true:
+  -> auth -> validate -> not ready (503) -> resolve digest for repository/name:tag
+     (registry call with robot account, see 6.1) -> cache decision -> enqueue
+  -> cache hit on this tag's document if ALL are true:
        - force == false
-       - last successful scan exists for this digest
-       - last_scan.db_updated_at >= current_db.UpdatedAt
-       - last scan covered the requested platforms (superset)
-       - last scan covered the requested severities (superset)
-       - same Trivy version / scan options version (a different Trivy version is a cache miss)
-       - same scanned platform (`SCANNER_SCAN_PLATFORM`)
-     => 200 cached result, flagged db_unchanged
-  -> else: enqueue (dedupe on digest + options) => 202
+       - no active scan (state is not queued or scanning)
+       - the stored result's digest == the resolved digest
+       - same scanned platform (`SCANNER_SCAN_PLATFORM`) and same Trivy version
+       - the stored platforms and severities cover the request (superset)
+       - the result's db.updated_at >= the installed DB's UpdatedAt
+     => the hit renews the document: confirmed_at = now, db.freshness recomputed
+        against this request's max_db_age, customer_ids, customer_data and
+        last_request_id overwritten, state done. No new document.
+        200 with cached: true, db_unchanged: true
+  -> else: ANOTHER document with the same image.digest that meets the same
+     conditions => its result (and its GridFS content) is copied into this
+     tag's document, and the response is a hit. Copies are independent.
+  -> else: enqueue (section 9) => 202 (or 200 / 409 / 429)
 worker:
   -> log "triggering scan"
   -> run Trivy with the local DB (no network DB update during scan)
@@ -165,8 +178,8 @@ Notes:
 
 - Request time (`requested_at`) is stored for audit and ordering. It is not used to decide whether to skip.
 - Trivy already caches per-layer analysis (by layer ID) so shared layers are cheap to re-analyze. Vulnerability matching still runs against the DB on each scan. The digest cache adds whole-image skipping on top.
-- Every scan stores the DB `UpdatedAt` it used.
-- A later request for a broader scope (more platforms or lower severities than the last scan covered) is a cache miss and triggers a new scan.
+- Every result stores the DB `UpdatedAt` it used. Validity is decided by the DB version rule, never by time.
+- A later request for a broader scope (more platforms or lower severities than the last scan covered) is a cache miss and triggers a new scan. For the same digest the scope only widens: the new scan covers the union of the stored and the requested platforms and severities. If the tag moved to another digest, the scope is just the request's.
 - Trivy runs once per scan. Summary counts are kept for all severities of the requested platforms; details are kept only for the requested severities. Only the requested result types are persisted; Trivy's full output is not stored.
 
 ## 7. Trivy DB lifecycle
@@ -183,12 +196,12 @@ Notes:
 ### 6.2 Scan runner (Trivy)
 
 - The target Trivy version is the one pinned in the Dockerfile (0.74.0).
-- Trivy runs once per scan on `registry/repository/name@digest` with `image --scanners vuln --format json --output <file> --list-all-pkgs=false --skip-db-update --skip-java-db-update --skip-version-check --image-src remote --cache-dir <worker dir> --timeout <slightly below SCANNER_SCAN_TIMEOUT>`, `--platform <SCANNER_SCAN_PLATFORM>` (default `linux/amd64`), and `--insecure` for an `http://` registry. The platform is stored as `scanned_platform` on every scan and is part of the cache and dedupe keys; an image with no manifest for that platform fails with `platform_not_found`. Full multi-architecture handling stays deferred (section 14). No `--severity` flag: Trivy reports every severity and we filter. `--image-src remote` makes Trivy pull from the registry, never from a local Docker daemon; `--skip-version-check` makes no other network call.
+- Trivy runs once per scan on `registry/repository/name@digest` with `image --scanners vuln --format json --output <file> --list-all-pkgs=false --skip-db-update --skip-java-db-update --skip-version-check --image-src remote --cache-dir <worker dir> --timeout <slightly below SCANNER_SCAN_TIMEOUT>`, `--platform <SCANNER_SCAN_PLATFORM>` (default `linux/amd64`), and `--insecure` for an `http://` registry. The platform is stored as the result's `scanned_platform` and is part of the cache conditions; an image with no manifest for that platform fails with `platform_not_found`. Full multi-architecture handling stays deferred (section 14). No `--severity` flag: Trivy reports every severity and we filter. `--image-src remote` makes Trivy pull from the registry, never from a local Docker daemon; `--skip-version-check` makes no other network call.
 - The child environment comes from an allowlist (`PATH`, `HOME`, `TMPDIR`, `TRIVY_*`, proxy variables), never the full environment. Registry credentials go in `TRIVY_USERNAME` / `TRIVY_PASSWORD`, never on the command line.
 - Each worker has its own Trivy cache directory. At scan start its `db` (and `java-db`) symlink points at the concrete version directory of the installed DB; that version's `UpdatedAt` and manifest digest are stored with the scan, and the version is pinned while the scan runs (pruning skips pinned versions).
 - The JSON goes to a private (0600) temporary file, which is stream-parsed and then deleted. Output above `SCANNER_SCAN_MAX_OUTPUT` fails the scan. Only the last 8 KiB of stderr is kept, redacted.
 - Failure classes: `trivy_timeout`, `trivy_exit_error`, `output_too_large`, `output_invalid`, `db_missing` (no vulnerability DB installed; Trivy is not started), `java_db_missing` (the image has `.jar` files and no Java DB is installed: Trivy stops with "Unable to initialize the Java DB"; Trivy has no clean way to skip jar analysis, so this is a clear failure), `platform_not_found`.
-- Requested platforms are matched against the result `Type`, case-insensitively. Platform strings: lowercase letters, digits, `-` and `_`, with a maximum count; severities: uppercase, from the fixed set UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL. Counts cover all severities of the requested platforms; details only the requested severities. Results carry `platforms_requested`, `platforms_found` and `platforms_not_found`: a requested platform that is not in the image must never look like a clean result. `has_more_platforms` is true when the image has other types. Every type found is upserted into `platforms`.
+- Requested platforms are matched against the result `Type`, case-insensitively. Platform strings: lowercase letters, digits, `-` and `_`, with a maximum count; severities: uppercase, from the fixed set UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL. Counts cover all severities of the requested platforms; details only the requested severities. All result types of the image are stored as `image_platform_types`, with the counts per scanned platform in `summary_by_platform`; responses derive `platforms_requested`, `platforms_found`, `platforms_not_found` and `has_more_platforms` (true when the image has other types) for the request. A requested platform that is not in the image must never look like a clean result. Every type found is upserted into `platforms`.
 - A stored finding has: id, package, installed version, fixed version, severity, title, primary URL, status, target, type. Descriptions, references and package lists are dropped. At most `SCANNER_SCAN_MAX_FINDINGS` are stored, with `truncated: true` beyond it.
 - Logging: "triggering scan" (scan_id, digest, customer ids, platforms, severities, Trivy version, db_updated_at) and "scan done" (durations, counts); findings are never logged. `trivy --version` runs at startup; the version is stored with each scan; readiness is false while the Trivy binary is missing.
 - Measured with Trivy 0.71.2 and 0.74.0 (see PROGRESS): a result type with no findings still appears in the output with `--list-all-pkgs=false` (checked for an OS type and a language type), so package lists are not needed to discover types.
@@ -283,8 +296,11 @@ Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format
 - Claim: `findOneAndUpdate` on `state: queued`, oldest `queued_at` first, setting `state: scanning`, `worker`, `lease_until` and `attempt + 1`. All lease times use MongoDB's clock (`$$NOW` in pipeline updates and `$expr` comparisons), never a replica's clock.
 - Lease `SCANNER_QUEUE_LEASE` (60s), heartbeat every third of it (20s). Every worker write (heartbeat, completion) is conditional on `_id` + `worker` + `attempt`; no match means the lease was lost: the result is discarded and the Trivy process group is killed.
 - Reaper on every replica every 30s: an expired `scanning` scan goes back to `queued`; after `SCANNER_QUEUE_MAX_ATTEMPTS` (3) it becomes `failed` with class `worker_lost`. Only lease loss is retried automatically.
-- Dedupe: `active_key` (hash of digest, sorted platforms, sorted severities, scanned platform and Trivy version) is set only while a scan is `queued` or `scanning` and removed when it finishes; a unique partial index on it (`{active_key: {$type: "string"}}`). A conflict returns the existing `scan_id`.
-- Idempotency covers queued, scanning and done scans. When a scan fails, its `request_id` moves to `prior_request_id`, so a retry with the same `request_id` creates a new scan.
+- One document per image tag (section 10). Enqueue: the first scan of a tag inserts the document (a duplicate key means another request created it: read it and decide again). Later scans update the document, only while its state is not `queued` or `scanning`: state `queued`, `queued_at`, `attempt` 0, the new options and request fields. The previous result stays until the new scan succeeds.
+- While the tag is `queued` or `scanning`: a request for the same digest whose platforms and severities are covered by the running scan's scope gets 200 with that state; any other request gets 409 `scan_in_progress` with `Retry-After`.
+- Scope widening (section 6): for the same digest the new scan covers the union of the stored result's and the requested platforms and severities.
+- A successful scan replaces the result fields (`result`, `db`, `confirmed_at`) and deletes the previous GridFS file of the document (best effort, after the new document is saved). A failed scan sets state `failed` with its class and a sanitized message and leaves the last good result in place.
+- Leases, fencing, the reaper, release and shutdown apply to the tag's document as described here.
 - Queue full: `queued` count >= `SCANNER_QUEUE_MAX_LENGTH` gives 429 with `Retry-After`.
 - Workers poll every `SCANNER_QUEUE_POLL_INTERVAL` (2s, with jitter) and are woken at once by an enqueue in the same process. No change streams.
 - Workers do not claim while MongoDB is not ready or no DB is installed. Before each scan they call the on-demand DB refresh (7.4).
@@ -297,21 +313,34 @@ Java DB has its own optional source list (`SCANNER_JAVA_DB_SOURCES`, same format
 
 `scans` (also acts as the job record)
 
+One document per image tag, current state only. `_id` is the scan_id: lowercase hex sha256 of `"<repository>/<name>:<tag>"`.
+
 ```json
 {
-  "_id": "scan_id", "request_id": "", "requested_at": "",
+  "_id": "scan_id", "last_request_id": "", "requested_at": "",
   "customer_ids": [], "customer_data": {},
-  "image": { "repository": "", "name": "", "tag": "", "digest": "" },
-  "options": { "platforms": ["npm"], "severity": ["HIGH","CRITICAL"] },
+  "image": { "repository": "", "name": "", "tag": "", "digest": "", "media_type": "" },
+  "options": { "platforms": ["npm"], "severity": ["HIGH","CRITICAL"], "max_db_age": 0 },
+  "reference": "registry/repository/name@digest",
   "state": "queued|scanning|done|failed",
-  "trivy": { "version": "", "db_updated_at": "", "db_manifest_digest": "" },
-  "platforms": [], "has_more_platforms": false,
-  "summary": {}, "report": {}, "report_gridfs_id": null,
   "queued_at": "", "started_at": "", "finished_at": "",
   "queue_wait_ms": 0, "scan_ms": 0, "total_ms": 0,
-  "worker": "", "lease_until": "", "error": ""
+  "worker": "", "lease_until": "", "attempt": 0, "priority": null,
+  "error": "", "failure_class": "",
+  "result": {
+    "digest": "", "platforms": [], "severity": [],
+    "scanned_platform": "linux/amd64", "trivy_version": "",
+    "image_platform_types": [], "summary": {}, "summary_by_platform": {},
+    "truncated": false, "report": { "findings": [] }, "report_gridfs_id": null
+  },
+  "db": { "updated_at": "", "manifest_digest": "", "freshness": "ok|stale" },
+  "confirmed_at": ""
 }
 ```
+
+- `image`, `options`, `reference`, `state`, the timings and the queue fields describe the current attempt; `image.digest` is the digest resolved by the last enqueue.
+- `result`, `db` and `confirmed_at` describe the last successful scan and are replaced only when a new scan succeeds (or renewed by a cache hit). `result.digest` is the digest that was scanned. `db.updated_at` is the DB the findings come from (captured at scan start); `db.freshness` is computed against the max_db_age of the request that produced or renewed the result.
+- `customer_ids`, `customer_data` and `last_request_id` are those of the last request (enqueue or cache hit).
 
 `platforms`: `{ _id, first_seen_at, last_seen_at, seen_count, example_digest }`
 
@@ -327,19 +356,17 @@ Schema setup ("ensure schema"):
 
 Indexes:
 
-- `scans.request_id`: unique, partial (`partialFilterExpression: {request_id: {$type: "string"}}`), so scans without a `request_id` do not collide. A scan without `request_id` stores no `request_id` field.
-- `scans(image.digest, state, finished_at)`, `scans(customer_ids, finished_at)`, `scans(state, queued_at)`.
+- `scans(image.digest, state, finished_at)` (also finds other tags with the same digest for the cache), `scans(customer_ids, finished_at)`, `scans(state, queued_at)`, `scans(state, lease_until)` (reaper). There is no unique index besides `_id` (schema version 3; nothing was deployed before it, so older development databases are recreated instead of migrated).
 - `db_checks.at`: TTL index (`at` is a BSON date), `expireAfterSeconds` from `SCANNER_DB_CHECKS_RETENTION`. When the retention changes, the index is updated with `collMod`, never dropped.
-- The queue-claim index is added with the queue (P8).
 
-Large reports: summary plus report inline; the full report moves to GridFS when its BSON-encoded size is above 8 MiB (a code constant; the BSON document limit is 16 MiB). The GridFS file is uploaded first (metadata `scan_id`, `uploaded_at`), then the scan document is saved; if that save fails, the file is deleted at once (best effort). A retry for the same `scan_id` deletes the previous file first. List queries (`GET /api/v2/scans`) never return the report (projection). Cleanup of old files is part of retention (section 14).
+Large reports: summary plus report inline; the full report moves to GridFS when its BSON-encoded size is above 8 MiB (a code constant; the BSON document limit is 16 MiB). The GridFS file is uploaded first (metadata `scan_id`, `uploaded_at`), then the scan document is saved; if that save fails, the new file is deleted at once (best effort) and the previous result keeps its file. After a successful save, the document's other files (the previous result's) are deleted (best effort). List queries (`GET /api/v2/scans`) never return the report (projection). Cleanup of old files is part of retention (section 14).
 
 ## 11. Configuration (draft)
 
 | Variable | Purpose |
 |---|---|
 | `SCANNER_V2_API_ENABLED` | Feature flag for the new API |
-| `SCANNER_V2_AUTH_TOKEN` | Service token for the new API |
+| `SCANNER_V2_AUTH_TOKEN` | Service token for the new API. One token, compared in constant time, at least 32 characters |
 | `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error (config error). If MongoDB is only unreachable, the service does not exit: it keeps running with readiness false and the v2 API returning 503, the DB updater keeps running, and the driver reconnects automatically (no custom backoff loop). Write and read concern come from the connection string (no separate settings). The connection string is never logged or included in errors. No multi-document transactions are used. |
 | `SCANNER_INSTANCE_ID` | Id of this scanner instance for `db_state` and `db_checks`. Default: the hostname, with a WARN at startup (set it explicitly, for example in compose) |
 | `SCANNER_DB_STATE_RETENTION` | How long a `db_state` document lives after its last write (TTL index on `updated_at`, updated with `collMod`). Default 7d; startup fails if it is shorter than twice `SCANNER_DB_CHECK_INTERVAL` |
@@ -388,7 +415,7 @@ All defaults can be overridden by env. Existing Trivy variables keep their curre
 2. Same digest again with an unchanged DB returns 200 with `cached: true` and **no Trivy process is started**.
 3. After the DB updates, the same digest is scanned again.
 4. `force: true` always scans.
-5. A new tag pointing to an already-scanned digest is a cache hit.
+5. A new tag pointing to an already-scanned digest is a cache hit: the result is copied into the new tag's document.
 6. Unknown `scan_id` returns `not_found` (404).
 7. With the mirror blackholed, the pre-check fails within its timeout (no long hang), the next fallback source is tried, and if all fail the scan proceeds with the old DB and responses say `stale`.
 8. Pre-check logs show source, route (direct/proxy/SOCKS5), TLS and HTTP/2 results, and no secrets.
@@ -398,6 +425,10 @@ All defaults can be overridden by env. Existing Trivy variables keep their curre
 12. A request with `platforms: ["npm"]` returns only npm findings, sets `has_more_platforms` when the image has other platform types, and still records those other types in the `platforms` collection.
 13. A request with a broader scope than the cached scan (extra platform or lower severity) triggers a new scan.
 14. Trivy never downloads a DB during a scan; all DB downloads go through our own module.
+15. A cache hit renews `confirmed_at` on the tag's document without creating a document.
+16. A rescan of the same tag overwrites its result (one document per tag).
+17. A request that is not covered by the tag's running scan returns 409 `scan_in_progress`.
+18. For the same digest, the scope widens to the union of the stored and the requested platforms and severities.
 
 ## 14. Deferred ideas and open questions
 
@@ -418,7 +449,7 @@ All defaults can be overridden by env. Existing Trivy variables keep their curre
 
 2. **Multi-architecture images**: an image index has several manifests with different digests, so the cache key depends on which one is scanned. To decide together with the digest store.
 3. **Queue priorities**: to be decided after R&D on Trivy's behaviour (CPU, memory, duration per image size). The `priority` field is reserved.
-4. **Retention**: how long old scans stay in MongoDB.
+4. **Retention**: later, delete tag documents not confirmed for N days, with their GridFS file.
 
 ### Open questions
 

@@ -56,18 +56,20 @@ func TestScan(t *testing.T) {
 	scan, report, err := r.Scan(context.Background(), "worker-1", queuedScan(), reference)
 
 	require.NoError(t, err)
-	assert.Equal(t, store.TrivyInfo{
-		Version:          "0.74.0",
-		DBUpdatedAt:      time.Date(2026, 10, 15, 7, 10, 8, 0, time.UTC),
-		DBManifestDigest: "sha256:db-v1",
-	}, store.TrivyInfo{Version: scan.Trivy.Version, DBUpdatedAt: scan.Trivy.DBUpdatedAt.UTC(), DBManifestDigest: scan.Trivy.DBManifestDigest})
-	assert.Equal(t, []string{"alpine", "node-pkg", "pip"}, scan.Platforms)
-	assert.Equal(t, []string{"alpine"}, scan.PlatformsFound)
-	assert.Equal(t, []string{"npm"}, scan.PlatformsNotFound, "npm was asked for and is not in the image")
-	assert.True(t, scan.HasMorePlatforms)
-	assert.Equal(t, map[string]int{"critical": 1, "high": 2, "medium": 1, "low": 1, "unknown": 0}, scan.Summary)
-	assert.False(t, scan.Truncated)
-	assert.Equal(t, "linux/amd64", scan.ScannedPlatform)
+	require.NotNil(t, scan.DB)
+	assert.Equal(t, store.ScanDB{UpdatedAt: time.Date(2026, 10, 15, 7, 10, 8, 0, time.UTC), ManifestDigest: "sha256:db-v1"},
+		store.ScanDB{UpdatedAt: scan.DB.UpdatedAt.UTC(), ManifestDigest: scan.DB.ManifestDigest}, "freshness is set by the queue")
+	summary := map[string]int{"critical": 1, "high": 2, "medium": 1, "low": 1, "unknown": 0}
+	assert.Equal(t, &store.ScanResult{
+		Digest:             queuedScan().Image.Digest,
+		Platforms:          []string{"alpine", "npm"},
+		Severity:           []string{"HIGH", "CRITICAL"},
+		ScannedPlatform:    "linux/amd64",
+		TrivyVersion:       "0.74.0",
+		ImagePlatformTypes: []string{"alpine", "node-pkg", "pip"},
+		Summary:            summary,
+		SummaryByPlatform:  map[string]map[string]int{"alpine": summary},
+	}, scan.Result, "npm was asked for and is not in the image: no summary for it")
 	assert.Greater(t, scan.ScanMS, int64(-1))
 	findings := report["findings"].([]Finding)
 	assert.Len(t, findings, 3)
@@ -102,12 +104,12 @@ func TestScan_ReportIsStoredInlineOrInGridFS(t *testing.T) {
 
 	inline := store.NewMemoryReports(store.ReportInlineLimit)
 	require.NoError(t, store.SaveWithReport(context.Background(), inline, scan, report, save))
-	assert.Nil(t, saved.ReportGridFSID)
-	assert.NotNil(t, saved.Report)
+	assert.Nil(t, saved.Result.ReportGridFSID)
+	assert.NotNil(t, saved.Result.Report)
 
 	gridFS := store.NewMemoryReports(100)
 	require.NoError(t, store.SaveWithReport(context.Background(), gridFS, scan, report, save))
-	require.NotNil(t, saved.ReportGridFSID)
+	require.NotNil(t, saved.Result.ReportGridFSID)
 	loaded, err := gridFS.Load(context.Background(), saved)
 	require.NoError(t, err)
 	assert.Len(t, loaded["findings"], 3)

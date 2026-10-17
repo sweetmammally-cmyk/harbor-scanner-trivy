@@ -54,7 +54,6 @@ func TestReap(t *testing.T) {
 		assert.Equal(t, "queued", doc["state"])
 		assert.NotContains(t, doc, "worker")
 		assert.NotContains(t, doc, "lease_until")
-		assert.Equal(t, queue.ActiveKey(scan), doc["active_key"], "still the active scan for its work")
 
 		runPool(t, other, doneScanner(), &fakeRefresher{}, always)
 
@@ -69,7 +68,7 @@ func TestReap(t *testing.T) {
 			shortLease(cfg)
 			cfg.QueueMaxAttempts = 2
 		})
-		scan, _, err := q.Enqueue(ctx, newScan("req-poison", "sha256:a"))
+		scan, _, err := q.Enqueue(ctx, newScan("v1", "sha256:a"))
 		require.NoError(t, err)
 
 		for attempt := 1; attempt <= 2; attempt++ {
@@ -84,16 +83,15 @@ func TestReap(t *testing.T) {
 		doc := rawScan(t, client, scan.ID)
 		assert.Equal(t, "failed", doc["state"])
 		assert.Equal(t, queue.FailureWorkerLost, doc["failure_class"])
-		assert.Equal(t, "req-poison", doc["prior_request_id"])
-		assert.NotContains(t, doc, "active_key")
-		assert.NotContains(t, doc, "request_id")
+		assert.NotContains(t, doc, "lease_until")
 		_, err = q.Claim(ctx, "w")
 		assert.ErrorIs(t, err, queue.ErrNoJob, "a failed scan is not claimed again")
 
-		retry, created, err := q.Enqueue(ctx, newScan("req-poison", "sha256:a"))
+		retry, created, err := q.Enqueue(ctx, newScan("v1", "sha256:a"))
 		require.NoError(t, err)
-		assert.True(t, created)
-		assert.NotEqual(t, scan.ID, retry.ID)
+		assert.True(t, created, "a new request queues the tag again")
+		assert.Equal(t, scan.ID, retry.ID)
+		assert.Zero(t, retry.Attempt)
 	})
 
 	t.Run("the reaper runs by itself on its interval once MongoDB is ready", func(t *testing.T) {

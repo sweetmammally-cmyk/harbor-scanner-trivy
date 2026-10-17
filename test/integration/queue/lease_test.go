@@ -129,63 +129,76 @@ func TestFencedWrites(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 2, current.Attempt)
 
-		stale.Summary = map[string]int{"critical": 99}
+		stale.Result = &store.ScanResult{Summary: map[string]int{"critical": 99}}
 		assert.ErrorIs(t, q.Complete(ctx, stale), queue.ErrLeaseLost)
-		current.Summary = map[string]int{"critical": 1}
+		current.Result = &store.ScanResult{Summary: map[string]int{"critical": 1}}
 		require.NoError(t, q.Complete(ctx, current))
 
-		doc := rawScan(t, client, current.ID)
-		assert.Equal(t, "done", doc["state"])
-		assert.EqualValues(t, 1, doc["summary"].(bson.D)[0].Value, "the current worker's result")
+		done := getScan(t, client, current.ID)
+		assert.Equal(t, "done", done.State)
+		assert.Equal(t, 1, done.Result.Summary["critical"], "the current worker's result")
 		assert.ErrorIs(t, q.Fail(ctx, stale, "trivy_exit_error", "late"), queue.ErrLeaseLost)
 	})
 
-	t.Run("completion stores values literally and frees the active key", func(t *testing.T) {
+	t.Run("completion stores values literally and replaces the result", func(t *testing.T) {
 		q, client, _ := newQueue(t, nil)
-		enqueued, _, err := q.Enqueue(ctx, newScan("req-1", "sha256:a"))
+		enqueued, _, err := q.Enqueue(ctx, newScan("", "sha256:a"))
 		require.NoError(t, err)
+		finish(t, client, enqueued)
+		setFields(t, client, enqueued.ID, bson.M{"$set": bson.M{"state": "queued"}})
 		scan, err := q.Claim(ctx, "w")
 		require.NoError(t, err)
-		scan.Report = bson.M{"findings": bson.A{bson.M{"id": "CVE-1", "title": "$where injection in $gt"}}}
-		scan.Platforms = []string{"$npm"}
-		scan.Trivy.DBManifestDigest = "sha256:db"
+		require.NotNil(t, scan.Result, "the previous result")
+		scan.Result = &store.ScanResult{
+			Digest:             "sha256:a",
+			ImagePlatformTypes: []string{"$npm"},
+			Report:             bson.M{"findings": bson.A{bson.M{"id": "CVE-1", "title": "$where injection in $gt"}}},
+		}
+		scan.DB = &store.ScanDB{ManifestDigest: "sha256:db", Freshness: "stale"}
 		scan.ScanMS = 1234
+		before := mongoNow(t, client)
 
 		require.NoError(t, q.Complete(ctx, scan))
 
-		var done store.Scan
-		require.NoError(t, client.Database().Collection(store.CollectionScans).FindOne(ctx, bson.M{"_id": scan.ID}).Decode(&done))
+		done := getScan(t, client, scan.ID)
 		assert.Equal(t, store.ScanDone, done.State)
-		assert.Equal(t, []string{"$npm"}, done.Platforms, "a value starting with $ is not read as a field path")
-		finding := done.Report["findings"].(bson.A)[0].(bson.D)
+		assert.Equal(t, []string{"$npm"}, done.Result.ImagePlatformTypes, "a value starting with $ is not read as a field path")
+		finding := done.Result.Report["findings"].(bson.A)[0].(bson.D)
 		assert.Contains(t, finding, bson.E{Key: "title", Value: "$where injection in $gt"})
-		assert.Empty(t, done.ActiveKey)
+		assert.Nil(t, done.Result.Summary, "the previous result is replaced, not merged")
+		assert.Equal(t, &store.ScanDB{ManifestDigest: "sha256:db", Freshness: "stale", UpdatedAt: done.DB.UpdatedAt}, done.DB)
+		require.NotNil(t, done.ConfirmedAt)
+		assert.False(t, done.ConfirmedAt.Before(before.Add(-time.Second)), "confirmed_at on MongoDB's clock")
 		assert.Nil(t, done.LeaseUntil)
 		require.NotNil(t, done.FinishedAt)
 		assert.Equal(t, int64(1234), done.ScanMS)
 		assert.GreaterOrEqual(t, done.TotalMS, done.QueueWaitMS)
-		assert.Equal(t, "req-1", done.RequestID, "a done scan keeps its request_id")
 		assert.Equal(t, enqueued.ID, done.ID)
 	})
 
-	t.Run("a failed scan frees its request_id: a retry creates a new scan", func(t *testing.T) {
+	t.Run("a failed scan keeps the last good result; a retry queues the same document again", func(t *testing.T) {
 		q, client, _ := newQueue(t, nil)
-		first, _, err := q.Enqueue(ctx, newScan("req-1", "sha256:a"))
+		first, _, err := q.Enqueue(ctx, newScan("v1", "sha256:a"))
+		require.NoError(t, err)
+		finish(t, client, first)
+		_, _, err = q.Enqueue(ctx, newScan("v1", "sha256:a"))
 		require.NoError(t, err)
 		scan, err := q.Claim(ctx, "w")
 		require.NoError(t, err)
 		require.NoError(t, q.Fail(ctx, scan, "trivy_exit_error", "exit status 1"))
 
-		doc := rawScan(t, client, first.ID)
-		assert.Equal(t, "failed", doc["state"])
-		assert.Equal(t, "trivy_exit_error", doc["failure_class"])
-		assert.Equal(t, "req-1", doc["prior_request_id"])
-		assert.NotContains(t, doc, "request_id")
-		assert.NotContains(t, doc, "active_key")
+		failed := getScan(t, client, first.ID)
+		assert.Equal(t, "failed", failed.State)
+		assert.Equal(t, "trivy_exit_error", failed.FailureClass)
+		assert.Equal(t, "exit status 1", failed.Error)
+		require.NotNil(t, failed.Result, "the last good result stays")
+		assert.Equal(t, 1, failed.Result.Summary["high"])
 
-		retry, created, err := q.Enqueue(ctx, newScan("req-1", "sha256:a"))
+		retry, created, err := q.Enqueue(ctx, newScan("v1", "sha256:a"))
 		require.NoError(t, err)
 		assert.True(t, created)
-		assert.NotEqual(t, first.ID, retry.ID)
+		assert.Equal(t, first.ID, retry.ID)
+		assert.Equal(t, "queued", retry.State)
+		assert.EqualValues(t, 1, countScans(t, client))
 	})
 }

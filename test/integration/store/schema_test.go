@@ -111,25 +111,24 @@ func TestSchema(t *testing.T) {
 		assert.Equal(t, scansBefore, indexes(t, client, "scans"))
 		assert.Equal(t, checksBefore, indexes(t, client, "db_checks"))
 		assert.Equal(t, versionBefore, schemaVersion(t, client))
-		assert.Contains(t, scansBefore, "request_id_unique")
 		assert.Contains(t, scansBefore, "image_digest_state_finished_at")
 		assert.Contains(t, scansBefore, "customer_ids_finished_at")
 		assert.Contains(t, scansBefore, "state_queued_at")
 	})
 
-	t.Run("request_id: absent twice is fine, a duplicate is rejected", func(t *testing.T) {
+	t.Run("scans: one document per tag, request ids are not unique", func(t *testing.T) {
 		client := newClient(t, schemaConfig(mongoAddr, "request_ids", retention))
 		require.NoError(t, client.EnsureSchema(context.Background()))
 		now := time.Now()
 
-		require.NoError(t, insert(t, client, store.CollectionScans, store.Scan{ID: "a", State: store.ScanQueued, QueuedAt: now}))
-		require.NoError(t, insert(t, client, store.CollectionScans, store.Scan{ID: "b", State: store.ScanQueued, QueuedAt: now}))
-		require.NoError(t, insert(t, client, store.CollectionScans, store.Scan{ID: "c", RequestID: "req-1", State: store.ScanQueued, QueuedAt: now}))
-		err := insert(t, client, store.CollectionScans, store.Scan{ID: "d", RequestID: "req-1", State: store.ScanQueued, QueuedAt: now})
+		require.NoError(t, insert(t, client, store.CollectionScans, store.Scan{ID: "a", LastRequestID: "req-1", State: store.ScanQueued, QueuedAt: now}))
+		require.NoError(t, insert(t, client, store.CollectionScans, store.Scan{ID: "b", LastRequestID: "req-1", State: store.ScanQueued, QueuedAt: now}))
+		err := insert(t, client, store.CollectionScans, store.Scan{ID: "a", State: store.ScanQueued, QueuedAt: now})
 
 		assert.True(t, mongo.IsDuplicateKeyError(err), "%v", err)
-		assert.EqualValues(t, bson.M{"request_id": bson.M{"$type": "string"}},
-			bsonToMap(indexes(t, client, "scans")["request_id_unique"]["partialFilterExpression"]))
+		scans := indexes(t, client, "scans")
+		assert.NotContains(t, scans, "request_id_unique")
+		assert.NotContains(t, scans, "active_key_unique")
 	})
 
 	t.Run("db_checks TTL follows the retention, updated with collMod", func(t *testing.T) {
@@ -218,7 +217,7 @@ func TestSchema(t *testing.T) {
 		require.NoError(t, client.EnsureSchema(context.Background()))
 
 		assert.EqualValues(t, store.SchemaVersion, schemaVersion(t, client)["version"])
-		assert.Contains(t, indexes(t, client, "scans"), "request_id_unique")
+		assert.Contains(t, indexes(t, client, "scans"), "state_queued_at")
 	})
 
 	t.Run("Mongo down at startup: indexes are created after it comes back", func(t *testing.T) {
@@ -231,7 +230,7 @@ func TestSchema(t *testing.T) {
 
 		proxy.start(t)
 		require.Eventually(t, client.Ready, 30*time.Second, 50*time.Millisecond)
-		assert.Contains(t, indexes(t, client, "scans"), "request_id_unique")
+		assert.Contains(t, indexes(t, client, "scans"), "state_queued_at")
 		assert.Contains(t, indexes(t, client, "db_checks"), "at_ttl")
 	})
 }

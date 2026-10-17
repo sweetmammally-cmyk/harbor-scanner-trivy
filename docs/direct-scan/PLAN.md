@@ -61,7 +61,7 @@ Enqueue into `scans`, dedupe on digest plus options, worker pool with atomic cla
 Exit: concurrency, crash-recovery and dedupe tests pass.
 
 ### Phase 9: REST API v2
-Router and service-token auth, `POST /api/v2/scans` with `request_id` idempotency, cache decision (all conditions in DEMAND section 6), `GET /api/v2/scans/{id}` with the five states, `GET /api/v2/scans` filters and paging, `GET /api/v2/db`, the `db` block in responses.
+Router and service-token auth, `POST /api/v2/scans` on the tag's document (idempotency from the document identity; `request_id` is a correlation id), cache decision with renewal and copy hits (all conditions in DEMAND section 6), `GET /api/v2/scans/{id}` with the five states, `GET /api/v2/scans` filters and paging, `GET /api/v2/db`, the `db` block in responses.
 Exit: API tests cover every row of the DEMAND response tables.
 
 ### Phase 10: Health, logging, metrics

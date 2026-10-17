@@ -152,12 +152,16 @@ func TestMongoClient(t *testing.T) {
 		at := time.Date(2026, 10, 15, 10, 0, 0, 123000000, time.UTC)
 		finished := at.Add(5 * time.Second)
 		scan := store.Scan{
-			ID: "scan-1", RequestID: "req-1", RequestedAt: at, CustomerIDs: []string{"cust-1"},
+			ID: "scan-1", LastRequestID: "req-1", RequestedAt: at, CustomerIDs: []string{"cust-1"},
 			CustomerData: map[string]any{"env": "prod"},
 			Image:        store.Image{Repository: "customer-1", Name: "app", Tag: "v1", Digest: "sha256:abc"},
 			Options:      store.ScanOptions{Platforms: []string{"npm"}, Severity: []string{"HIGH", "CRITICAL"}},
-			State:        store.ScanDone, Platforms: []string{"npm"}, Summary: map[string]int{"high": 2},
-			QueuedAt: at, FinishedAt: &finished, TotalMS: 5000,
+			State:        store.ScanDone,
+			Result: &store.ScanResult{Digest: "sha256:abc", Platforms: []string{"npm"}, Severity: []string{"HIGH", "CRITICAL"},
+				ImagePlatformTypes: []string{"npm"}, Summary: map[string]int{"high": 2},
+				SummaryByPlatform: map[string]map[string]int{"npm": {"high": 2}}},
+			DB:       &store.ScanDB{UpdatedAt: at, ManifestDigest: "sha256:db", Freshness: "ok"},
+			QueuedAt: at, FinishedAt: &finished, ConfirmedAt: &finished, TotalMS: 5000,
 		}
 		_, err = client.Database().Collection(store.CollectionScans).InsertOne(ctx, scan)
 		require.NoError(t, err)

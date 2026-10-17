@@ -26,18 +26,24 @@ func at(minutes int) *time.Time {
 	return &t
 }
 
-func scan(id, requestID, digest, state string, finishedAt *time.Time) store.Scan {
+func scan(id, digest, state string) store.Scan {
 	return store.Scan{
 		ID:          id,
-		RequestID:   requestID,
 		RequestedAt: base,
 		CustomerIDs: []string{"cust-1"},
 		Image:       store.Image{Repository: "customer-1", Name: "app", Tag: "v1", Digest: digest},
 		Options:     store.ScanOptions{Platforms: []string{"npm"}, Severity: []string{"HIGH", "CRITICAL"}},
 		State:       state,
 		QueuedAt:    base,
-		FinishedAt:  finishedAt,
 	}
+}
+
+// withResult is a done scan with a result (and no report yet).
+func withResult(id string) store.Scan {
+	done := scan(id, "sha256:a", store.ScanDone)
+	done.FinishedAt = at(1)
+	done.Result = &store.ScanResult{Digest: "sha256:a", Platforms: []string{"npm"}, Severity: []string{"HIGH", "CRITICAL"}}
+	return done
 }
 
 // ScanRepository checks the ScanRepository contract. newRepository returns an
@@ -47,16 +53,13 @@ func ScanRepository(t *testing.T, newRepository func(t *testing.T) store.ScanRep
 
 	t.Run("create and get", func(t *testing.T) {
 		repository := newRepository(t)
-		created := scan("scan-1", "req-1", "sha256:a", store.ScanQueued, nil)
+		created := scan("scan-1", "sha256:a", store.ScanQueued)
+		created.LastRequestID = "req-1"
 		require.NoError(t, repository.Create(ctx, created))
 
 		got, err := repository.Get(ctx, "scan-1")
 		require.NoError(t, err)
 		assert.Equal(t, created, got)
-
-		byRequest, err := repository.GetByRequestID(ctx, "req-1")
-		require.NoError(t, err)
-		assert.Equal(t, created, byRequest)
 	})
 
 	t.Run("not found", func(t *testing.T) {
@@ -64,39 +67,18 @@ func ScanRepository(t *testing.T, newRepository func(t *testing.T) store.ScanRep
 
 		_, err := repository.Get(ctx, "missing")
 		assert.ErrorIs(t, err, store.ErrNotFound)
-		_, err = repository.GetByRequestID(ctx, "missing")
-		assert.ErrorIs(t, err, store.ErrNotFound)
-		_, err = repository.LastDone(ctx, "sha256:missing")
-		assert.ErrorIs(t, err, store.ErrNotFound)
 	})
 
-	t.Run("request_id is unique, scans without one never collide", func(t *testing.T) {
+	t.Run("one document per id; request ids are not unique", func(t *testing.T) {
 		repository := newRepository(t)
-		require.NoError(t, repository.Create(ctx, scan("scan-1", "req-1", "sha256:a", store.ScanQueued, nil)))
-		require.NoError(t, repository.Create(ctx, scan("scan-2", "", "sha256:a", store.ScanQueued, nil)))
-		require.NoError(t, repository.Create(ctx, scan("scan-3", "", "sha256:a", store.ScanQueued, nil)))
+		first := scan("scan-1", "sha256:a", store.ScanQueued)
+		first.LastRequestID = "req-1"
+		require.NoError(t, repository.Create(ctx, first))
+		other := scan("scan-2", "sha256:a", store.ScanQueued)
+		other.LastRequestID = "req-1"
+		require.NoError(t, repository.Create(ctx, other))
 
-		err := repository.Create(ctx, scan("scan-4", "req-1", "sha256:b", store.ScanQueued, nil))
-		assert.ErrorIs(t, err, store.ErrDuplicateRequestID)
-
-		err = repository.Create(ctx, scan("scan-1", "req-9", "sha256:a", store.ScanQueued, nil))
-		assert.Error(t, err, "the same scan id twice")
-		assert.NotErrorIs(t, err, store.ErrDuplicateRequestID)
-	})
-
-	t.Run("last done is the newest finished successful scan of the digest", func(t *testing.T) {
-		repository := newRepository(t)
-		require.NoError(t, repository.Create(ctx, scan("old", "", "sha256:a", store.ScanDone, at(1))))
-		require.NoError(t, repository.Create(ctx, scan("newest", "", "sha256:a", store.ScanDone, at(3))))
-		require.NoError(t, repository.Create(ctx, scan("middle", "", "sha256:a", store.ScanDone, at(2))))
-		require.NoError(t, repository.Create(ctx, scan("failed-later", "", "sha256:a", store.ScanFailed, at(4))))
-		require.NoError(t, repository.Create(ctx, scan("queued", "", "sha256:a", store.ScanQueued, nil)))
-		require.NoError(t, repository.Create(ctx, scan("other-digest", "", "sha256:b", store.ScanDone, at(5))))
-
-		last, err := repository.LastDone(ctx, "sha256:a")
-
-		require.NoError(t, err)
-		assert.Equal(t, "newest", last.ID)
+		assert.Error(t, repository.Create(ctx, scan("scan-1", "sha256:b", store.ScanQueued)), "the same scan id twice")
 	})
 }
 
@@ -177,19 +159,19 @@ func DBCheckRepository(t *testing.T, newRepository func(t *testing.T) store.DBCh
 }
 
 // ReportStore checks the ReportStore contract. newStore returns an empty store
-// that keeps reports up to limit BSON bytes inline.
+// with the given inline limit.
 func ReportStore(t *testing.T, newStore func(t *testing.T, limit int) store.ReportStore) {
 	ctx := context.Background()
-	report := bson.M{"vulnerabilities": strings.Repeat("CVE-2026-0001 ", 50)}
+	report := bson.M{"findings": strings.Repeat("CVE-2026-0001 ", 50)}
 
 	t.Run("small report stays inline", func(t *testing.T) {
 		reports := newStore(t, 10_000)
-		scan := scan("scan-1", "", "sha256:a", store.ScanDone, at(1))
+		scan := withResult("scan-1")
 
 		require.NoError(t, reports.Attach(ctx, &scan, report))
 
-		assert.Equal(t, report, scan.Report)
-		assert.Nil(t, scan.ReportGridFSID)
+		assert.Equal(t, report, scan.Result.Report)
+		assert.Nil(t, scan.Result.ReportGridFSID)
 		loaded, err := reports.Load(ctx, scan)
 		require.NoError(t, err)
 		assert.Equal(t, report, loaded)
@@ -197,62 +179,65 @@ func ReportStore(t *testing.T, newStore func(t *testing.T, limit int) store.Repo
 
 	t.Run("large report goes to GridFS", func(t *testing.T) {
 		reports := newStore(t, 100)
-		scan := scan("scan-1", "", "sha256:a", store.ScanDone, at(1))
+		scan := withResult("scan-1")
 
 		require.NoError(t, reports.Attach(ctx, &scan, report))
 
-		assert.Nil(t, scan.Report)
-		require.NotNil(t, scan.ReportGridFSID)
+		assert.Nil(t, scan.Result.Report)
+		require.NotNil(t, scan.Result.ReportGridFSID)
 		loaded, err := reports.Load(ctx, scan)
 		require.NoError(t, err)
 		assert.Equal(t, report, loaded)
 	})
 
-	t.Run("scan without report", func(t *testing.T) {
+	t.Run("scan without result", func(t *testing.T) {
 		reports := newStore(t, 100)
 
-		loaded, err := reports.Load(ctx, scan("scan-1", "", "sha256:a", store.ScanQueued, nil))
+		loaded, err := reports.Load(ctx, scan("scan-1", "sha256:a", store.ScanQueued))
 
 		require.NoError(t, err)
 		assert.Nil(t, loaded)
 	})
 
-	t.Run("a retry of the same scan deletes the earlier file", func(t *testing.T) {
+	t.Run("save with report: a failed save deletes the new file and keeps the previous one", func(t *testing.T) {
 		reports := newStore(t, 100)
-		first := scan("scan-1", "", "sha256:a", store.ScanDone, at(1))
-		require.NoError(t, reports.Attach(ctx, &first, report))
-		retry := scan("scan-1", "", "sha256:a", store.ScanDone, at(2))
-		require.NoError(t, reports.Attach(ctx, &retry, report))
-
-		_, err := reports.Load(ctx, first)
-		assert.Error(t, err, "the earlier file is gone")
-		loaded, err := reports.Load(ctx, retry)
-		require.NoError(t, err)
-		assert.Equal(t, report, loaded)
-	})
-
-	t.Run("save with report: a failed save deletes the uploaded file", func(t *testing.T) {
-		reports := newStore(t, 100)
+		previous := withResult("scan-1")
+		require.NoError(t, store.SaveWithReport(ctx, reports, previous, report, func(ctx context.Context, scan store.Scan) error {
+			previous = scan
+			return nil
+		}))
 		var attempted store.Scan
 		saveErr := errors.New("mongo write failed")
 
-		err := store.SaveWithReport(ctx, reports, scan("scan-1", "", "sha256:a", store.ScanDone, at(1)), report,
+		err := store.SaveWithReport(ctx, reports, withResult("scan-1"), report,
 			func(ctx context.Context, scan store.Scan) error {
 				attempted = scan
 				return saveErr
 			})
 
 		assert.ErrorIs(t, err, saveErr)
-		require.NotNil(t, attempted.ReportGridFSID, "the file was uploaded before the save")
+		require.NotNil(t, attempted.Result.ReportGridFSID, "the file was uploaded before the save")
 		_, err = reports.Load(ctx, attempted)
 		assert.Error(t, err, "and deleted after the failed save")
+		loaded, err := reports.Load(ctx, previous)
+		require.NoError(t, err, "the last good result keeps its file")
+		assert.Equal(t, report, loaded)
 	})
 
-	t.Run("save with report: a successful save keeps the file", func(t *testing.T) {
+	t.Run("save with report: a successful save deletes the previous result's file", func(t *testing.T) {
 		reports := newStore(t, 100)
-		var saved store.Scan
+		var previous, saved store.Scan
+		require.NoError(t, store.SaveWithReport(ctx, reports, withResult("scan-1"), report, func(ctx context.Context, scan store.Scan) error {
+			previous = scan
+			return nil
+		}))
+		other := withResult("scan-2")
+		require.NoError(t, store.SaveWithReport(ctx, reports, other, report, func(ctx context.Context, scan store.Scan) error {
+			other = scan
+			return nil
+		}))
 
-		err := store.SaveWithReport(ctx, reports, scan("scan-1", "", "sha256:a", store.ScanDone, at(1)), report,
+		err := store.SaveWithReport(ctx, reports, withResult("scan-1"), report,
 			func(ctx context.Context, scan store.Scan) error {
 				saved = scan
 				return nil
@@ -262,27 +247,30 @@ func ReportStore(t *testing.T, newStore func(t *testing.T, limit int) store.Repo
 		loaded, err := reports.Load(ctx, saved)
 		require.NoError(t, err)
 		assert.Equal(t, report, loaded)
+		_, err = reports.Load(ctx, previous)
+		assert.Error(t, err, "the previous result's file is gone")
+		_, err = reports.Load(ctx, other)
+		assert.NoError(t, err, "files of other scan ids are left alone")
 	})
 
-	t.Run("save with report: a small report has no file to delete", func(t *testing.T) {
+	t.Run("save with report: a small report has no file", func(t *testing.T) {
 		reports := newStore(t, 10_000)
-		saveErr := errors.New("mongo write failed")
 
-		err := store.SaveWithReport(ctx, reports, scan("scan-1", "", "sha256:a", store.ScanDone, at(1)), report,
+		err := store.SaveWithReport(ctx, reports, withResult("scan-1"), report,
 			func(ctx context.Context, scan store.Scan) error {
-				assert.Nil(t, scan.ReportGridFSID)
-				assert.Equal(t, report, scan.Report)
-				return saveErr
+				assert.Nil(t, scan.Result.ReportGridFSID)
+				assert.Equal(t, report, scan.Result.Report)
+				return nil
 			})
 
-		assert.ErrorIs(t, err, saveErr)
+		assert.NoError(t, err)
 	})
 
 	t.Run("unknown GridFS file", func(t *testing.T) {
 		reports := newStore(t, 100)
 		missing := bson.NewObjectID()
-		withMissingFile := scan("scan-1", "", "sha256:a", store.ScanDone, at(1))
-		withMissingFile.ReportGridFSID = &missing
+		withMissingFile := withResult("scan-1")
+		withMissingFile.Result.ReportGridFSID = &missing
 
 		_, err := reports.Load(ctx, withMissingFile)
 
