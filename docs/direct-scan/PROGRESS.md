@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 8 (queue)
-- Last completed task: P8-5
+- Phase: 8 (queue) done; next is Phase 9 (API)
+- Last completed task: P8-6
 - In progress: none
-- Next task: P8-6 (remaining real-Mongo queue tests)
+- Next task: P9-1
 - Blockers / questions for the user: none
 - Last updated: 2026-10-17
 
@@ -178,6 +178,24 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P8-6  Queue tests on real MongoDB
+- Status: done
+- What changed: the owner's test list, on mongo:7 with separate `store.Client`s acting as replicas, maps to:
+  - claimed exactly once under contention: `TestClaim` (4 replicas x 4 workers, 40 scans);
+  - ten concurrent identical requests give one scan: `TestEnqueue`, now spread over 3 replica clients (also the same request_id case);
+  - killed worker -> lease expires -> requeued -> finished by another worker: `TestReap`;
+  - a stale worker's late completion is rejected: `TestFencedWrites`, and the pool's lost-lease case in `TestPool`;
+  - poison job -> `failed` / `worker_lost` after max attempts: `TestReap`;
+  - queue full: `TestEnqueue` (`ErrQueueFull`); the 429 with Retry-After is the API's job (P9);
+  - graceful shutdown releases the lease: `TestShutdown`, the hand-off now to a pool on another client;
+  - retry after a failed scan with the same request_id creates a new scan: `TestFencedWrites` and `TestReap`;
+  - no claim while not ready: `TestPool`.
+  - `mongotest.StartContainer` sets the container's `nofile` limit to 64000. With Docker's default 1024, `-count=3` runs (one database per test) made MongoDB abort with "Too many open files" (WiredTiger panic, exit 14), failing every later test.
+- Files: `test/integration/queue/enqueue_test.go`, `test/integration/queue/shutdown_test.go`, `test/integration/mongotest/mongotest.go`
+- Tests run: `go test -race -count=3 -tags=integration ./test/integration/queue/ ./test/integration/store/` -> ok; `go test -count=1 -tags=integration ./test/integration/...` -> ok; `go test -short -race ./...` -> ok; `go mod tidy` leaves `go.mod` unchanged (uses the `container.Ulimit` alias, no new direct import).
+- Decisions / surprises: MongoDB in production also needs a high `nofile` limit (MongoDB advises 64000); to add to the compose file and README in P11.
+- Next: P9-1
 
 ### 2026-10-17  P8-5  Queue metrics
 - Status: done

@@ -14,6 +14,7 @@ import (
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/queue"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
+	"github.com/aquasecurity/harbor-scanner-trivy/test/integration/mongotest"
 )
 
 // startPool runs a pool and returns a function that stops it (SIGTERM) and
@@ -58,7 +59,7 @@ func TestShutdown(t *testing.T) {
 	})
 
 	t.Run("a scan still running at the end of the grace is killed and released", func(t *testing.T) {
-		q, client, _ := newQueue(t, grace)
+		q, client, cfg := newQueue(t, grace)
 		started := make(chan struct{})
 		scanner := &fakeScanner{scan: func(ctx context.Context, scan store.Scan) (store.Scan, bson.M, error) {
 			close(started)
@@ -84,7 +85,7 @@ func TestShutdown(t *testing.T) {
 		}
 
 		// Another replica takes it up.
-		other := startPool(q, doneScanner())
+		other := startPool(queue.New(mongotest.Client(t, cfg), cfg), doneScanner())
 		defer other()
 		require.Eventually(t, func() bool { return stateOf(t, client, scan.ID) == "done" }, 10*time.Second, 20*time.Millisecond)
 		assert.EqualValues(t, 1, rawScan(t, client, scan.ID)["attempt"])

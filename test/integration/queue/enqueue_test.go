@@ -150,8 +150,9 @@ func TestEnqueue(t *testing.T) {
 		}
 	})
 
-	t.Run("ten concurrent identical requests create one scan", func(t *testing.T) {
-		q, client, _ := newQueue(t, nil)
+	t.Run("ten concurrent identical requests on several replicas create one scan", func(t *testing.T) {
+		q, client, cfg := newQueue(t, nil)
+		replicas := []*queue.Queue{q, queue.New(mongotest.Client(t, cfg), cfg), queue.New(mongotest.Client(t, cfg), cfg)}
 		var wg sync.WaitGroup
 		ids := make([]string, 10)
 		created := make([]bool, 10)
@@ -161,7 +162,7 @@ func TestEnqueue(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				var scan store.Scan
-				scan, created[i], errs[i] = q.Enqueue(ctx, newScan(fmt.Sprintf("req-%d", i), "sha256:same"))
+				scan, created[i], errs[i] = replicas[i%len(replicas)].Enqueue(ctx, newScan(fmt.Sprintf("req-%d", i), "sha256:same"))
 				ids[i] = scan.ID
 			}()
 		}

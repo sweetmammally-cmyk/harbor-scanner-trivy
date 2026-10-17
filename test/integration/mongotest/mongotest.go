@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/stretchr/testify/require"
 	tc "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -23,24 +24,29 @@ import (
 // function that stops it. For TestMain, so a package shares one container.
 func StartContainer() (string, func(), error) {
 	ctx := context.Background()
-	container, err := tc.GenericContainer(ctx, tc.GenericContainerRequest{
+	mongo, err := tc.GenericContainer(ctx, tc.GenericContainerRequest{
 		ContainerRequest: tc.ContainerRequest{
 			Image:        "mongo:7",
 			ExposedPorts: []string{"27017/tcp"},
 			WaitingFor:   wait.ForListeningPort("27017/tcp").WithStartupTimeout(2 * time.Minute),
+			// Every test uses its own database; with the default limit of 1024 open
+			// files, repeated runs make MongoDB abort. 64000 is what MongoDB advises.
+			HostConfigModifier: func(hostConfig *container.HostConfig) {
+				hostConfig.Ulimits = []*container.Ulimit{{Name: "nofile", Soft: 64000, Hard: 64000}}
+			},
 		},
 		Started: true,
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("starting mongo container: %w", err)
 	}
-	stop := func() { _ = container.Terminate(ctx) }
-	host, err := container.Host(ctx)
+	stop := func() { _ = mongo.Terminate(ctx) }
+	host, err := mongo.Host(ctx)
 	if err != nil {
 		stop()
 		return "", nil, err
 	}
-	port, err := container.MappedPort(ctx, "27017")
+	port, err := mongo.MappedPort(ctx, "27017")
 	if err != nil {
 		stop()
 		return "", nil, err

@@ -77,7 +77,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P8-3 Reaper every 30s on every replica: expired -> queued, after `SCANNER_QUEUE_MAX_ATTEMPTS` -> failed `worker_lost`
 - [x] P8-4 Graceful shutdown: stop claiming, `SCANNER_SHUTDOWN_GRACE`, then kill and release leases without counting the attempt
 - [x] P8-5 Queue metrics: depth, oldest queued age, claim latency, lease losses, reaper requeues (exposed in P10-4)
-- [ ] P8-6 Tests on real mongo:7 with several clients as replicas: claimed exactly once; ten identical POSTs give one scan; killed worker requeued and finished elsewhere; stale late completion rejected; poison job failed `worker_lost`; queue full 429; shutdown releases the lease; retry after a failure creates a new scan; no claim while not ready
+- [x] P8-6 Tests on real mongo:7 with several clients as replicas: claimed exactly once; ten identical POSTs give one scan; killed worker requeued and finished elsewhere; stale late completion rejected; poison job failed `worker_lost`; queue full 429; shutdown releases the lease; retry after a failure creates a new scan; no claim while not ready
 
 ## Phase 9: REST API v2
 - [ ] P9-1 Router and service-token auth middleware; wire `main.go`; log the fallback-interval WARN only when v2 is enabled; run the component tests (first `main.go` touch)
