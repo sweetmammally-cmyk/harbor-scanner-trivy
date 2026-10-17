@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 9 (API)
-- Last completed task: P9-2
+- Last completed task: P9-3
 - In progress: P9-1 (code done; only the v1 component test run is missing)
-- Next task: P9-3
+- Next task: P9-4
 - Blockers / questions for the user: `make test-component` cannot start its `redis` container because a container named `redis` already exists on the dev machine (`goharbor/redis-photon:v2.11.2`, exited, from a local Harbor compose install). The test uses that fixed name; remove or rename the old container (owner's call), then rerun.
 - Last updated: 2026-10-17
 
@@ -197,6 +197,17 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-17  P9-3  Cache decision, renewal and copy hits
+- Status: done
+- What changed:
+  - `pkg/v2/queue/cache.go`: `Want` and `Serves` (the result conditions of DEMAND 6: digest, scanned platform, Trivy version, stored scope covers the request, result DB >= installed DB; an unknown installed DB never serves). `Renew` (pipeline `findOneAndUpdate` on `_id` + not queued/scanning + `result.digest`: `confirmed_at = $$NOW`, `db.freshness`, customer fields, `last_request_id`, `requested_at`, `received_at`, state done, error cleared). `FindCopySource` (another `_id`, `result.digest`, the same conditions as a query, `confirmed_at` desc; the source may be active). `SaveCopy` (insert for a new tag, else a conditional update while not active; a race gives `store.ErrNotFound` = miss).
+  - `pkg/v2/api`: after the active-scan check and unless `force`, `serveFromCache`: renewal of the tag's own result, else a copy from another tag (report loaded from the source and attached to this tag with `SaveWithReport`, so a large report gets its own new GridFS file and the tag's older file is deleted); a vanished source file -> one more lookup, then a miss; a concurrent change -> miss -> enqueue. `writeHit` logs "scan skipped (db unchanged)" and answers 200 with `cached` and `db_unchanged`. `view.go`: the result view filtered to the request (findings of the requested platforms and severities, summary summed from `summary_by_platform` over the requested platforms at every severity, `platforms_found`/`not_found`/`has_more_platforms` from `image_platform_types`, image digest of the result, timings, customer fields and `request_id`).
+  - `store.MongoReports.Load` maps a missing GridFS file to `store.ErrNotFound`.
+- Files: `pkg/v2/queue/{cache,cache_test,queue}.go`, `pkg/v2/api/{scans,view,view_test}.go`, `pkg/v2/store/reports.go`, `pkg/v2/store/storetest/storetest.go`, `test/integration/apiv2/{main_test,cache_test}.go`
+- Tests run: `go test -short -race ./...` -> ok; `go test -count=1 -race -tags=integration ./test/integration/apiv2/` -> ok (all subtests listed with -v); store and queue integration -> ok. Cases: `Serves` (narrower request, older installed DB, and seven misses); the view (filtering, summary per requested platform, found/not found/more, empty lists not null); on mongo:7: a narrower request hits, renews `confirmed_at`, overwrites the customer fields and `last_request_id`, leaves the result alone, creates no document, and stores no `cached`/`db_unchanged`; a failed last attempt with a good result is served and marked done; misses for `force`, a broader severity, another platform and a newer installed DB (all 202); a broader severity rescans the union; a copy hit for a new tag with the same digest gets its own GridFS file, and a later rescan of the source does not change the copy; a copy from a source that is being rescanned; a deleted source file makes the request a miss (202).
+- Decisions / surprises: the `result.digest` index is added with the other list indexes in P9-5 (schema version bump); the lookup works without it meanwhile.
+- Next: P9-4
 
 ### 2026-10-17  P9-2  POST /api/v2/scans
 - Status: done

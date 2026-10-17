@@ -72,8 +72,12 @@ func (h *Handler) createScan(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, logger, err)
 		return
 	}
-	if err == nil && active(existing) {
+	exists := err == nil
+	if exists && active(existing) {
 		h.answerActive(ctx, w, logger, existing, scan)
+		return
+	}
+	if !body.Force && h.serveFromCache(ctx, w, logger, scan, existing, exists) {
 		return
 	}
 
@@ -105,6 +109,101 @@ func (h *Handler) answerActive(ctx context.Context, w http.ResponseWriter, logge
 		return
 	}
 	writeError(w, http.StatusConflict, CodeScanInProgress, "another scan of this image tag is in progress", retryScanning)
+}
+
+// serveFromCache answers a cache hit (DEMAND section 6): the tag's own result
+// (renewed), or another tag's result for the same digest (copied into this
+// tag's document). It returns false on a miss, and true when it answered,
+// also with an error.
+func (h *Handler) serveFromCache(ctx context.Context, w http.ResponseWriter, logger *slog.Logger,
+	request, existing store.Scan, exists bool) bool {
+	local, _ := h.deps.DBState.Get(ctx, "db")
+	freshness := local.Freshness(request.Options.MaxDBAge, time.Now())
+	want := queue.Want{
+		Digest:          request.Image.Digest,
+		ScannedPlatform: h.cfg.ScanPlatform,
+		TrivyVersion:    h.deps.TrivyVersion(),
+		Options:         request.Options,
+		DBUpdatedAt:     local.Metadata.UpdatedAt,
+	}
+
+	if exists && queue.Serves(existing, want) {
+		renewed, err := h.deps.Queue.Renew(ctx, request, request.Image.Digest, freshness)
+		if errors.Is(err, store.ErrNotFound) {
+			return false // changed by a concurrent request
+		}
+		if err != nil {
+			h.writeStoreError(w, logger, err)
+			return true
+		}
+		h.writeHit(ctx, w, logger, renewed, request, "")
+		return true
+	}
+
+	// Another tag's result; once more if the source's report vanished in between.
+	for try := 0; try < 2; try++ {
+		source, err := h.deps.Queue.FindCopySource(ctx, want, request.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return false
+		}
+		if err != nil {
+			h.writeStoreError(w, logger, err)
+			return true
+		}
+		report, err := h.deps.Reports.Load(ctx, source)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			h.writeStoreError(w, logger, err)
+			return true
+		}
+
+		copied := request
+		result := *source.Result
+		result.Report = nil
+		result.ReportGridFSID = nil
+		copied.Result = &result
+		copied.DB = &store.ScanDB{UpdatedAt: source.DB.UpdatedAt, ManifestDigest: source.DB.ManifestDigest, Freshness: freshness}
+		copied.State = store.ScanDone
+		save := func(ctx context.Context, scan store.Scan) error { return h.deps.Queue.SaveCopy(ctx, scan, exists) }
+		err = store.SaveWithReport(ctx, h.deps.Reports, copied, report, save)
+		if errors.Is(err, store.ErrNotFound) {
+			return false // changed by a concurrent request
+		}
+		if err != nil {
+			h.writeStoreError(w, logger, err)
+			return true
+		}
+		saved, err := h.deps.Scans.Get(ctx, request.ID)
+		if err != nil {
+			h.writeStoreError(w, logger, err)
+			return true
+		}
+		h.writeHit(ctx, w, logger, saved, request, source.ID)
+		return true
+	}
+	return false
+}
+
+// writeHit answers a cache hit with the result filtered to the request.
+func (h *Handler) writeHit(ctx context.Context, w http.ResponseWriter, logger *slog.Logger, scan, request store.Scan, copiedFrom string) {
+	report, err := h.deps.Reports.Load(ctx, scan)
+	if err != nil {
+		h.writeStoreError(w, logger, err)
+		return
+	}
+	view, err := newResultView(scan, report, request.Options.Platforms, request.Options.Severity, h.dbBlock(ctx, scan))
+	if err != nil {
+		logger.Error("building the result view failed", slog.String("error", err.Error()))
+		writeError(w, http.StatusInternalServerError, CodeInternal, "building the result failed", 0)
+		return
+	}
+	view.Cached = true
+	view.DBUnchanged = true
+	logger.Info("scan skipped (db unchanged)", slog.String("copied_from", copiedFrom),
+		slog.Time("db_updated_at", scan.DB.UpdatedAt), slog.String("freshness", scan.DB.Freshness))
+	writeJSON(w, http.StatusOK, view)
 }
 
 func active(scan store.Scan) bool {

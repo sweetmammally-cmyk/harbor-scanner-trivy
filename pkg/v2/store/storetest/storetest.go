@@ -274,6 +274,6 @@ func ReportStore(t *testing.T, newStore func(t *testing.T, limit int) store.Repo
 
 		_, err := reports.Load(ctx, withMissingFile)
 
-		assert.Error(t, err)
+		assert.ErrorIs(t, err, store.ErrNotFound)
 	})
 }

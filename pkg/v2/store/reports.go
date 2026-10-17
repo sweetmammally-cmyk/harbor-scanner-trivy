@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -36,7 +37,8 @@ type ReportStore interface {
 	// its result: the previous result's file, and files of attempts that failed.
 	DiscardOthers(ctx context.Context, scan Scan) error
 	// Load returns the report of a scan's result from the document or from
-	// GridFS; nil when there is no report.
+	// GridFS; nil when there is no report. A GridFS file that is gone (deleted
+	// by a newer result) gives ErrNotFound.
 	Load(ctx context.Context, scan Scan) (bson.M, error)
 }
 
@@ -152,7 +154,11 @@ func (r *MongoReports) Load(ctx context.Context, scan Scan) (bson.M, error) {
 	ctx, cancel := r.client.OperationContext(ctx)
 	defer cancel()
 	var data bytes.Buffer
-	if _, err := r.bucket.DownloadToStream(ctx, *scan.Result.ReportGridFSID, &data); err != nil {
+	_, err := r.bucket.DownloadToStream(ctx, *scan.Result.ReportGridFSID, &data)
+	if errors.Is(err, mongo.ErrFileNotFound) {
+		return nil, fmt.Errorf("reading report of scan %s from GridFS: %w", scan.ID, ErrNotFound)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("reading report of scan %s from GridFS: %w", scan.ID, err)
 	}
 	var report bson.M

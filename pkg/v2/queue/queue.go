@@ -205,10 +205,14 @@ func (q *Queue) wakeWorker() {
 }
 
 func (q *Queue) findOne(ctx context.Context, filter bson.D) (store.Scan, error) {
+	return q.findOneWith(ctx, filter, options.FindOne())
+}
+
+func (q *Queue) findOneWith(ctx context.Context, filter bson.D, opts *options.FindOneOptionsBuilder) (store.Scan, error) {
 	ctx, cancel := q.client.OperationContext(ctx)
 	defer cancel()
 	var scan store.Scan
-	err := q.scans.FindOne(ctx, filter).Decode(&scan)
+	err := q.scans.FindOne(ctx, filter, opts).Decode(&scan)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return store.Scan{}, store.ErrNotFound
 	}

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,11 +24,15 @@ import (
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/queue"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/registry"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/runner"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 	"github.com/aquasecurity/harbor-scanner-trivy/test/integration/mongotest"
 )
 
 const token = "0123456789abcdef0123456789abcdef"
+
+// reportLimit keeps small reports inline and moves large ones to GridFS.
+const reportLimit = 1000
 
 var mongoAddr string
 
@@ -106,7 +111,7 @@ func (e *env) newReplica(t *testing.T) *env {
 func newReplica(t *testing.T, cfg config.Config, client *store.Client) *env {
 	e := &env{client: client, cfg: cfg, registry: &fakeRegistry{digests: map[string]string{}}, dbState: dbmgr.NewMemoryStateStore()}
 	e.queue = queue.New(client, cfg)
-	e.reports = store.NewMongoReports(client, store.ReportInlineLimit)
+	e.reports = store.NewMongoReports(client, reportLimit)
 	installed := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
 	require.NoError(t, e.dbState.Save(context.Background(), "db", dbmgr.DBState{
 		Mode: dbmgr.ModeNormal, LastUpstreamCheckAt: installed, LastConfirmedCurrentAt: installed,
@@ -176,4 +181,68 @@ func (e *env) count(t *testing.T) int64 {
 
 func scanID(tag string) string {
 	return store.ScanID(store.Image{Repository: "project", Name: "app", Tag: tag})
+}
+
+// finish plays the worker for the only queued scan: claim it, store a result
+// for its scope with the given findings, and complete it.
+func (e *env) finish(t *testing.T, findings []runner.Finding) store.Scan {
+	ctx := context.Background()
+	claimed, err := e.queue.Claim(ctx, "replica-1/worker-0")
+	require.NoError(t, err)
+	local, err := e.dbState.Get(ctx, "db")
+	require.NoError(t, err)
+
+	byPlatform := map[string]map[string]int{}
+	summary := map[string]int{"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
+	types := []string{"debian"}
+	for _, platform := range claimed.Options.Platforms {
+		byPlatform[platform] = map[string]int{"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
+		types = append(types, platform)
+	}
+	var stored []runner.Finding
+	for _, finding := range findings {
+		severity := strings.ToLower(finding.Severity)
+		byPlatform[finding.Type][severity]++
+		summary[severity]++
+		if slices.Contains(claimed.Options.Severity, finding.Severity) {
+			stored = append(stored, finding)
+		}
+	}
+	claimed.Result = &store.ScanResult{
+		Digest: claimed.Image.Digest, Platforms: claimed.Options.Platforms, Severity: claimed.Options.Severity,
+		ScannedPlatform: e.cfg.ScanPlatform, TrivyVersion: "0.74.0",
+		ImagePlatformTypes: types, Summary: summary, SummaryByPlatform: byPlatform,
+	}
+	claimed.DB = &store.ScanDB{UpdatedAt: local.Metadata.UpdatedAt, ManifestDigest: "sha256:db", Freshness: "ok"}
+	claimed.ScanMS = 1500
+	save := func(ctx context.Context, scan store.Scan) error { return e.queue.Complete(ctx, scan) }
+	require.NoError(t, store.SaveWithReport(ctx, e.reports, claimed, bson.M{"findings": stored}, save))
+	return e.scan(t, claimed.ID)
+}
+
+// manyFindings are enough findings for a report above reportLimit (GridFS).
+func manyFindings(platform, prefix string) []runner.Finding {
+	var findings []runner.Finding
+	for i := 0; i < 30; i++ {
+		findings = append(findings, runner.Finding{ID: fmt.Sprintf("%s-%d", prefix, i), Package: "pkg", InstalledVersion: "1.0",
+			Severity: "HIGH", Target: "app", Type: platform})
+	}
+	return findings
+}
+
+// reportFiles returns the GridFS file ids of a scan document.
+func (e *env) reportFiles(t *testing.T, scanID string) []bson.ObjectID {
+	ctx, cancel := e.client.OperationContext(context.Background())
+	defer cancel()
+	cursor, err := e.client.Database().Collection(store.ReportBucket+".files").Find(ctx, bson.M{"metadata.scan_id": scanID})
+	require.NoError(t, err)
+	var files []struct {
+		ID bson.ObjectID `bson:"_id"`
+	}
+	require.NoError(t, cursor.All(ctx, &files))
+	var ids []bson.ObjectID
+	for _, file := range files {
+		ids = append(ids, file.ID)
+	}
+	return ids
 }
