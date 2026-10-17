@@ -81,14 +81,14 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P8-6 Tests on real mongo:7 with several clients as replicas: claimed exactly once; ten identical POSTs give one scan; killed worker requeued and finished elsewhere; stale late completion rejected; poison job failed `worker_lost`; queue full 429; shutdown releases the lease; retry after a failure creates a new scan; no claim while not ready
 
 ## Phase 9: REST API v2
-- [ ] P9-1 Router and service-token auth middleware (one `SCANNER_V2_AUTH_TOKEN`, constant-time compare, at least 32 characters); wire `main.go`; log the fallback-interval WARN only when v2 is enabled; run the component tests (first `main.go` touch)
-- [ ] P9-2 `POST /api/v2/scans`: validation (400 for `customer_data` > 64 KiB or > 100 `customer_ids`; `request_id` an optional correlation id of 1-128 characters), order auth -> validate -> not ready -> resolve -> cache -> enqueue; 409 `scan_in_progress` with `Retry-After`
-- [ ] P9-3 Cache decision (all conditions in DEMAND section 6) on the tag's document, then copy hit from another document with the same digest (GridFS content copied); a hit renews `confirmed_at`, freshness and the request fields; response with `cached` and `db_unchanged`
-- [ ] P9-4 `GET /api/v2/scans/{id}` with `not_found` (404, also for an id that is not 64 lowercase hex), `queued`, `scanning`, `done`, `failed`
-- [ ] P9-5 `GET /api/v2/scans` filters and paging (project out the report)
-- [ ] P9-6 `GET /api/v2/db` (includes `db_age`)
-- [ ] P9-7 `db` block in responses (updated_at, last_upstream_check_at, confirmed_at, freshness; stored values, the local DB state while a tag has no result)
-- [ ] P9-8 API tests covering every row of the DEMAND response tables
+- [ ] P9-1 Router (`/api/v2/` only when enabled), bearer auth (one token >= 32 chars, constant-time hash compare, 401 + `WWW-Authenticate`), HTTP hygiene (1 MiB body, JSON content type, strict decoding, `SCANNER_V2_MAX_INFLIGHT`, one log line per request, `X-Request-ID`), one error shape; wire `main.go` with the startup and shutdown order; both startup WARNs only when v2 is enabled; run the v1 component tests
+- [ ] P9-2 `POST /api/v2/scans`: validation (DEMAND 5.1), order auth -> validate -> not ready -> resolve -> active-scan check -> cache -> enqueue; `received_at`; 202 / 200 covered active scan / 409 `scan_in_progress` / 429 / 503
+- [ ] P9-3 Cache decision on the tag's document (renewal), copy hit from another document by `result.digest` (source may be active; GridFS copied; source file gone -> lookup once more, then miss); views filtered to the request
+- [ ] P9-4 `GET /api/v2/scans/{id}`: id format, 404 `not_found`, `Retry-After: 2`, findings only when done, `previous` block, failed with class and fixed message, `platforms`/`severity` view filters
+- [ ] P9-5 `GET /api/v2/scans`: filters, immutable `created_at`, keyset pagination, projection; indexes (schema version bump); explain test; stable pagination while tags are inserted
+- [ ] P9-6 `GET /api/v2/db`: this instance's in-memory state per DB kind (works while MongoDB is down), sources redacted, other instances from MongoDB best effort
+- [ ] P9-7 `db` block in responses (stored values, local DB state while a tag has no result)
+- [ ] P9-8 Handler tests with fakes and a full-stack integration test (mongo:7, fake registry, fake trivy) covering DEMAND 5 and 6; v1 component tests
 
 ## Phase 10: Health, logging, metrics
 - [ ] P10-1 `GET /api/v2/health` computed from stored data (includes `db_age`; DB information for every instance)

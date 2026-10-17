@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 9 (API) next; Phase 8 (queue) done, including the one-document-per-tag model change (P8-7)
-- Last completed task: P8-7
+- Phase: 9 (API)
+- Last completed task: P8-7 (Phase 9 decisions recorded)
 - In progress: none
 - Next task: P9-1
-- Blockers / questions for the user: the owner's earlier "Phase 9 message" (items 1-16, partly replaced on 2026-10-17) never reached this session and is not recorded anywhere; it is needed before P9-1. Open point for P9-3: whether the copy-hit source document may itself be queued/scanning.
+- Blockers / questions for the user: none
 - Last updated: 2026-10-17
 
 ## Repo facts (filled in by Phase 0)
@@ -50,6 +50,15 @@ Newest changelog entries go at the top of the Changelog.
 
 Record decisions here with date and reason (package layout, Mongo test strategy, OCI client approach, DB swap mechanism, anything the user answered). If a decision changes the spec, also propose the edit to `DEMAND.md`.
 
+- 2026-10-17 (owner, complete Phase 9 decisions; supersede earlier Phase 9 messages; DEMAND v0.18 sections 5, 6, 10, 11, 13 and 14):
+  - Corrections to P8-7: the copy-hit lookup matches `result.digest` only (own index); `image.digest` is the latest request's digest. A copy source may be queued/scanning; its GridFS content is copied to a new file; a vanished source file -> lookup once more, then a miss.
+  - P9-1: bearer auth, constant-time compare of hashes, one token of at least 32 characters (startup fails otherwise when enabled), 401 with `WWW-Authenticate`, `/probe/*` open, `/api/v2/health` and `/api/v2/db` need the token. `/api/v2/` routed only when enabled. Both startup WARNs only when v2 is enabled. Startup order store -> schema -> updater -> workers -> HTTP; shutdown readiness false -> HTTP drain -> workers (grace, release) -> updater -> Mongo close. Hygiene: 1 MiB body, JSON content type, strict decoding, server timeouts, `SCANNER_V2_MAX_INFLIGHT` (32) -> 429 + `Retry-After`, one log line per request, `X-Request-ID`. Error shape `{"error": {"code", "message"}}` with the ten codes of DEMAND 5.0.
+  - P9-2: validation rules of DEMAND 5.1; order auth -> validate -> not ready -> resolve -> active-scan check -> cache -> enqueue; covered active scan -> 200 even with `force` (document unchanged), otherwise 409 `Retry-After: 5`.
+  - P9-3: hit conditions and renewal; copy hit; views filtered to the request (findings, summary from `summary_by_platform`, found/not found/has more from `image_platform_types`); a broader severity is a miss.
+  - P9-4: id format, 404 `{"state": "not_found"}`, `Retry-After: 2` while queued/scanning, findings only when done, `previous {confirmed_at, digest, summary}`, failed shows class and a short sanitized message, optional `platforms`/`severity` view filters.
+  - P9-5: filters, immutable `created_at`, order `created_at` desc then `_id` desc, keyset pagination (limit 50, max 200, opaque cursor), no findings/report; indexes (customer_ids, created_at), result.digest, image.digest, created_at, state; explain test; stable pagination.
+  - P9-6/P9-7: `GET /api/v2/db` from this instance's memory plus other instances best effort; `db` block from stored values, local state while no result.
+  - Our choices within these rules (to confirm): error statuses 413 (body too large) and 415 (content type) carry `invalid_request`; the in-flight cap answers `queue_full` with `Retry-After: 1`; `queue_full` and `registry_unavailable` use `Retry-After: 10`; MongoDB down or a failed MongoDB call is `store_unavailable`, schema not ready or no DB installed is `not_ready`; a GET view filter outside the stored scope is 400; the `failed` message is a fixed text per failure class (the stored detail may hold redacted stderr); `platform` list filter matches `result.image_platform_types`; the `state` index is the existing `(state, queued_at)`; the v2 DBs and worker caches live in a new `SCANNER_V2_CACHE_DIR` (default `/home/scanner/.cache/scanner-v2`), apart from the adapter's Trivy cache, because the adapter's Trivy may update its own DB there; a POST extends its own write deadline (the default `SCANNER_API_SERVER_WRITE_TIMEOUT` of 15s is shorter than a registry resolve with its retry); `runner.MaxPlatforms` drops from 50 to 20.
 - 2026-10-17 (owner): data model "current state only, one record per image tag" (replaces Phase 9 items 1, 7, 8, 10, 12 and 16 of a message this session never received; recorded in DEMAND v0.17 sections 4, 5, 6, 9, 10, 11, 13 and 14).
   - `scans` holds one document per tag, `_id` = scan_id = lowercase hex sha256 of `"<repository>/<name>:<tag>"`; no history; nothing deployed, so no migration (schema version 3, dev databases recreated).
   - Removed: `active_key` and its unique index, the `request_id` unique index, `prior_request_id`, the fingerprint/409 idea. `request_id` is an optional correlation id (1-128 chars) stored as `last_request_id`.

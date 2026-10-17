@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.17 (one scan document per image tag, 2026-10-17)
+Status: DRAFT v0.18 (REST API v2 decisions, 2026-10-17)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -52,7 +52,14 @@ Problems today:
 
 ## 5. REST API (new, `/api/v2`)
 
-All endpoints require a service token in the `Authorization: Bearer` header. This is caller authentication only; registry access uses the robot account.
+### 5.0 Common rules
+
+- `/api/v2/` is routed only when `SCANNER_V2_API_ENABLED` is true; with v2 disabled nothing changes. `/probe/*` stays unauthenticated; every `/api/v2/...` endpoint, including `/api/v2/health` and `/api/v2/db`, requires the token.
+- Auth: `Authorization: Bearer <token>`, compared in constant time on the SHA-256 hashes. One token, `SCANNER_V2_AUTH_TOKEN`, at least 32 characters; startup fails when v2 is enabled and it is missing or shorter. A missing or wrong token gives 401 `unauthorized` with `WWW-Authenticate: Bearer`. Tokens are never logged. This is caller authentication only; registry access uses the robot account.
+- HTTP hygiene: request bodies at most 1 MiB (413 `invalid_request` above); `Content-Type: application/json` required on bodies (415 `invalid_request` otherwise); strict JSON decoding (unknown fields or trailing data give 400 `invalid_request`); the server's read, header, write and idle timeouts are set (`SCANNER_API_SERVER_*`; the header timeout is the read timeout; a POST extends its own write deadline to cover the synchronous digest resolution). At most `SCANNER_V2_MAX_INFLIGHT` (default 32) POSTs run at once; beyond it 429 `queue_full` with `Retry-After: 1`.
+- One log line per request: method, route template, status, duration and request id; never bodies or headers. `X-Request-ID` is accepted when it is 1-128 characters of `A-Za-z0-9._:-`, otherwise generated, and returned in the response.
+- One error shape: `{"error": {"code": "...", "message": "..."}}`. Codes: `invalid_request` (400/413/415), `unauthorized` (401), `image_not_found` (404), `registry_auth_failed` (502), `registry_unavailable` (503, `Retry-After`), `queue_full` (429, `Retry-After`), `scan_in_progress` (409, `Retry-After: 5`), `not_ready` (503: schema not ready or no DB installed), `store_unavailable` (503: MongoDB down or a MongoDB call failed), `internal` (500). Messages never contain secrets, paths or stderr.
+- Not found: `GET /api/v2/scans/{scan_id}` answers 404 with `{"scan_id": "...", "state": "not_found"}`.
 
 ### 5.1 Trigger scan: `POST /api/v2/scans`
 
@@ -70,103 +77,127 @@ All endpoints require a service token in the `Authorization: Bearer` header. Thi
 }
 ```
 
-Fields:
+Fields (anything else is 400):
 
-- `request_id`: optional correlation id (1-128 characters), stored as `last_request_id` and logged. It is not unique and not an idempotency key: idempotency comes from the document identity (one document per tag), so a Temporal retry finds the same document.
-- `image`: `repository`, `name` and `tag` must follow the OCI distribution rules (path components `[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*`, tag `[A-Za-z0-9_][A-Za-z0-9._-]{0,127}`; no `..`, no encoded characters); otherwise 400. The tag is resolved to a digest synchronously in this request.
-- `platforms`: required. The Trivy result types (npm, jar, pip, ...) the caller wants reported.
-- `severity`: optional, default `["HIGH","CRITICAL"]`.
-- `max_db_age`: how fresh the DB must be for the response to report `freshness: ok` (see section 7.4). Optional, falls back to a server default.
+- `request_id`: optional correlation id, 1-128 characters of `A-Za-z0-9._:-`; stored as `last_request_id` and logged. Not unique and not an idempotency key: the document identity (one document per tag) is the idempotency, so a Temporal retry finds the same document.
+- `requested_at`: optional, RFC 3339, at most 5 minutes in the future. Audit only; the server also stores `received_at`.
+- `image`: `repository`, `name` and `tag` follow the OCI distribution rules (section 6.1); otherwise 400. The tag is resolved to a digest synchronously in this request.
+- `customer_ids`: required, 1-100 entries of 1-128 characters.
+- `customer_data`: optional JSON object of at most 64 KiB (JSON-encoded).
+- `platforms`: required, 1-20 Trivy result types (npm, jar, pip, ...); lowercased, deduplicated and sorted.
+- `severity`: optional, from CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN (uppercased, deduplicated, sorted); default `["CRITICAL","HIGH"]`.
+- `max_db_age`: optional duration (our parser, so `1d` works), between 1m and 30d; default `SCANNER_DB_MAX_AGE_DEFAULT`. How fresh the DB must be for `freshness: ok` (section 7.4).
 - `force`: always scan, ignore the cache.
-- More filters will be added later (reserved).
-- Limits: `customer_data` larger than 64 KiB (JSON-encoded) or more than 100 `customer_ids` is rejected with 400.
-
-Responses:
 
 The `scan_id` is the lowercase hex sha256 of `"<repository>/<name>:<tag>"`: the id of the tag's document.
 
+Order: auth -> body size, decoding and validation (400) -> not ready (503: MongoDB down, schema not ready, no DB installed) -> resolve the digest (synchronous, section 6.1 error mapping) -> active-scan check -> cache decision (section 6) -> enqueue (section 9). There is no separate idempotency step.
+
 | Case | HTTP | Body |
 |---|---|---|
-| Scan queued | 202 | `{ "scan_id", "state": "queued" }` |
-| Cache hit (see 6) | 200 | the stored result with `"cached": true, "db_unchanged": true` |
-| The tag is queued/scanning for the same digest, and its scope covers the request | 200 | its `scan_id` and state |
-| The tag is queued/scanning for another digest, or for a scope that does not cover the request | 409 | error `scan_in_progress` with `Retry-After` |
-| Queue full | 429 | error with retry hint |
-| Mongo unavailable | 503 | error |
+| New scan queued | 202 | `{ "scan_id", "state": "queued", "db" }` |
+| The tag is queued/scanning for the same digest and the running scope covers the request (also with `force: true`; the document is not changed) | 200 | `{ "scan_id", "state", "db" }` |
+| The tag is queued/scanning for another digest, or for a scope that does not cover the request | 409 | `scan_in_progress`, `Retry-After: 5` |
+| Cache hit (section 6) | 200 | the result view (5.2) with `"cached": true, "db_unchanged": true` |
+| Queue full | 429 | `queue_full`, `Retry-After` |
+| MongoDB unavailable / not ready | 503 | `store_unavailable` / `not_ready` |
 
-`cached` and `db_unchanged` appear only in POST responses; they are not stored. `scan_in_progress` is one of the API error codes.
+`cached` and `db_unchanged` appear only in POST hit responses; they are never stored.
 
-Every response that includes a DB section carries:
+Every response with a DB section carries:
 
 ```json
 "db": { "updated_at": "...", "last_upstream_check_at": "...", "confirmed_at": "...", "freshness": "ok|stale" }
 ```
 
-`updated_at`, `confirmed_at` and `freshness` are the values stored on the document (section 10); nothing is recomputed on read. While a tag has no result yet (its first scan is queued or scanning), the block shows the current local DB state.
+`updated_at`, `confirmed_at` and `freshness` are the values stored on the document (section 10): set when a scan completes (the DB captured at scan start, freshness against that request's `max_db_age`) and renewed by every hit. Nothing is recomputed on read. `last_upstream_check_at` is this instance's. While a tag has no result yet, the block shows the current local DB state.
 
 ### 5.2 Scan state: `GET /api/v2/scans/{scan_id}`
 
 | `state` | HTTP | Meaning for the caller |
 |---|---|---|
-| `not_found` | 404 | Scan is not here. Submit again. A `scan_id` that is not 64 lowercase hex characters is also `not_found`. |
-| `queued` | 200 | Waiting in the queue. |
-| `scanning` | 200 | Trivy is running. |
-| `done` | 200 | Finished. Result is included. |
-| `failed` | 200 | Finished with an error. `error` is included. The last successful result of the tag stays in place. |
+| `not_found` | 404 | Not here, or the id is not 64 lowercase hex characters. Submit again. |
+| `queued` | 200 | Waiting in the queue. `Retry-After: 2`. |
+| `scanning` | 200 | Trivy is running. `Retry-After: 2`. |
+| `done` | 200 | Finished. The result view is included. |
+| `failed` | 200 | Finished with an error: `error` has the failure class and a short fixed message (never the stored detail). |
 
-The state describes the tag's current attempt; the result is the tag's last successful scan.
+The state describes the tag's current attempt. Findings are returned only when the state is `done`. For `queued`, `scanning` and `failed`, a `previous` block `{confirmed_at, digest, summary}` is included when the tag has a last good result.
 
-A `done` result contains:
+Optional query parameters `platforms` and `severity` (comma-separated, same rules as POST) filter the view; the default view is the full stored scope. A filter outside the stored scope is 400.
+
+The result view (GET `done` and POST hits) is filtered to the request:
 
 ```json
 {
-  "scan_id": "...",
-  "state": "done",
-  "cached": false,
+  "scan_id": "...", "state": "done",
+  "cached": true, "db_unchanged": true,
   "image": { "repository": "", "name": "", "tag": "", "digest": "sha256:..." },
   "db": { "updated_at": "", "last_upstream_check_at": "", "confirmed_at": "", "freshness": "ok" },
-  "summary": { "critical": 0, "high": 0 },
-  "platforms": [ { "type": "node", "name": "..." } ],
+  "platforms_requested": ["npm"], "platforms_found": ["npm"], "platforms_not_found": [],
   "has_more_platforms": true,
+  "severity": ["CRITICAL", "HIGH"],
+  "summary": { "critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0 },
+  "truncated": false,
   "vulnerabilities": [],
   "timing": { "queue_wait_ms": 0, "scan_ms": 0, "total_ms": 0 }
 }
 ```
 
+- `vulnerabilities`: the stored findings of the requested platforms and severities.
+- `summary`: summed from `summary_by_platform` over the requested platforms only, at every severity.
+- `platforms_found`, `platforms_not_found` and `has_more_platforms` are computed for the request from `image_platform_types`.
+- `image.digest` is the digest of the result.
+
 ### 5.3 Query scans: `GET /api/v2/scans`
 
-Filters: `customer_id`, `digest`, `repository`, `state`, `severity`, `platform`, `from`, `to`, plus paging. This is the filtering Harbor cannot do.
+- Filters: `customer_id`, `digest` (matches `result.digest` or `image.digest`), `repository`, `name`, `state`, `platform` (a type found in the image: `result.image_platform_types`), `request_id` (`last_request_id`), `from` and `to` (RFC 3339, on `created_at`).
+- Order: `created_at` descending, then `_id` descending; `created_at` is set once when the tag's document is created and never changes.
+- Keyset pagination (no skip): `limit` default 50, at most 200; the response has `items` and an opaque `next_cursor` (absent on the last page), passed back as `cursor`.
+- Items never contain findings or the report (projection).
+
+This is the filtering Harbor cannot do.
 
 ### 5.4 DB status: `GET /api/v2/db`
 
-Current DB version, `updated_at`, `downloaded_at`, `db_age`, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, active source (mirror), mode (`normal` | `degraded`), and the last DB check results. Each scanner instance has its own DB copy, so these are shown per instance (`instance_id`) and per DB kind (`db`, `java-db`).
+- This instance, per DB kind (`db`, `java-db`), from its in-memory state, so it works while MongoDB is down: version, `updated_at`, `downloaded_at`, `installed_at`, manifest digest, `last_upstream_check_at`, `last_confirmed_current_at`, `newer_available`, mode (`normal` | `degraded`), `db_age`, freshness against `SCANNER_DB_MAX_AGE_DEFAULT`, the last per-source results (credentials in source URLs redacted).
+- Other instances' states from MongoDB, best effort (left out with a note while MongoDB is down).
 
 ### 5.5 Health
 
 - `GET /api/v2/health`: detailed health derived from stored data: Mongo connectivity, DB present, DB age and freshness, last upstream check, queue depth, recent scan durations and failure rate, last pre-check result per source. DB information is shown for every instance.
 - Liveness/readiness probes (existing Harbor-style probes kept). Readiness is false while Mongo is unreachable or no DB exists yet.
 
+### 5.6 Startup and shutdown
+
+- Startup (v2 enabled): store client and its monitor (schema ensured when MongoDB is up) -> DB updater -> workers and reaper -> HTTP server.
+- Shutdown (SIGTERM): v2 readiness false (new POSTs get 503) -> HTTP server shutdown (in-flight requests drain) -> workers stop claiming, running scans get `SCANNER_SHUTDOWN_GRACE`, then they are killed and released -> updater stops -> MongoDB connection closed.
+
 ## 6. Scan flow and cache rules
 
 ```
-POST /api/v2/scans
-  -> auth -> validate -> not ready (503) -> resolve digest for repository/name:tag
-     (registry call with robot account, see 6.1) -> cache decision -> enqueue
+POST /api/v2/scans (order in 5.1)
+  -> active scan on this tag (queued/scanning):
+       same digest and the running scope covers the request -> 200 with its state
+       otherwise -> 409 scan_in_progress
   -> cache hit on this tag's document if ALL are true:
        - force == false
-       - no active scan (state is not queued or scanning)
-       - the stored result's digest == the resolved digest
+       - no active scan
+       - result.digest == the resolved digest
        - same scanned platform (`SCANNER_SCAN_PLATFORM`) and same Trivy version
        - the stored platforms and severities cover the request (superset)
-       - the result's db.updated_at >= the installed DB's UpdatedAt
+       - result db.updated_at >= the installed DB's UpdatedAt
      => the hit renews the document: confirmed_at = now, db.freshness recomputed
-        against this request's max_db_age, customer_ids, customer_data and
+        against THIS request's max_db_age, customer_ids, customer_data and
         last_request_id overwritten, state done. No new document.
-        200 with cached: true, db_unchanged: true
-  -> else: ANOTHER document with the same image.digest that meets the same
-     conditions => its result (and its GridFS content) is copied into this
-     tag's document, and the response is a hit. Copies are independent.
-  -> else: enqueue (section 9) => 202 (or 200 / 409 / 429)
+        200 with the filtered view, cached: true, db_unchanged: true
+  -> else: ANOTHER document with result.digest == the resolved digest that meets
+     the same result conditions (it may be queued or scanning: its result is
+     still valid) => its result is copied into this tag's document, with its
+     GridFS content copied to a new file for this tag; respond as a hit. If the
+     source file is gone (overwritten in between), the lookup is done once more,
+     then it is a miss. Copies are independent.
+  -> else: enqueue (section 9) => 202 (or 429)
 worker:
   -> log "triggering scan"
   -> run Trivy with the local DB (no network DB update during scan)
@@ -176,11 +207,11 @@ worker:
 
 Notes:
 
-- Request time (`requested_at`) is stored for audit and ordering. It is not used to decide whether to skip.
+- `requested_at` is stored for audit only. It is not used to decide whether to skip.
 - Trivy already caches per-layer analysis (by layer ID) so shared layers are cheap to re-analyze. Vulnerability matching still runs against the DB on each scan. The digest cache adds whole-image skipping on top.
 - Every result stores the DB `UpdatedAt` it used. Validity is decided by the DB version rule, never by time.
-- A later request for a broader scope (more platforms or lower severities than the last scan covered) is a cache miss and triggers a new scan. For the same digest the scope only widens: the new scan covers the union of the stored and the requested platforms and severities. If the tag moved to another digest, the scope is just the request's.
-- Trivy runs once per scan. Summary counts are kept for all severities of the requested platforms; details are kept only for the requested severities. Only the requested result types are persisted; Trivy's full output is not stored.
+- A request for a narrower scope is served from a wider stored result (filtered view). A broader scope (more platforms or a severity that was not stored) is a cache miss and triggers a new scan, because those details were never stored. For the same digest the scope only widens: the new scan covers the union of the stored and the requested platforms and severities. If the tag moved to another digest, the scope is just the request's.
+- Trivy runs once per scan. Summary counts are kept for all severities of the scanned platforms; details only for the scanned severities. Only the scanned result types are persisted; Trivy's full output is not stored.
 
 ## 7. Trivy DB lifecycle
 
@@ -215,7 +246,7 @@ Notes:
 ### 7.2 Update interval
 
 - `SCANNER_DB_CHECK_INTERVAL` (e.g. `1h`, `3h`, `1d`). The `d` suffix must be supported.
-- If unset or invalid, the **fallback interval is 3h** and a WARN log says "using fallback interval".
+- If unset or invalid, the **fallback interval is 3h** and, when v2 is enabled, a WARN log says "using fallback interval".
 - Each tick: cheap upstream check first (compare the upstream OCI manifest digest with the stored one). Download only if different.
 - While the mode is `degraded`, `SCANNER_DB_RETRY_INTERVAL` (default `15m`) applies instead of the check interval. After a successful run the check interval applies again.
 
@@ -317,7 +348,7 @@ One document per image tag, current state only. `_id` is the scan_id: lowercase 
 
 ```json
 {
-  "_id": "scan_id", "last_request_id": "", "requested_at": "",
+  "_id": "scan_id", "created_at": "", "last_request_id": "", "requested_at": "", "received_at": "",
   "customer_ids": [], "customer_data": {},
   "image": { "repository": "", "name": "", "tag": "", "digest": "", "media_type": "" },
   "options": { "platforms": ["npm"], "severity": ["HIGH","CRITICAL"], "max_db_age": 0 },
@@ -340,7 +371,7 @@ One document per image tag, current state only. `_id` is the scan_id: lowercase 
 
 - `image`, `options`, `reference`, `state`, the timings and the queue fields describe the current attempt; `image.digest` is the digest resolved by the last enqueue.
 - `result`, `db` and `confirmed_at` describe the last successful scan and are replaced only when a new scan succeeds (or renewed by a cache hit). `result.digest` is the digest that was scanned. `db.updated_at` is the DB the findings come from (captured at scan start); `db.freshness` is computed against the max_db_age of the request that produced or renewed the result.
-- `customer_ids`, `customer_data` and `last_request_id` are those of the last request (enqueue or cache hit).
+- `customer_ids`, `customer_data`, `last_request_id`, `requested_at` and `received_at` are those of the last request (enqueue or cache hit). `created_at` is set when the document is created and never changes (list order).
 
 `platforms`: `{ _id, first_seen_at, last_seen_at, seen_count, example_digest }`
 
@@ -356,7 +387,7 @@ Schema setup ("ensure schema"):
 
 Indexes:
 
-- `scans(image.digest, state, finished_at)` (also finds other tags with the same digest for the cache), `scans(customer_ids, finished_at)`, `scans(state, queued_at)`, `scans(state, lease_until)` (reaper). There is no unique index besides `_id` (schema version 3; nothing was deployed before it, so older development databases are recreated instead of migrated).
+- `scans(result.digest)` (cache copy lookup and the digest filter), `scans(image.digest)`, `scans(customer_ids, created_at)`, `scans(created_at)`, `scans(state, queued_at)` (queue claim and the state filter), `scans(state, lease_until)` (reaper). There is no unique index besides `_id` (schema version 4; nothing was deployed before it, so older development databases are recreated instead of migrated).
 - `db_checks.at`: TTL index (`at` is a BSON date), `expireAfterSeconds` from `SCANNER_DB_CHECKS_RETENTION`. When the retention changes, the index is updated with `collMod`, never dropped.
 
 Large reports: summary plus report inline; the full report moves to GridFS when its BSON-encoded size is above 8 MiB (a code constant; the BSON document limit is 16 MiB). The GridFS file is uploaded first (metadata `scan_id`, `uploaded_at`), then the scan document is saved; if that save fails, the new file is deleted at once (best effort) and the previous result keeps its file. After a successful save, the document's other files (the previous result's) are deleted (best effort). List queries (`GET /api/v2/scans`) never return the report (projection). Cleanup of old files is part of retention (section 14).
@@ -366,9 +397,11 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | Variable | Purpose |
 |---|---|
 | `SCANNER_V2_API_ENABLED` | Feature flag for the new API |
-| `SCANNER_V2_AUTH_TOKEN` | Service token for the new API. One token, compared in constant time, at least 32 characters |
+| `SCANNER_V2_AUTH_TOKEN` | Service token for the new API (secret). One token, compared in constant time, at least 32 characters; startup fails when v2 is enabled and it is missing or shorter |
+| `SCANNER_V2_MAX_INFLIGHT` | Most POSTs handled at once; beyond it 429. Default 32 |
+| `SCANNER_V2_CACHE_DIR` | Directory of the v2 DBs (version directories) and the per-worker Trivy caches, separate from the Harbor adapter's `SCANNER_TRIVY_CACHE_DIR`. Default `/home/scanner/.cache/scanner-v2` |
 | `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error (config error). If MongoDB is only unreachable, the service does not exit: it keeps running with readiness false and the v2 API returning 503, the DB updater keeps running, and the driver reconnects automatically (no custom backoff loop). Write and read concern come from the connection string (no separate settings). The connection string is never logged or included in errors. No multi-document transactions are used. |
-| `SCANNER_INSTANCE_ID` | Id of this scanner instance for `db_state` and `db_checks`. Default: the hostname, with a WARN at startup (set it explicitly, for example in compose) |
+| `SCANNER_INSTANCE_ID` | Id of this scanner instance for `db_state` and `db_checks`. Default: the hostname, with a WARN at startup when v2 is enabled (set it explicitly, for example in compose) |
 | `SCANNER_DB_STATE_RETENTION` | How long a `db_state` document lives after its last write (TTL index on `updated_at`, updated with `collMod`). Default 7d; startup fails if it is shorter than twice `SCANNER_DB_CHECK_INTERVAL` |
 | `SCANNER_MONGO_CONNECT_TIMEOUT` | Connect timeout. Default 5s |
 | `SCANNER_DB_CHECKS_RETENTION` | How long `db_checks` documents are kept (TTL index). Default 30d (the `d` suffix is supported) |
@@ -429,6 +462,7 @@ All defaults can be overridden by env. Existing Trivy variables keep their curre
 16. A rescan of the same tag overwrites its result (one document per tag).
 17. A request that is not covered by the tag's running scan returns 409 `scan_in_progress`.
 18. For the same digest, the scope widens to the union of the stored and the requested platforms and severities.
+19. A narrower request is served from a wider stored result, filtered to the request.
 
 ## 14. Deferred ideas and open questions
 
