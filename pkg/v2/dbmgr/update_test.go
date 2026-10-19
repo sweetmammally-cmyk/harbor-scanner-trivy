@@ -105,10 +105,15 @@ func TestUpdate(t *testing.T) {
 		serveBlob(broken, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("not the layer")) })
 		good := startFakeOCIRegistry(t, dbLayer(t, "good db", now))
 		sources := []config.DBSource{broken.source(t, "direct"), good.source(t, "direct")}
+		logs := captureLogs(t)
 
 		result := update(testContext(t), updateConfig, cacheDir, trivyDB, sources)
 
 		assert.True(t, result.Installed)
+		// The DB source selection is logged (DEMAND section 12).
+		assert.Contains(t, logs.String(), `"msg":"DB source selected","db":"db","source":"`+sources[0].String())
+		assert.Contains(t, logs.String(), `"msg":"DB source selected","db":"db","source":"`+sources[1].String())
+		assert.Contains(t, logs.String(), `"msg":"DB installed","db":"db","source":"`+sources[1].String())
 		assert.Equal(t, []string{"download_error", ""}, sourceClasses(result))
 		assert.True(t, result.Sources[0].Answered, "the broken source did answer the upstream check")
 		assert.Equal(t, "good db", readDB(t, cacheDir))

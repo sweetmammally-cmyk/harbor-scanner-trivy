@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 10 (health, logging, metrics); Phase 9 complete except the v1 component test run
-- Last completed task: P10-4
+- Last completed task: P10-3
 - In progress: none
-- Next task: P10-3
+- Next task: P10-5
 - Blockers / questions for the user: the v1 component tests wait for the owner to rename the local Harbor container `redis` to `redis-harbor-local` (still named `redis` at the last check); P9-1 and P9-8 stay `[~]` until then.
 - Last updated: 2026-10-19
 
@@ -205,6 +205,21 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-19  P10-3  Required log lines and no secrets
+- Status: done
+- What changed: tests only. Every required line of DEMAND 12 has a log-capture test:
+  - "triggering scan" and "scan done" with durations: `pkg/v2/runner/scan_test.go` (already) and the new full-stack test;
+  - "scan skipped (db unchanged)": new full-stack test;
+  - DB source selection: `pkg/v2/dbmgr/update_test.go` now checks "DB source selected" for both sources and "DB installed" for the good one;
+  - each pre-check stage result: `pkg/v2/dbmgr/precheck_log_test.go` (already) and the full-stack test (started, stage, failed);
+  - "using fallback interval": `pkg/v2/config/config_test.go` (already, now with v2 enabled);
+  - "all DB sources failed, scanning with existing DB": `pkg/v2/dbmgr/update_test.go` (already) and the full-stack test.
+  - New `test/integration/apiv2/logs_test.go` (`TestRequiredLogsAndNoSecrets`): the whole stack with a DB source behind a proxy with user and password, a registry password and the service token; after a scan, a hit and a failed DB update it checks the lines above, `scan_id`, `digest`, `customer_ids` and `request_id` in the structured logs, and that neither the proxy user or password, the registry password, the token, nor "Bearer " appears in the logs, the health, db, list and scan bodies, or the metrics scrape; findings are not logged.
+- Files: `pkg/v2/dbmgr/update_test.go`, `test/integration/apiv2/logs_test.go`
+- Tests run: `go test -short -race -run TestUpdate ./pkg/v2/dbmgr/` -> ok; `go test -count=1 -race -tags=integration -run TestRequiredLogsAndNoSecrets ./test/integration/apiv2/` -> ok.
+- Decisions / surprises: none.
+- Next: P10-5
 
 ### 2026-10-19  P10-4  Prometheus metrics
 - Status: done
