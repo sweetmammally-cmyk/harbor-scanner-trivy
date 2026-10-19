@@ -1,7 +1,9 @@
 package trivy
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/fake"
 	"github.com/google/go-containerregistry/pkg/v1/random"
@@ -180,9 +182,15 @@ func TestWrapper_Scan(t *testing.T) {
 			NonSSL: true,
 		}
 
+		var logs bytes.Buffer
+		defaultLogger := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		defer slog.SetDefault(defaultLogger)
+
 		got, err := NewWrapper(config, ambassador).Scan(imageRef, ScanOption{Format: FormatJSON})
 		require.NoError(t, err)
 		require.Equal(t, expectedReport, got)
+		require.NotContains(t, logs.String(), "FULL TRIVY REPORT", "the full report is not logged (P10-5)")
 
 		ambassador.AssertExpectations(t)
 	})

@@ -147,14 +147,6 @@ func (w *wrapper) parseJSONReport(reportFile io.Reader) (Report, error) {
 		)
 	}
 
-	// DEBUG: dump full trivy report
-	data, err := json.MarshalIndent(scanReport, "", "  ")
-	if err == nil {
-		slog.Info("FULL TRIVY REPORT",
-			slog.String("report", string(data)),
-		)
-	}
-
 	var vulnerabilities []Vulnerability
 
 	for _, scanResult := range scanReport.Results {

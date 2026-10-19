@@ -5,10 +5,10 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 10 (health, logging, metrics); Phase 9 complete except the v1 component test run
-- Last completed task: P10-3
+- Phase: 10 done; Phase 9 complete except the v1 component test run
+- Last completed task: P10-5 (Phase 10 complete)
 - In progress: none
-- Next task: P10-5
+- Next task: the v1 component test run (P9-1/P9-8) once the owner has renamed the local `redis` container; then Phase 11 (P11-1)
 - Blockers / questions for the user: the v1 component tests wait for the owner to rename the local Harbor container `redis` to `redis-harbor-local` (still named `redis` at the last check); P9-1 and P9-8 stay `[~]` until then.
 - Last updated: 2026-10-19
 
@@ -189,6 +189,8 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 Touched by this plan:
 
 - `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` (P0-6): test expectations for `vendor_attributes.Trivy` (owner chose KEEP). Test-only. (Correction: missing from this list until P5-1.)
+- `pkg/trivy/wrapper.go` (P10-5): the "FULL TRIVY REPORT" debug log (added in `0c87038`) is removed; the other debug logs of that commit stay. `pkg/trivy/wrapper_test.go` (P10-5): `TestWrapper_Scan` checks that the line is not logged.
+- `cmd/scanner-trivy/main.go` (P10-2): uses `service.Routes(v1)` instead of building the mux itself.
 - `cmd/scanner-trivy/main.go` (P9-1): reads the v2 config; when `SCANNER_V2_API_ENABLED` is true, starts `pkg/v2/service`, routes `/api/v2/` to its handler in front of the v1 router (an `http.ServeMux`), and at shutdown calls `StopAccepting` before and `Stop` after the HTTP server's `Shutdown`. With v2 disabled the v1 handler is served exactly as before.
 - `go.mod`, `go.sum` (P5-1): new dependency `go.mongodb.org/mongo-driver/v2 v2.9.1` and its indirect modules; minimum-version bumps it requires: `golang.org/x/crypto` 0.51.0 -> 0.53.0, `golang.org/x/sync` 0.20.0 -> 0.21.0, `golang.org/x/sys` 0.45.0 -> 0.46.0, `golang.org/x/text` 0.37.0 -> 0.39.0, `github.com/klauspost/compress` 1.17.4 -> 1.19.2 (all indirect). Upstream unit and integration tests pass with them.
 
@@ -205,6 +207,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-19  P10-5  Remove the FULL TRIVY REPORT log
+- Status: done
+- What changed: `pkg/trivy/wrapper.go` no longer logs the whole Trivy report ("FULL TRIVY REPORT"); the "Trivy result detected" and "Trivy vulnerability" INFO lines, `vendor_attributes.Trivy` and all other v1 behaviour stay (owner).
+- Files: `pkg/trivy/wrapper.go`, `pkg/trivy/wrapper_test.go`
+- Tests run: `go test -short -race ./...` -> ok; `go test -count=1 -tags=integration ./test/integration/api/` -> ok. The new assertion in `TestWrapper_Scan` fails against the old `wrapper.go` (checked) and passes now.
+- Decisions / surprises: none.
+- Next: v1 component tests (waiting for the owner), then Phase 11
 
 ### 2026-10-19  P10-3  Required log lines and no secrets
 - Status: done
