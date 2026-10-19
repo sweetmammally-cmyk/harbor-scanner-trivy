@@ -20,8 +20,8 @@ const RecentWindow = 20
 // and metric scrapes do not query MongoDB each time.
 const statsCacheTTL = 10 * time.Second
 
-// metrics are the queue's counters in this replica.
-type metrics struct {
+// counters are the queue's counters in this replica.
+type counters struct {
 	claims         atomic.Int64
 	claimNanos     atomic.Int64
 	leaseLosses    atomic.Int64
@@ -38,7 +38,7 @@ type Recent struct {
 	Failed int
 }
 
-func (m *metrics) scanFinished(failed bool) {
+func (m *counters) scanFinished(failed bool) {
 	m.recentMu.Lock()
 	defer m.recentMu.Unlock()
 	m.recent = append(m.recent, failed)
@@ -62,6 +62,19 @@ func (q *Queue) Recent() Recent {
 	return recent
 }
 
+// PeekStats returns the last CachedStats result with the counters of now,
+// without querying MongoDB (for metric scrapes); false before the first one.
+func (q *Queue) PeekStats() (Stats, bool) {
+	q.statsMu.Lock()
+	defer q.statsMu.Unlock()
+	stats := q.stats
+	stats.Claims = q.metrics.claims.Load()
+	stats.ClaimDuration = time.Duration(q.metrics.claimNanos.Load())
+	stats.LeaseLosses = q.metrics.leaseLosses.Load()
+	stats.ReaperRequeues = q.metrics.reaperRequeues.Load()
+	return stats, !q.statsAt.IsZero()
+}
+
 // CachedStats is Stats, reused for statsCacheTTL.
 func (q *Queue) CachedStats(ctx context.Context) (Stats, error) {
 	q.statsMu.Lock()
@@ -78,11 +91,11 @@ func (q *Queue) CachedStats(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
-func (m *metrics) leaseLost() {
+func (m *counters) leaseLost() {
 	m.leaseLosses.Add(1)
 }
 
-func (m *metrics) claimed(took time.Duration) {
+func (m *counters) claimed(took time.Duration) {
 	m.claims.Add(1)
 	m.claimNanos.Add(int64(took))
 }

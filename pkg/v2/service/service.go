@@ -10,9 +10,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/api"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/metrics"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/queue"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/registry"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/runner"
@@ -33,6 +36,7 @@ type Service struct {
 	stopPool    func()
 	poolDone    chan struct{}
 	stopReaper  func()
+	collector   *metrics.Collector
 }
 
 // Start starts the v2 service: the store client and its monitor (which ensures
@@ -82,6 +86,15 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 	reaperCtx, stopReaper := context.WithCancel(context.Background())
 	s.stopReaper = stopReaper
 	go q.RunReaper(reaperCtx, queue.ReapInterval)
+	// The queue statistics are refreshed here, so metric scrapes never query MongoDB.
+	go refreshQueueStats(reaperCtx, client, q)
+
+	s.collector = metrics.NewCollector(func() metrics.Gauges {
+		return gauges(cfg, client, q, dbState, scanner)
+	})
+	if err = prometheus.Register(s.collector); err != nil {
+		return nil, fmt.Errorf("registering the v2 metrics: %w", err)
+	}
 
 	s.handler = api.NewHandler(cfg, api.Deps{
 		Queue:           q,
@@ -136,10 +149,53 @@ func (s *Service) Stop() {
 	s.stopUpdater()
 	<-s.updaterDone
 	s.stopMonitor()
+	prometheus.Unregister(s.collector)
 	ctx, cancel := context.WithTimeout(context.Background(), disconnectTimeout)
 	defer cancel()
 	if err := s.client.Disconnect(ctx); err != nil {
 		slog.Warn("closing the MongoDB connection failed", slog.String("error", err.Error()))
 	}
 	slog.Info("v2 direct scan service stopped")
+}
+
+// statsRefreshInterval is how often the queue statistics for /metrics are read.
+const statsRefreshInterval = 10 * time.Second
+
+// refreshQueueStats keeps the cached queue statistics fresh while MongoDB is ready.
+func refreshQueueStats(ctx context.Context, client *store.Client, q *queue.Queue) {
+	for {
+		if client.Ready() {
+			if _, err := q.CachedStats(ctx); err != nil {
+				slog.Warn("reading queue statistics failed", slog.String("error", err.Error()))
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(statsRefreshInterval):
+		}
+	}
+}
+
+// gauges reads the scrape-time metrics from memory only.
+func gauges(cfg config.Config, client *store.Client, q *queue.Queue, dbState dbmgr.StateStore, scanner *runner.Runner) metrics.Gauges {
+	now := time.Now()
+	result := metrics.Gauges{MongoUp: client.Up(), TrivyVersion: scanner.Version(), SchemaVersion: store.SchemaVersion}
+	stats, known := q.PeekStats()
+	result.QueueKnown = known
+	result.Queue = metrics.QueueFigures{Depth: stats.Depth, OldestQueuedAge: stats.OldestQueuedAge, Claims: stats.Claims,
+		ClaimDuration: stats.ClaimDuration, LeaseLosses: stats.LeaseLosses, ReaperRequeues: stats.ReaperRequeues}
+	kinds := []string{"db"}
+	if len(cfg.JavaDBSources) > 0 {
+		kinds = append(kinds, "java-db")
+	}
+	for _, kind := range kinds {
+		state, _ := dbState.Get(context.Background(), kind)
+		figures := metrics.DBFigures{DB: kind, Age: state.Age(now), Degraded: state.Mode == dbmgr.ModeDegraded, NewerAvailable: state.NewerAvailable}
+		if !state.LastConfirmedCurrentAt.IsZero() {
+			figures.ConfirmedAge = now.Sub(state.LastConfirmedCurrentAt)
+		}
+		result.DBs = append(result.DBs, figures)
+	}
+	return result
 }

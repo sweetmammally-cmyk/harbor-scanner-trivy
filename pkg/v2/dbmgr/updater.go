@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/metrics"
 )
 
 // UpdateResults is the outcome of one update run for both DBs.
@@ -171,6 +172,12 @@ func (u *Updater) RefreshForScan(ctx context.Context, maxAge time.Duration) (DBS
 
 // saveState applies an update result to the stored state of a DB.
 func (u *Updater) saveState(db string, result UpdateResult) {
+	metrics.DBUpdateRun(db, result.Mode)
+	for _, source := range result.Sources {
+		if source.FailureClass != "" {
+			metrics.SourceFailed(db, source.Source, source.FailureClass)
+		}
+	}
 	state, err := u.store.Get(u.ctx, db)
 	if err == nil {
 		err = u.store.Save(u.ctx, db, state.apply(result))

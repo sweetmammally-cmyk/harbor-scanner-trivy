@@ -94,7 +94,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P10-1 `GET /api/v2/health`: ok/degraded/unhealthy (DEMAND 5.5), checks with sanitized details, DB states, queue, recent scans (in-memory window of 20), all instances; `SCANNER_HEALTH_QUEUE_STUCK_AFTER`
 - [x] P10-2 Readiness (Mongo ping flag, schema, Trivy DB, trivy binary, shutting down, required Java DB; degraded mode stays ready) and trivial liveness; v1 probes unchanged when v2 is disabled
 - [ ] P10-3 Log-capture test for every required log line (DEMAND 12) and a test that no secret appears in logs, metrics or the health body
-- [ ] P10-4 Prometheus metrics on the adapter's `/metrics` (DEMAND 12 list, label rules, Queue.Stats cached 10s, a scrape does not query MongoDB)
+- [x] P10-4 Prometheus metrics on the adapter's `/metrics` (DEMAND 12 list, label rules, Queue.Stats cached 10s, a scrape does not query MongoDB)
 - [ ] P10-5 Remove the FULL TRIVY REPORT debug log (`pkg/trivy/wrapper.go`); everything else in v1 stays
 
 ## Phase 11: Hardening and acceptance

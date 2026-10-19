@@ -37,8 +37,8 @@ type Queue struct {
 	scans  *mongo.Collection
 	// wake tells this replica's idle workers that a scan was enqueued.
 	wake chan struct{}
-	// metrics are updated by the queue and read by the metrics endpoint.
-	metrics metrics
+	// metrics are the counters of this replica, read by health and /metrics.
+	metrics counters
 
 	// The CachedStats cache.
 	statsMu sync.Mutex

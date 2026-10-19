@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -233,6 +234,28 @@ func TestFullStack(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		assert.Equal(t, true, decode(t, w)["cached"])
 		assert.Equal(t, 1, s.runs())
+
+		// A scrape of /metrics: the expected names, no forbidden label values,
+		// nothing secret.
+		scrape := httptest.NewRecorder()
+		promhttp.Handler().ServeHTTP(scrape, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		text := scrape.Body.String()
+		for _, name := range []string{
+			`scanner_v2_scans_total{result="done"}`, `scanner_v2_scans_total{result="hit"}`, `scanner_v2_scans_total{result="copy_hit"}`,
+			"scanner_v2_scan_duration_seconds_bucket", "scanner_v2_queue_wait_seconds_bucket",
+			`scanner_v2_api_requests_total{route="/api/v2/scans",status="200"}`, `route="/api/v2/scans/{id}"`,
+			"scanner_v2_api_inflight_requests", "scanner_v2_queue_claims_total", "scanner_v2_queue_claim_seconds_total",
+			"scanner_v2_queue_lease_losses_total", "scanner_v2_queue_reaper_requeues_total", "scanner_v2_mongo_up 1",
+			`scanner_v2_db_age_seconds{db="db"}`, `scanner_v2_db_confirmed_age_seconds{db="db"}`, `scanner_v2_db_degraded{db="db"} 1`,
+			`scanner_v2_db_newer_available{db="db"}`, `scanner_v2_db_update_runs_total{db="db",mode="degraded"}`,
+			`scanner_v2_db_precheck_failures_total{class=`, `source="127.0.0.1:1"`,
+			`scanner_v2_build_info{schema_version="4",trivy_version="0.74.0"} 1`,
+		} {
+			assert.Contains(t, text, name)
+		}
+		for _, forbidden := range []string{"sha256:", "cust-", "project", `"v1"`, `"v2"`, registryPassword, token, "/home/scanner"} {
+			assert.NotContains(t, text, forbidden)
+		}
 
 		// force and a broader severity scan again.
 		w = s.do(http.MethodPost, "/api/v2/scans", body("v1", `"alpine"`, `"force":true`))

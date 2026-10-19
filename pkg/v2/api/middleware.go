@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/metrics"
 )
 
 // maxBodyBytes is the largest request body read.
@@ -63,7 +65,10 @@ func (h *Handler) logRequests(next http.Handler) http.Handler {
 		}
 
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		metrics.APIInflight(1)
 		next.ServeHTTP(recorder, r)
+		metrics.APIInflight(-1)
+		metrics.APIRequest(route, recorder.status)
 		slog.Info("request",
 			slog.String("method", r.Method),
 			slog.String("route", route),

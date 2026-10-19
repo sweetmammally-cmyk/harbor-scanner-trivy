@@ -16,3 +16,13 @@ func TestRecent(t *testing.T) {
 
 	assert.Equal(t, Recent{Done: 15, Failed: 5}, q.Recent(), "only the last 20 scans")
 }
+
+func TestPeekStatsNeverQueries(t *testing.T) {
+	q := &Queue{} // no MongoDB client: a query would panic
+	q.metrics.leaseLost()
+
+	stats, known := q.PeekStats()
+
+	assert.False(t, known, "no statistics read yet")
+	assert.EqualValues(t, 1, stats.LeaseLosses, "the counters are live")
+}

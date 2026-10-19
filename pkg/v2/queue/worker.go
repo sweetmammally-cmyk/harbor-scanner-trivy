@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/dbmgr"
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/metrics"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/runner"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
@@ -213,6 +214,7 @@ func (p *Pool) process(scan store.Scan, worker string) {
 		p.logWriteError(logger, err)
 		if err == nil {
 			p.queue.metrics.scanFinished(true)
+			metrics.ScanFinished(metrics.ResultFailed, 0)
 		}
 		return
 	}
@@ -225,6 +227,7 @@ func (p *Pool) process(scan store.Scan, worker string) {
 	p.logWriteError(logger, err)
 	if err == nil {
 		p.queue.metrics.scanFinished(false)
+		metrics.ScanFinished(metrics.ResultDone, time.Duration(finished.ScanMS)*time.Millisecond)
 	}
 }
 

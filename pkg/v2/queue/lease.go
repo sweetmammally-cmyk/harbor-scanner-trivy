@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/metrics"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
 )
 
@@ -49,6 +50,9 @@ func (q *Queue) Claim(ctx context.Context, worker string) (store.Scan, error) {
 	}
 	if err != nil {
 		return store.Scan{}, fmt.Errorf("claiming a scan: %w", err)
+	}
+	if scan.StartedAt != nil {
+		metrics.ScanClaimed(scan.StartedAt.Sub(scan.QueuedAt))
 	}
 	return scan, nil
 }

@@ -6,11 +6,11 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 10 (health, logging, metrics); Phase 9 complete except the v1 component test run
-- Last completed task: P10-1
+- Last completed task: P10-4
 - In progress: none
-- Next task: P10-4
+- Next task: P10-3
 - Blockers / questions for the user: the v1 component tests wait for the owner to rename the local Harbor container `redis` to `redis-harbor-local` (still named `redis` at the last check); P9-1 and P9-8 stay `[~]` until then.
-- Last updated: 2026-10-17
+- Last updated: 2026-10-19
 
 ## Repo facts (filled in by Phase 0)
 
@@ -205,6 +205,17 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-19  P10-4  Prometheus metrics
+- Status: done
+- What changed:
+  - New `pkg/v2/metrics` (depends only on Prometheus), registered on the default registry, so they appear on the adapter's existing `/metrics` (same listener, unauthenticated, served while `SCANNER_API_SERVER_METRICS_ENABLED` is true, the default). Event metrics: `scanner_v2_scans_total{result=done|failed|hit|copy_hit}`, `scanner_v2_scan_duration_seconds` and `scanner_v2_queue_wait_seconds` histograms (1s to ~34m), `scanner_v2_api_requests_total{route,status}` (route template), `scanner_v2_api_inflight_requests`, `scanner_v2_db_update_runs_total{db,mode}`, `scanner_v2_db_precheck_failures_total{db,source,class}` (source = registry host only). Scrape-time `Collector` (fixed descriptors, so Unregister works when its output changes): `scanner_v2_mongo_up`, `scanner_v2_build_info{trivy_version,schema_version}`, `scanner_v2_queue_depth`, `scanner_v2_queue_oldest_age_seconds` (only after the first statistics), `scanner_v2_queue_claims_total` and `scanner_v2_queue_claim_seconds_total` (claim latency = seconds / claims), `scanner_v2_queue_lease_losses_total`, `scanner_v2_queue_reaper_requeues_total`, and per DB kind `scanner_v2_db_age_seconds`, `scanner_v2_db_confirmed_age_seconds`, `scanner_v2_db_degraded`, `scanner_v2_db_newer_available`.
+  - A scrape never queries MongoDB: the collector reads the ping flag, the in-memory DB states and `Queue.PeekStats` (the last cached statistics with live counters); `pkg/v2/service` refreshes the cache every 10s while MongoDB is ready (`refreshQueueStats`), and registers/unregisters the collector in `Start`/`Stop`.
+  - Hooks: `Updater.saveState` (runs and failed sources), `Queue.Claim` (queue wait), the pool (done with duration, failed), `writeHit` (hit, copy_hit), the request log middleware (requests, in-flight). The queue's internal counter type is renamed `counters` (it clashed with the package name).
+- Files: `pkg/v2/metrics/{metrics,collector,metrics_test}.go`, `pkg/v2/queue/{metrics,metrics_test,queue,lease,worker}.go`, `pkg/v2/api/{middleware,scans}.go`, `pkg/v2/dbmgr/updater.go`, `pkg/v2/service/service.go`, `test/integration/apiv2/fullstack_test.go`
+- Tests run: `go test -short -race ./...` -> ok; `go test -count=1 -tags=integration ./test/integration/...` -> ok. Unit: source host (with a proxied route), collector output (`GatherAndCompare`), no queue gauges before the first statistics, unregister after the output changed, event counters; `PeekStats` on a queue without a MongoDB client (a query would panic). Full stack: a real scrape after a scan, a hit and a copy hit has all the names above with the expected labels, and contains no digest, customer id, repository, tag, registry password, token or path.
+- Decisions / surprises: no metric needs a `platform` label, so the rule about known Trivy types has no user yet. Claim latency is exposed as two counters (a Prometheus summary without quantiles).
+- Next: P10-3
 
 ### 2026-10-17  P10-1  GET /api/v2/health
 - Status: done

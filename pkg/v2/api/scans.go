@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/metrics"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/queue"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/registry"
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/store"
@@ -201,6 +202,11 @@ func (h *Handler) writeHit(ctx context.Context, w http.ResponseWriter, logger *s
 	}
 	view.Cached = true
 	view.DBUnchanged = true
+	if copiedFrom == "" {
+		metrics.ScanFinished(metrics.ResultHit, 0)
+	} else {
+		metrics.ScanFinished(metrics.ResultCopyHit, 0)
+	}
 	logger.Info("scan skipped (db unchanged)", slog.String("copied_from", copiedFrom),
 		slog.Time("db_updated_at", scan.DB.UpdatedAt), slog.String("freshness", scan.DB.Freshness))
 	writeJSON(w, http.StatusOK, view)
