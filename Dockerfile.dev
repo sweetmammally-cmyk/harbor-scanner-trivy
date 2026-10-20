@@ -4,7 +4,9 @@ ARG SKAFFOLD_GO_GCFLAGS
 
 FROM golang:1.25 AS builder
 
-ENV GOPROXY=https://package-mirror.liara.ir/repository/go/
+# Go module proxy for the build; override with --build-arg GOPROXY=... (for
+# example a regional mirror). The Makefile passes GOPROXY from the environment.
+ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOSUMDB=off
 
 WORKDIR /go/src/github.com/aquasecurity/harbor-scanner-trivy

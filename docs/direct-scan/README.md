@@ -19,6 +19,18 @@ This fork adds a direct scan API (`/api/v2`) next to the Harbor adapter (`/api/v
 - MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`). The scanner uses no multi-document transactions. MongoDB 4.2 or newer is required; the examples use 7. Give MongoDB a high open-file limit (`nofile` 64000), a persistent volume and authentication.
 - `/metrics` (Prometheus) is served on the same port without authentication. Keep that port internal.
 
+## Building the image
+
+The Go modules are downloaded through `GOPROXY`, a Dockerfile build argument that defaults to the public `https://proxy.golang.org,direct` (what CI uses). To build through our own Go module mirror, pass it from the environment; the Makefile hands it to `docker build`:
+
+```
+GOPROXY=<our Go module mirror> make docker-build
+# or directly
+docker build --build-arg GOPROXY=<our Go module mirror> -t harbor-scanner-trivy:v2 .
+```
+
+The mirror address is never committed.
+
 ## Offline installs: seed DB
 
 The default image has no seed DB: a new replica is not ready until its first DB download succeeds. For an install that cannot reach any DB source at first start, build the image with the Trivy DB baked in:

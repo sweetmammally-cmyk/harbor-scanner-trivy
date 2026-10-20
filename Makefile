@@ -22,7 +22,7 @@ $(BINARY): $(SOURCES)
 
 .PHONY: docker-build
 docker-build: build
-	docker build --no-cache -t $(IMAGE) .
+	docker build --no-cache $(if $(GOPROXY),--build-arg GOPROXY=$(GOPROXY)) -t $(IMAGE) .
 
 # LINT_BASE is the upstream commit this fork is based on: lint reports only
 # issues on lines changed since then (upstream's own findings stay upstream's).

@@ -203,8 +203,8 @@ Merge summary (P11-6, checked against `git diff --name-only 2691434 HEAD` on 202
 | File | Our change | Merge note |
 |---|---|---|
 | `cmd/scanner-trivy/main.go` | reads the v2 config; when enabled, starts `pkg/v2/service`, wraps the v1 handler with `service.Routes`, stops it around the HTTP server's shutdown | about 20 lines; keep the v1 path unchanged |
-| `Dockerfile` | `GOPROXY`/`GOSUMDB` (pre-plan), `/home/scanner/.cache/scanner-v2` owned by `scanner` | Trivy version stays the single `TRIVY_VERSION` pin (0.74.0); a Trivy upgrade must recheck the `memory` cache backend and the error texts the runner classifies |
-| `Dockerfile.dev` | `GOPROXY`/`GOSUMDB` (pre-plan) | |
+| `Dockerfile` | `ARG GOPROXY` (default public proxy; P12-5) and `GOSUMDB=off` (pre-plan), `/home/scanner/.cache/scanner-v2` owned by `scanner`, `WITH_SEED_DB` (P11-14) | Trivy version stays the single `TRIVY_VERSION` pin (0.74.0); a Trivy upgrade must recheck the `memory` cache backend and the error texts the runner classifies |
+| `Dockerfile.dev` | `ARG GOPROXY` (P12-5) and `GOSUMDB=off` (pre-plan) | |
 | `Makefile` | golangci-lint v2.15.0 in `make setup`; `make lint --new-from-rev=$(LINT_BASE)` | after a merge, move `LINT_BASE` to the new upstream commit |
 | `.github/workflows/build.yml` | every push, full history | |
 | `pkg/http/api/server.go`, `pkg/http/api/server_test.go` | fixed inverted `ErrServerClosed` check that exited the process on every shutdown | an upstream bug; consider sending the fix upstream |
@@ -228,6 +228,7 @@ Touched by this plan:
 - `Dockerfile` (P11-4): creates `/home/scanner/.cache/scanner-v2` owned by `scanner`, so a new named volume inherits the owner. No `VOLUME` instruction (it would give v1-only users an anonymous volume); the seed DB setup is unchanged (owner).
 - `pkg/http/api/server.go` (P11-1): the serve goroutine called `os.Exit(1)` when `ListenAndServe` returned `http.ErrServerClosed`, the normal result of `Shutdown` (inverted condition). It now exits only for other errors. Without the fix SIGTERM killed the process as soon as the HTTP server closed: no shutdown grace, no lease release (v2), no clean stop of the v1 Redis worker. `pkg/http/api/server_test.go` (empty upstream) has the regression test.
 - `Dockerfile` (P11-14): build arguments `WITH_SEED_DB` (default false) and `SEED_DB_REPOSITORY` (default `docker.io/aquasec/trivy-db:2`); with `WITH_SEED_DB=true` the build downloads the Trivy DB with the image's Trivy into `/home/scanner/seed/db`.
+- `Dockerfile`, `Dockerfile.dev` (P12-5): the hard-coded `ENV GOPROXY=<regional package mirror>` (from `0c87038`) is replaced by `ARG GOPROXY=https://proxy.golang.org,direct`; `Makefile` `docker-build` passes `GOPROXY` from the environment as a build argument when it is set.
 - `.github/workflows/build.yml` (P12-5): runs on pushes to every branch (was main only) and checks out the full history (`fetch-depth: 0`) for the lint comparison; all steps unchanged. `Makefile` (P12-5): `make lint` reports only issues on lines changed since `LINT_BASE` (default `2691434`, the upstream base).
 - `Makefile` (P11-7): `make setup` installs golangci-lint v2.15.0 instead of v1.21.0 (which cannot load Go 1.26 code).
 - `pkg/trivy/wrapper.go` (P10-5): the "FULL TRIVY REPORT" debug log (added in `0c87038`) is removed; the other debug logs of that commit stay. `pkg/trivy/wrapper_test.go` (P10-5): `TestWrapper_Scan` checks that the line is not logged.
@@ -248,6 +249,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P12-5  GOPROXY build argument
+- Status: done (owner: the part of P12-5 that was missing)
+- What changed: `Dockerfile` and `Dockerfile.dev` no longer hard-code the regional Go module mirror: `ARG GOPROXY=https://proxy.golang.org,direct` (a build argument is visible to the `RUN go mod download` step), so CI uses the public proxy. `make docker-build` passes `GOPROXY` from the environment as `--build-arg` when it is set (`GOPROXY=<mirror> make docker-build`). `GOSUMDB=off` (pre-plan) is unchanged. README "Building the image". goreleaser unchanged (owner: fix only if the first CI run fails).
+- Files: `Dockerfile`, `Dockerfile.dev`, `Makefile`, `docs/direct-scan/README.md`
+- Tests run: `GOPROXY=<our mirror> make docker-build` -> ok (`docker build --no-cache --build-arg GOPROXY=...`); negative check `docker build --build-arg GOPROXY=http://127.0.0.1:1 --target builder` -> `go mod download` fails fetching from 127.0.0.1:1 (the argument is used); `make -n docker-build` without `GOPROXY` passes no build argument; no internal hostname in the Dockerfiles, Makefile, workflows or skaffold.
+- Decisions / surprises: none.
+- Next: P12-3
 
 ### 2026-10-20  P12-5  CI for the fork
 - Status: done (verified locally; the first run on GitHub happens with the owner's next push)
