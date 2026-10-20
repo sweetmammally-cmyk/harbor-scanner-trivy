@@ -8,6 +8,7 @@ This fork adds a direct scan API (`/api/v2`) next to the Harbor adapter (`/api/v
 - Required when enabled: `SCANNER_V2_AUTH_TOKEN` (at least 32 characters), `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB`, `SCANNER_DB_SOURCES`, `SCANNER_REGISTRY_URL`. Startup fails with a clear error when one is missing.
 - Set `SCANNER_INSTANCE_ID` explicitly per replica (for example `scanner-1`), so an instance keeps its DB state when its container is recreated. The default is the hostname, with a WARN.
 - Callers send `Authorization: Bearer <SCANNER_V2_AUTH_TOKEN>` on every `/api/v2/...` request. `/probe/healthy` and `/probe/ready` need no token.
+- Calling the API from the backend (Temporal): [INTEGRATION.md](INTEGRATION.md).
 
 ## Network and credentials
 

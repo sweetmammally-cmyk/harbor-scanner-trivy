@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 12 (staging and integration)
-- Last completed task: P12-5
+- Last completed task: P12-3
 - In progress: none
-- Next task: P12-3, then P12-2, P12-6, P12-1, P12-4 (report after each)
+- Next task: P12-2, then P12-6, P12-1, P12-4 (report after each)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-20
 
@@ -249,6 +249,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P12-3  Integration guide for a Temporal activity
+- Status: done
+- What changed: new `docs/direct-scan/INTEGRATION.md` (for the backend team): the calls, a table of every answer and what the activity does (poll on 202 and on 200 queued/scanning; wait `Retry-After` and POST again on 409, 429 and 503; fail without retry on 400, 401, 404 and 502 `registry_auth_failed`; retryable error otherwise), heartbeats, how to read `done`, `db.freshness`, `failed` with and without `previous`, the failure classes, activity options (timeouts, retry policy with non-retryable types) and worker registration. Linked from the README. New Go module `docs/direct-scan/integration/` (own `go.mod`, Temporal Go SDK v1.50.0; the scanner's module does not depend on it, `go list ./...` at the root does not include it): `scanactivity.go` (the activity: `request_id` from the workflow and activity ids, the answer table, polling, `Retry-After` capped by `MaxWait`, heartbeats; `failed` with `previous` -> `Stale: true` with the failure class; without -> a retryable application error typed by the class), `scanactivity_test.go` (Temporal's activity test environment against a fake scanner: 409 then 202 then queued then done; a cache hit; `image_not_found` non-retryable; failed with previous as stale; failed without previous as a retryable typed error), `workflow_test.go` (the guide's workflow snippet, run with a mocked activity).
+- Files: `docs/direct-scan/INTEGRATION.md`, `docs/direct-scan/README.md`, `docs/direct-scan/integration/{go.mod,go.sum,scanactivity.go,scanactivity_test.go,workflow_test.go}`
+- Tests run: `cd docs/direct-scan/integration && go test -race ./...` -> ok; golangci-lint there -> 0 issues; root `go vet ./...` and `make lint` -> ok; root `go.mod` unchanged.
+- Decisions / surprises: the example is not run by CI (`make test` covers the root module only); adding a CI step for it is a one-liner if wanted. Modules were fetched through our Go module mirror (proxy.golang.org answers 403 for some modules here).
+- Next: P12-2
 
 ### 2026-10-20  P12-5  GOPROXY build argument
 - Status: done (owner: the part of P12-5 that was missing)
