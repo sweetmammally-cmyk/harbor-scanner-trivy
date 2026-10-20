@@ -178,6 +178,19 @@ Record decisions here with date and reason (package layout, Mongo test strategy,
 
 List every file from the original upstream repo that we modify, with the reason.
 
+Merge summary (P11-6, checked against `git diff --name-only 2691434 HEAD` on 2026-10-20). Upstream base: `2691434`. Everything else we added lives in new paths that upstream does not have: `pkg/v2/`, `test/integration/{apiv2,queue,store,mongotest}/`, `docs/direct-scan/`, `CLAUDE.md`. When merging a new upstream version, only these upstream files need attention:
+
+| File | Our change | Merge note |
+|---|---|---|
+| `cmd/scanner-trivy/main.go` | reads the v2 config; when enabled, starts `pkg/v2/service`, wraps the v1 handler with `service.Routes`, stops it around the HTTP server's shutdown | about 20 lines; keep the v1 path unchanged |
+| `Dockerfile` | `GOPROXY`/`GOSUMDB` (pre-plan), `/home/scanner/.cache/scanner-v2` owned by `scanner` | Trivy version stays the single `TRIVY_VERSION` pin (0.74.0); a Trivy upgrade must recheck the `memory` cache backend and the error texts the runner classifies |
+| `Dockerfile.dev` | `GOPROXY`/`GOSUMDB` (pre-plan) | |
+| `Makefile` | golangci-lint v2.15.0 in `make setup` | |
+| `go.mod`, `go.sum` | MongoDB driver v2.9.1 and the indirect bumps it needs | re-run `go mod tidy` after merging |
+| `pkg/trivy/model.go`, `pkg/trivy/wrapper.go`, `pkg/scan/transformer.go` | pre-plan: result Target/Type on vulnerabilities, `vendor_attributes.Trivy` (KEEP); debug INFO logs per result and vulnerability; FULL TRIVY REPORT log removed (P10-5) | v1 behaviour otherwise upstream's |
+| `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` | test expectations for `vendor_attributes.Trivy`; the no-FULL-REPORT check | test-only |
+| `Vagrantfile` | trailing whitespace (pre-plan) | can be dropped |
+
 Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc0` "smoke", on top of upstream `2691434`):
 
 - `Dockerfile`: multi-stage build that compiles the binary in the image; `GOPROXY` set to `package-mirror.liara.ir`, `GOSUMDB=off`; `GOTRACEBACK=all`.
