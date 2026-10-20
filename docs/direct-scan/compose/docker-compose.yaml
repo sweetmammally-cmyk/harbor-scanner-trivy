@@ -1,0 +1,71 @@
+# Example: two v2 scanner replicas and MongoDB 7 (DEMAND sections 5.6, 9, 11).
+# Secrets come from .env (mode 0600, never in the image); see .env.example.
+# Docker Compose reads $ as a variable: a Harbor robot name such as
+# robot$scanner is written robot$$scanner in this file and in .env values
+# that compose interpolates.
+
+x-scanner: &scanner
+  image: harbor-scanner-trivy:v2
+  user: "10000:10000"                  # the image's non-root "scanner" user
+  stop_grace_period: 45s               # longer than SCANNER_SHUTDOWN_GRACE (30s)
+  dns:                                  # our DNS servers, tried in order (no DNS pool in the scanner)
+    - 10.0.0.53
+    - 10.0.1.53
+  env_file: .env
+  environment: &scanner-env
+    SCANNER_V2_API_ENABLED: "true"
+    SCANNER_MONGO_DB: scanner
+    SCANNER_SHUTDOWN_GRACE: 30s
+    SCANNER_QUEUE_WORKERS: "2"
+    SCANNER_V2_WORKER_CACHE_BACKEND: fs
+    SCANNER_DB_CHECK_INTERVAL: 3h
+    SCANNER_DB_SOURCES: "mirror.example.internal/aquasec/trivy-db:2|direct,ghcr.io/aquasecurity/trivy-db:2|direct"
+    SCANNER_JAVA_DB_SOURCES: "mirror.example.internal/aquasec/trivy-java-db:1|direct,ghcr.io/aquasecurity/trivy-java-db:1|direct"
+    SCANNER_REGISTRY_URL: https://harbor.example.internal
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/probe/ready"]
+    interval: 15s
+    timeout: 5s
+    start_period: 10m                  # the first DB download can take minutes
+    retries: 3
+  mem_limit: 5g                        # 2 workers: see "Sizing" in README.md
+  depends_on:
+    - mongo
+  networks: [scan]
+
+services:
+  scanner-1:
+    <<: *scanner
+    environment:
+      <<: *scanner-env
+      SCANNER_INSTANCE_ID: scanner-1     # explicit: keeps its DB state across container recreation
+    volumes:
+      - scanner-1-cache:/home/scanner/.cache   # local SSD; v1's Trivy cache and SCANNER_V2_CACHE_DIR
+
+  scanner-2:
+    <<: *scanner
+    environment:
+      <<: *scanner-env
+      SCANNER_INSTANCE_ID: scanner-2
+    volumes:
+      - scanner-2-cache:/home/scanner/.cache
+
+  mongo:
+    image: mongo:7
+    command: ["--auth"]
+    env_file: .env                       # MONGO_INITDB_ROOT_USERNAME / _PASSWORD
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
+    volumes:
+      - mongo-data:/data/db
+    networks: [scan]
+
+volumes:
+  scanner-1-cache:
+  scanner-2-cache:
+  mongo-data:
+
+networks:
+  scan:

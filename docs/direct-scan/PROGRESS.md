@@ -6,7 +6,7 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-12
+- Last completed task: P11-4
 - In progress: none
 - Next task: P11-4 (README, compose) after the measurements
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
@@ -190,6 +190,7 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 Touched by this plan:
 
 - `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` (P0-6): test expectations for `vendor_attributes.Trivy` (owner chose KEEP). Test-only. (Correction: missing from this list until P5-1.)
+- `Dockerfile` (P11-4): creates `/home/scanner/.cache/scanner-v2` owned by `scanner`, so a new named volume inherits the owner. No `VOLUME` instruction (it would give v1-only users an anonymous volume); the seed DB setup is unchanged (owner).
 - `Makefile` (P11-7): `make setup` installs golangci-lint v2.15.0 instead of v1.21.0 (which cannot load Go 1.26 code).
 - `pkg/trivy/wrapper.go` (P10-5): the "FULL TRIVY REPORT" debug log (added in `0c87038`) is removed; the other debug logs of that commit stay. `pkg/trivy/wrapper_test.go` (P10-5): `TestWrapper_Scan` checks that the line is not logged.
 - `cmd/scanner-trivy/main.go` (P10-2): uses `service.Routes(v1)` instead of building the mux itself.
@@ -209,6 +210,17 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-4  Operator README, compose example, Dockerfile
+- Status: done
+- What changed:
+  - New `docs/direct-scan/README.md` (operator guide): enabling v2 and its required settings, explicit `SCANNER_INSTANCE_ID`, the bearer token; DNS through Docker's `dns:` (no DNS pool); robot `$` written `$$` in compose files and `env_file` values (checked with Compose 5.6: `robot$$scanner` arrives as `robot$scanner`, an unescaped `robot$scanner` arrives as `robot`); secrets in a 0600 `.env`, never in the image, logs, argv or MongoDB; write/read concern in `SCANNER_MONGO_URI`, no transactions, MongoDB 4.2+ with `nofile` 64000, a volume and authentication; `/metrics` internal; memory and disk (no tmpfs, page cache, two DB copies, per-scan temp directories, the two cache backends, the cache limit, the undocumented memory backend); sizing from P11-12 (table, disk per replica: Trivy DB x3 about 4.6 GiB, Java DB x3 about 4.4 GiB, v1's copy, worker caches, temp; one full DB per install, upstream about every 6 hours; memory about 2 GB per worker + 1 GB with the measured RSS; scan times).
+  - New `docs/direct-scan/compose/docker-compose.yaml` and `.env.example`: two replicas with explicit `SCANNER_INSTANCE_ID`, `stop_grace_period: 45s` (> `SCANNER_SHUTDOWN_GRACE` 30s), `dns:`, a healthcheck on `/probe/ready` (start period 10m for the first download), user 10000, `mem_limit: 5g` for 2 workers, the secrets in `.env`; `mongo:7` with `--auth`, `nofile` 64000 and a named volume. Hostnames and DNS addresses are placeholders. `docker compose config` accepts it.
+  - `Dockerfile`: see "Upstream files touched". The image builds; it runs as uid 10000; a new named volume at `/home/scanner/.cache` is owned by `scanner` and writable; busybox `wget` is there for the healthcheck.
+- Files: `docs/direct-scan/README.md`, `docs/direct-scan/compose/{docker-compose.yaml,.env.example}`, `Dockerfile`
+- Tests run: `docker build` -> ok; the ownership and user checks above; `docker compose config` with the example `.env` -> ok; the `$$` check with a throwaway container.
+- Decisions / surprises: none.
+- Next: P11-6
 
 ### 2026-10-20  P11-12  Measurements: DB sizes, cache backends, memory and temp space
 - Status: done

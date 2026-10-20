@@ -29,6 +29,11 @@ ARG TRIVY_VERSION
 
 RUN adduser -u 10000 -D -g '' scanner scanner
 
+# The v2 service's DBs, worker layer caches and per-scan temp directories
+# (SCANNER_V2_CACHE_DIR). Mount a persistent local volume here; the directory
+# exists with the right owner so a new named volume inherits it.
+RUN mkdir -p /home/scanner/.cache/scanner-v2 && chown -R scanner:scanner /home/scanner/.cache
+
 COPY --from=builder /go/src/github.com/aquasecurity/harbor-scanner-trivy/scanner-trivy /home/scanner/bin/scanner-trivy
 
 ENV TRIVY_VERSION=${TRIVY_VERSION}
