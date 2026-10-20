@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-1
-- In progress: none
-- Next task: P11-4 (README, compose) after the measurements
-- Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
+- Phase: 11 (hardening and acceptance); Phases 0-10 done
+- Last completed task: P9-1, P9-8, P11-6 (v1 component tests green)
+- In progress: P11-2 (AC11 needs P11-3)
+- Next task: P11-3 (one real Harbor scan through the v1 adapter)
+- Blockers / questions for the user: the owner removed all local containers, including the local Harbor test install; P11-3 needs a Harbor (its `harbor.yml` was not found under the home directory, `/opt` or `/srv`; the goharbor v2.11.2 images are still there). Push decisions after the history scans are the owner's (16+ local commits not on origin).
 - Last updated: 2026-10-20
 
 ## Repo facts (filled in by Phase 0)
@@ -234,6 +234,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P9-1, P9-8, P11-6  v1 component tests
+- Status: done
+- What changed: no code. `make test-component` (builds the image, then `go test -tags=component ./test/component/...`). First attempt after the owner renamed `redis`: the test failed before testing anything, because the local Harbor install also had a container named `registry` (`goharbor/registry-photon:v2.11.2`) and the test creates a container with that fixed name. The owner then removed all local containers; second attempt green: `TestComponent` passed (`scan image for vulnerabilities` 20 s, `scan image for SBOM` 10 s, 98 s in total). No failure, so no comparison with the P0-6 worktree was needed. This closes the component-test part of P9-1, P9-8 and P11-6 and of AC11 (P11-2; the real Harbor scan P11-3 is still open).
+- Files: `docs/direct-scan/{CHECKLIST,PROGRESS}.md`
+- Tests run: `make test-component` -> ok.
+- Decisions / surprises: the component test uses fixed container names (`redis`, `registry`, `trivy-adapter`); any local containers with those names block it.
+- Next: P11-3
 
 ### 2026-10-20  P11-8  History scan, second pass (after the live run)
 - Status: done (report only; nothing rewritten, nothing pushed)
