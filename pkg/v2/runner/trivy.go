@@ -59,7 +59,9 @@ type Runner struct {
 	cacheDir string
 	workDir  string
 	// tmpDir holds one temporary directory per running scan.
-	tmpDir    string
+	tmpDir string
+	// dirSize measures a directory; tests replace it.
+	dirSize   func(path string) (int64, error)
 	plainHTTP bool
 	platforms store.PlatformRepository
 
@@ -77,6 +79,7 @@ func NewRunner(cfg config.Config, trivyPath, cacheDir, workDir, tmpDir string, p
 		cacheDir:  cacheDir,
 		workDir:   workDir,
 		tmpDir:    tmpDir,
+		dirSize:   dirSize,
 		plainHTTP: strings.HasPrefix(cfg.RegistryURL, "http://"),
 		platforms: platforms,
 	}
@@ -258,6 +261,52 @@ func (r *Runner) environment(tmpDir string) []string {
 		env = append(env, "TRIVY_USERNAME="+r.cfg.RegistryUsername, "TRIVY_PASSWORD="+r.cfg.RegistryPassword)
 	}
 	return env
+}
+
+// trimLayerCache clears the worker's Trivy layer cache (fanal) when it is
+// larger than SCANNER_V2_WORKER_CACHE_MAX. It runs between scans of that worker
+// and never touches the DBs. The memory backend has no layer cache on disk.
+func (r *Runner) trimLayerCache(logger *slog.Logger, worker string) {
+	if r.cfg.WorkerCacheBackend == config.CacheBackendMemory {
+		return
+	}
+	layerCache := filepath.Join(r.workDir, worker, "fanal")
+	size, err := r.dirSize(layerCache)
+	if err != nil {
+		logger.Warn("measuring the worker's layer cache failed", slog.String("error", err.Error()))
+		return
+	}
+	if size <= r.cfg.WorkerCacheMax {
+		return
+	}
+	if err = os.RemoveAll(layerCache); err != nil {
+		logger.Warn("clearing the worker's layer cache failed", slog.String("error", err.Error()))
+		return
+	}
+	logger.Info("worker layer cache cleared", slog.String("worker", worker),
+		slog.Int64("size_bytes", size), slog.Int64("max_bytes", r.cfg.WorkerCacheMax))
+}
+
+// dirSize is the total size of the regular files below path; 0 when it does not exist.
+func dirSize(path string) (int64, error) {
+	var size int64
+	err := filepath.WalkDir(path, func(_ string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type().IsRegular() {
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			size += info.Size()
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	return size, err
 }
 
 // CleanTemp removes what scans left in the temp directory (a crash or a kill

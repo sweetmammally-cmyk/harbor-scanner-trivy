@@ -73,6 +73,8 @@ func (r *Runner) Scan(ctx context.Context, worker string, scan store.Scan, refer
 		slog.String("trivy_version", r.Version()),
 	)
 	start := time.Now()
+	// Between this worker's scans, keep its layer cache under the limit.
+	defer r.trimLayerCache(logger, worker)
 
 	outputPath, db, err := r.runTrivy(ctx, logger, worker, reference)
 	if err != nil {

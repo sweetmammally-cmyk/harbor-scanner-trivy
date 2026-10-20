@@ -28,6 +28,7 @@ func setEnabled(t *testing.T) {
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	WorkerCacheMax:              5 << 30,
 	WorkerCacheBackend:          "fs",
 	HealthQueueStuckAfter:       10 * time.Minute,
 	MaxInflight:                 32,
@@ -214,6 +215,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_V2_MAX_INFLIGHT":                "8",
 				"SCANNER_V2_CACHE_DIR":                   "/data/v2",
 				"SCANNER_V2_WORKER_CACHE_BACKEND":        "memory",
+				"SCANNER_V2_WORKER_CACHE_MAX":            "512MB",
 				"SCANNER_MONGO_URI":                      "mongodb://mongo:27017",
 				"SCANNER_INSTANCE_ID":                    "scanner-1",
 				"SCANNER_MONGO_DB":                       "scanner",
@@ -263,6 +265,7 @@ func TestGetConfig(t *testing.T) {
 				MaxInflight:                 8,
 				CacheDir:                    "/data/v2",
 				WorkerCacheBackend:          "memory",
+				WorkerCacheMax:              512 << 20,
 				MongoURI:                    "mongodb://mongo:27017",
 				InstanceID:                  "scanner-1",
 				MongoDB:                     "scanner",
@@ -491,4 +494,16 @@ func TestGetConfig_AuthToken(t *testing.T) {
 		_, err := GetConfig()
 		assert.ErrorContains(t, err, "SCANNER_V2_MAX_INFLIGHT")
 	})
+}
+
+func TestParseSize(t *testing.T) {
+	for value, want := range map[string]int64{"0": 0, "1000": 1000, "4KB": 4 << 10, "512MB": 512 << 20, "5GB": 5 << 30, "1TB": 1 << 40} {
+		got, err := ParseSize(value)
+		require.NoError(t, err, value)
+		assert.Equal(t, want, got, value)
+	}
+	for _, value := range []string{"", "GB", "5 GB", "5gb", "1.5GB", "-1GB", "5GiB"} {
+		_, err := ParseSize(value)
+		assert.Error(t, err, value)
+	}
 }

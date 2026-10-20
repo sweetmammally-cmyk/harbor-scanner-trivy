@@ -27,6 +27,9 @@ type Config struct {
 	// WorkerCacheBackend is Trivy's layer cache of the workers: "fs" (on disk,
 	// reused across scans) or "memory" (one scan only, nothing written to disk).
 	WorkerCacheBackend string `env:"SCANNER_V2_WORKER_CACHE_BACKEND" envDefault:"fs"`
+	// WorkerCacheMax is read from SCANNER_V2_WORKER_CACHE_MAX by GetConfig
+	// ("5GB" style): the largest layer cache of one worker (fs backend).
+	WorkerCacheMax int64
 
 	// MongoURI may hold a password: never log it or put it in errors.
 	MongoURI string `env:"SCANNER_MONGO_URI"`
@@ -187,6 +190,15 @@ func GetConfig() (Config, error) {
 			cfg.DBStateRetention, cfg.DBCheckInterval)
 	}
 
+	cacheMax := os.Getenv("SCANNER_V2_WORKER_CACHE_MAX")
+	if cacheMax == "" {
+		cacheMax = "5GB"
+	}
+	cfg.WorkerCacheMax, err = ParseSize(cacheMax)
+	if err != nil || cfg.WorkerCacheMax <= 0 {
+		return cfg, fmt.Errorf("SCANNER_V2_WORKER_CACHE_MAX: invalid size %q", cacheMax)
+	}
+
 	if cfg.WorkerCacheBackend != CacheBackendFS && cfg.WorkerCacheBackend != CacheBackendMemory {
 		return cfg, fmt.Errorf("SCANNER_V2_WORKER_CACHE_BACKEND must be %q or %q", CacheBackendFS, CacheBackendMemory)
 	}
@@ -225,6 +237,24 @@ func GetConfig() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// ParseSize parses a size in bytes, with an optional KB, MB, GB or TB suffix
+// (powers of 1024), for example "5GB".
+func ParseSize(value string) (int64, error) {
+	multiplier := int64(1)
+	for i, suffix := range []string{"KB", "MB", "GB", "TB"} {
+		if strings.HasSuffix(value, suffix) {
+			multiplier = int64(1) << (10 * (i + 1))
+			value = strings.TrimSuffix(value, suffix)
+			break
+		}
+	}
+	number, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || number < 0 {
+		return 0, fmt.Errorf("invalid size %q", value)
+	}
+	return number * multiplier, nil
 }
 
 // ParseDuration parses a Go duration such as "90m" or "3h", and also whole days such as "1d".

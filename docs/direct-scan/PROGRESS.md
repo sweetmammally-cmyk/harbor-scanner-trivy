@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-10
+- Last completed task: P11-11
 - In progress: P11-12 (measurements running), P11-8 (history scan done, report to the owner)
-- Next task: P11-11, then P11-4 (README, compose)
+- Next task: P11-4 (README, compose) after the measurements
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
 - Last updated: 2026-10-20
 
@@ -208,6 +208,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-11  Worker layer cache limit
+- Status: done
+- What changed: `SCANNER_V2_WORKER_CACHE_MAX` (`config.ParseSize`: bytes with an optional KB/MB/GB/TB suffix in powers of 1024; default `5GB`). `Runner.trimLayerCache` runs after every scan of a worker (deferred in `Scan`, so also after failures): with the fs backend it measures `<workers>/<worker>/fanal` and removes it when larger than the limit, logging "worker layer cache cleared" with the size and the limit. The DB links and other workers' caches are never touched; the memory backend is skipped. `Runner.dirSize` (sum of regular files) is a field so tests can fake it.
+- Files: `pkg/v2/config/{config,config_test}.go`, `pkg/v2/runner/{trivy,scan,layercache_test}.go`
+- Tests run: `go test -short -race ./...` -> ok. Cases: sizes and invalid sizes; with a fake size of 6 GB the cache is cleared after a successful and after a failed scan, the worker's DB link and another worker's cache stay, and the line is logged; exactly at the limit it stays; the memory backend never measures; `dirSize` sums nested files and is 0 for a missing directory.
+- Decisions / surprises: the measured fs layer cache is small (Trivy's fanal cache stores analysis results, not layer blobs: about 2 MiB after two Debian-based images), so the 5GB limit is a safety net.
+- Next: P11-12, P11-4
 
 ### 2026-10-20  P11-10  Worker cache backend fs|memory
 - Status: done
