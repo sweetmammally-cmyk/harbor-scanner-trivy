@@ -109,7 +109,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P11-9 Per-scan temp directory inside `SCANNER_V2_CACHE_DIR` (Trivy's `TMPDIR` and the output), removed on success, failure, timeout and kill; leftovers removed at startup
 - [x] P11-10 `SCANNER_V2_WORKER_CACHE_BACKEND=fs|memory` (Trivy 0.74.0 `--cache-backend memory`, verified first)
 - [x] P11-11 `SCANNER_V2_WORKER_CACHE_MAX` (default 5GB per worker, fs only): clear the worker's own layer cache between scans when larger; test with a fake size function
-- [ ] P11-12 Measure DB sizes (fresh download, Trivy DB and Java DB) and, for both cache backends on a large real image: peak temp usage, peak Trivy RSS, scan time, second scan of an image sharing base layers; record in PROGRESS; README sizing from them
+- [x] P11-12 Measure DB sizes (fresh download, Trivy DB and Java DB) and, for both cache backends on a large real image: peak temp usage, peak Trivy RSS, scan time, second scan of an image sharing base layers; record in PROGRESS; README sizing from them
 
 ## Acceptance criteria (from DEMAND section 13)
 - [ ] AC1 New image: 202, then `queued`, `scanning`, `done`, with stored result and timings

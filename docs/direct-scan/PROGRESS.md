@@ -6,8 +6,8 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-7
-- In progress: P11-12 (measurements running)
+- Last completed task: P11-12
+- In progress: none
 - Next task: P11-4 (README, compose) after the measurements
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
 - Last updated: 2026-10-20
@@ -209,6 +209,30 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-12  Measurements: DB sizes, cache backends, memory and temp space
+- Status: done
+- What changed: measurements only, plus `TestManualUpdate` now also updates the Java DB when `SCANNER_JAVA_DB_SOURCES` is set (committed with P11-9). Machine: the dev machine (Debian, local disk, 7.8 GB tmpfs `/tmp` not used: everything measured under a directory on the root disk), Trivy 0.74.0 binary from `aquasec/trivy:0.74.0`.
+  - DB sizes from a fresh download (2026-10-20):
+    - Trivy DB (`ghcr.io/aquasecurity/trivy-db:2`): compressed layer 135,378,999 bytes (129 MiB); on disk `trivy.db` 1,640,230,912 bytes (1.53 GiB) + `metadata.json` 143 bytes; download and install 2m3s through our module.
+    - Java DB: compressed layer 986,097,002 bytes (940 MiB, ghcr.io manifest); on disk `trivy-java.db` 1,557,934,080 bytes (1.45 GiB) + `metadata.json`; installed from `docker.io/aquasec/trivy-java-db:1` in 2m4s.
+    - From `ghcr.io/aquasecurity/trivy-java-db:1` the download failed twice on this network, after 10m43s and 5m59s, both with `stream error: stream ID 1; PROTOCOL_ERROR; received from peer` (an HTTP/2 stream reset). The module behaved as designed: `download_error`, `degraded` with `newer_available`, the Trivy DB kept, no partial version directory. Docker Hub worked at once, so the reset is on the path to ghcr.io. A failed download restarts from zero (no resume); to raise with the owner.
+  - Scans: one Trivy run per scan with the runner's exact flags (`--image-src remote --platform linux/amd64 --skip-db-update ...`), `TMPDIR` set to a measured directory, peak RSS from `/proc/<pid>/status` `VmHWM` and temp size from `du`, both sampled every 0.2 s; each backend started from an empty worker cache; the second image shares its first 4 of 7 layers with the first. Clean round (nothing else on the network):
+
+    | backend | image (compressed) | time | peak Trivy RSS | peak temp dir | layer cache after |
+    |---|---|---|---|---|---|
+    | fs | node:22-bookworm (392 MiB, 8 layers) | 53.4 s | 293 MiB | 118 MiB | 2 MiB |
+    | fs | python:3.12-bookworm (365 MiB, 7 layers) | 8.1 s | 300 MiB | 0 MiB | 2 MiB |
+    | memory | node:22-bookworm | 47.3 s | 358 MiB | 116 MiB | none |
+    | memory | python:3.12-bookworm | 54.1 s | 336 MiB | 0 MiB | none |
+
+    An earlier round during the Java DB download (shared network) gave 70 s / 8.5 s (fs) and 74 s / 80 s (memory), RSS 255-356 MiB, temp 0-118 MiB.
+  - Reading: the fs layer cache holds analysis results, not layer blobs (2 MiB after two images), and makes an image with shared base layers about 6x faster; the memory backend analyzes every layer every time. Peak temp space is about one large layer. Peak Trivy memory stays under 400 MiB for these images.
+  - README sizing (P11-4) uses these numbers; the memory guidance keeps the owner's starting point (about 2 GB per worker + 1 GB) because larger and Java images were not measured.
+- Files: `docs/direct-scan/PROGRESS.md`, `docs/direct-scan/CHECKLIST.md`
+- Tests run: the measurement runs above; `TestManualUpdate` (manual tag) three times.
+- Decisions / surprises: the ghcr.io Java DB resets (see above).
+- Next: P11-4, P11-6
 
 ### 2026-10-20  P11-7  golangci-lint for Go 1.26
 - Status: done
