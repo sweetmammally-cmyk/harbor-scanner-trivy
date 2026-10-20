@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 11 (hardening and acceptance); Phases 0-10 done
-- Last completed task: P9-1, P9-8, P11-6 (v1 component tests green)
-- In progress: P11-2 (AC11 needs P11-3)
-- Next task: P11-3 (one real Harbor scan through the v1 adapter)
-- Blockers / questions for the user: the owner removed all local containers, including the local Harbor test install; P11-3 needs a Harbor (its `harbor.yml` was not found under the home directory, `/opt` or `/srv`; the goharbor v2.11.2 images are still there). Push decisions after the history scans are the owner's (16+ local commits not on origin).
+- Phase: 11 done; every checklist task is ticked
+- Last completed task: P11-3 (and P11-2 complete)
+- In progress: none
+- Next task: none planned; open decisions for the owner: pushing the local commits (history scans in P11-8), the seed DB, resume support for downloads, sending the upstream server fix upstream
+- Blockers / questions for the user: none
 - Last updated: 2026-10-20
 
 ## Repo facts (filled in by Phase 0)
@@ -234,6 +234,19 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-3  One real Harbor scan through the v1 adapter
+- Status: done
+- What changed: no code. The owner's local Harbor was gone, so the owner provided a Harbor URL, one image and a robot account in a 0600 file outside the repository (`~/harbor-p11-3.env`); none of them is recorded here. The first credentials were refused (the token service gave an anonymous token without actions; the robot name had lost its `$`); after the owner fixed them the token had `pull` on the repository. A robot account cannot register scanners in Harbor and that Harbor cannot reach the dev machine, so the scan was driven the way Harbor drives an adapter: the image built from this branch with v2 disabled (pure v1 path) and its own Redis; v1's Trivy took its DBs from the internal mirror (`SCANNER_TRIVY_DB_REPOSITORY`, `SCANNER_TRIVY_JAVA_DB_REPOSITORY`), not ghcr.io.
+  - The tag resolved to a single-platform Docker v2 manifest. `GET /api/v1/metadata`: Trivy 0.74.0, Docker v2 and OCI manifests accepted.
+  - `POST /api/v1/scan` with the Harbor scan request (registry URL, `authorization: Basic <robot>`, repository, digest, mime type) -> 202 with an id; `GET /api/v1/scan/{id}/report` (`application/vnd.security.vulnerability.report; version=1.1`) -> 302 while scanning, then 200 after 120 s (including v1's first DB download).
+  - Report: scanner Trivy 0.74.0, artifact digest as resolved, overall severity Critical, 894 vulnerabilities (Critical 18, High 262, Medium 307, Low 302, Unknown 5) of types debian 709, gobinary 153, node-pkg 32; every vulnerability carries `vendor_attributes.Trivy` (the documented addition, KEEP). The report was saved temporarily as `p11-3-report.json` in the project root (excluded through `.git/info/exclude`, never committed).
+  - No secret: the robot password is neither in the report nor in the adapter's logs. The temporary containers and network were removed.
+  - With this, AC11 is complete: the v1 unit, integration and component tests pass and a real Harbor image was scanned through the v1 API. P11-2 (acceptance walk) is complete: AC7 and AC9 were shown live in P11-1.
+- Files: `docs/direct-scan/{CHECKLIST,PROGRESS}.md`
+- Tests run: the run above.
+- Decisions / surprises: the scan was driven through the adapter's API instead of Harbor's UI (no admin rights and no network path from that Harbor to the dev machine); the requests and the report format are the ones Harbor uses.
+- Next: none (owner decisions listed in Current state)
 
 ### 2026-10-20  P9-1, P9-8, P11-6  v1 component tests
 - Status: done
