@@ -6,7 +6,7 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-13
+- Last completed task: P11-1
 - In progress: none
 - Next task: P11-4 (README, compose) after the measurements
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
@@ -234,6 +234,23 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-1  End-to-end compose run
+- Status: done
+- What changed: the compose example now also has a Redis service and `SCANNER_REDIS_URL` (the v1 adapter in the same process needs Redis for its job queue; it was missing), and a `.gitignore` next to it ignores `.env`. The run itself used a copy of the example outside the repository (`~/scanner-e2e`, `.env` mode 0600 with the internal mirror and random secrets; the mirror address is not recorded here): two replicas of the image built from this branch, `mongo:7 --auth` with `nofile` 64000, Redis, a local `registry:2` over plain http (so `--insecure` was used for real) with `node:22-alpine` (tags v1 and v2), `python:3.12-alpine`, `node:22-bookworm`, `node:20-bookworm` and `maven:3.9-eclipse-temurin-21`; DB sources: the internal mirror (a ghcr.io pull-through mirror) first, Docker Hub second, for both DBs; no ghcr.io.
+  - The internal mirror speaks only HTTP/1.1 (TLS 1.3, no h2 in ALPN): with the default rules its pre-check fails `http2_not_negotiated`; with the per-source `allow-http1` option (DEMAND 7.3) it passes. Both DBs from it: Trivy DB selected and installed in 52 s, Java DB in 5m38s, no resets. Schema version 4 created with authentication.
+  - Scans: POST 202 -> scanning -> done in about 2 s (`node:22-alpine`, alpine and node-pkg, 21 findings, timings recorded); a narrower request on the other replica is a hit; tag v2 with the same digest is a copy hit (200, `cached`); unknown id 404 `not_found`; list by customer; no token 401; the Java image scanned with the Java DB (jar and ubuntu found).
+  - Found and fixed two bugs here (separate entries): the cache never hit on a tag's own result with a real DB (nanosecond `UpdatedAt` vs milliseconds in MongoDB), and the upstream API server exited the process on every `Shutdown`, so the graceful shutdown never ran. After both fixes, rebuilt and repeated:
+    - own-result hits on both replicas (`copied_from` empty);
+    - stop during a scan that finishes within the grace: the stop took 7 s and the scan completed; with a 1 s grace (override): "shutdown grace period over, killing running scans", "scan released at shutdown", stopped in 3 s, and the other replica claimed the scan 2.6 s after it started and finished it.
+  - Failover (AC7) on one replica with the mirror name pointed at an unroutable address: pre-check `tcp_timeout` after 5.002 s, Docker Hub selected and installed (34 s; its manifest digest differs from the mirror's, so switching sources downloads again). With Docker Hub blackholed too: both sources `tcp_timeout` after 5 s each, "all DB sources failed, scanning with existing DB", the replica stays ready (degraded), health `degraded`; a forced scan on it ran with the existing DB and, once `max_db_age` (1m) had passed since the last confirmation, answered `freshness: stale`.
+  - MongoDB stopped: readiness 503 and liveness 200 (the second replica followed within its 5 s ping), health 503 `unhealthy` ("MongoDB is down"), `/api/v2/db` 200 from memory with a note for other instances, POST 503 `store_unavailable`; ready again 6 s after MongoDB was back; health then `ok` with both instances.
+  - Metrics scrape without a token: build info (Trivy 0.74.0, schema 4), `mongo_up 1`, per-DB gauges and update runs.
+  - Observations: at the time of the run Docker Hub's Trivy DB was one build (6 h) newer than the mirror's; the v1 adapter WARNs that its own cache and reports directories do not exist on a fresh volume (upstream behaviour, created on first use).
+- Files: `docs/direct-scan/compose/{docker-compose.yaml,.gitignore}`
+- Tests run: the run above; `docker compose config` of the example -> ok.
+- Decisions / surprises: two real bugs (fixed); the mirror needs `allow-http1`.
+- Next: component tests, P11-3
 
 ### 2026-10-20  P11-1  Fix: graceful shutdown never ran (upstream server exited on Shutdown)
 - Status: done (bug found in the P11-1 compose run)

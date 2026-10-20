@@ -11,7 +11,7 @@ This fork adds a direct scan API (`/api/v2`) next to the Harbor adapter (`/api/v
 
 ## Network and credentials
 
-- DB sources (`SCANNER_DB_SOURCES`, `SCANNER_JAVA_DB_SOURCES`), tried in order: our own mirror first, Docker Hub (`docker.io/aquasec/trivy-db:2`, `docker.io/aquasec/trivy-java-db:1`) as the fallback. Do not use ghcr.io: on our network long transfers from it are reset after minutes (the source fails with `stream_reset` and the next one is tried). Keep the real mirror address in `.env` only.
+- DB sources (`SCANNER_DB_SOURCES`, `SCANNER_JAVA_DB_SOURCES`), tried in order: our own mirror first, Docker Hub (`docker.io/aquasec/trivy-db:2`, `docker.io/aquasec/trivy-java-db:1`) as the fallback. Do not use ghcr.io: on our network long transfers from it are reset after minutes (the source fails with `stream_reset` and the next one is tried). Keep the real mirror address in `.env` only. A mirror that speaks only HTTP/1.1 fails the pre-check (`http2_not_negotiated`) unless its entry has the `allow-http1` option: `mirror.example.internal/aquasecurity/trivy-db:2|direct|allow-http1`.
 
 - DNS: set the DNS servers with Docker's `dns:` setting (or the host's `/etc/resolv.conf`). Go's resolver tries them in order; the scanner has no DNS pool of its own.
 - Harbor robot account names contain `$` (for example `robot$scanner`). Docker Compose interpolates `$` in `docker-compose.yaml` and in `env_file` values, so write `robot$$scanner`; an unescaped `robot$scanner` reaches the container as `robot` (checked with Compose 5.6). In a shell, quote it: `'robot$scanner'`.

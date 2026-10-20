@@ -14,6 +14,9 @@ x-scanner: &scanner
   env_file: .env
   environment: &scanner-env
     SCANNER_V2_API_ENABLED: "true"
+    # The Harbor adapter (v1) runs in the same process and needs Redis for its job
+    # queue; in a Harbor deployment this is usually Harbor's Redis.
+    SCANNER_REDIS_URL: redis://redis:6379
     SCANNER_MONGO_DB: scanner
     SCANNER_SHUTDOWN_GRACE: 30s
     SCANNER_QUEUE_WORKERS: "2"
@@ -30,6 +33,7 @@ x-scanner: &scanner
   mem_limit: 5g                        # 2 workers: see "Sizing" in README.md
   depends_on:
     - mongo
+    - redis
   networks: [scan]
 
 services:
@@ -59,6 +63,10 @@ services:
         hard: 64000
     volumes:
       - mongo-data:/data/db
+    networks: [scan]
+
+  redis:
+    image: redis:7
     networks: [scan]
 
 volumes:

@@ -1,0 +1,2 @@
+# The real .env holds secrets and the internal mirror address.
+.env
