@@ -98,13 +98,18 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P10-5 Remove the FULL TRIVY REPORT debug log (`pkg/trivy/wrapper.go`); everything else in v1 stays
 
 ## Phase 11: Hardening and acceptance
-- [ ] P11-1 End-to-end run in docker compose (scanner, Mongo, mirror or fake mirror); `stop_grace_period` longer than `SCANNER_SHUTDOWN_GRACE`
+- [ ] P11-1 End-to-end run in docker compose with the real mirror and ghcr.io as DB sources; `stop_grace_period` longer than `SCANNER_SHUTDOWN_GRACE`
 - [ ] P11-2 Walk the acceptance criteria below and record evidence in PROGRESS.md
-- [ ] P11-3 Harbor adapter regression: existing tests pass and one manual Harbor scan works
-- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code. It must also say: Harbor robot usernames contain `$`, which needs escaping in compose files and shells. And: MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`); the service uses no multi-document transactions. Sizing: v2 keeps its DBs and worker caches in `SCANNER_V2_CACHE_DIR`, separate from v1's Trivy cache, so there are two DB copies on disk. The `/metrics` port must stay internal (unauthenticated)
+- [ ] P11-3 Harbor adapter regression: existing tests pass and one real Harbor scan through the v1 adapter works
+- [ ] P11-4 Dockerfile (seed DB, volume) and config README for v2. The README must say: DNS servers are set with Docker's `dns:` setting (or `/etc/resolv.conf`); Go's resolver tries them in order. No DNS pool in our code. It must also say: Harbor robot usernames contain `$`, which needs escaping in compose files and shells. And: MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`); the service uses no multi-document transactions. Sizing: v2 keeps its DBs and worker caches in `SCANNER_V2_CACHE_DIR`, separate from v1's Trivy cache, so there are two DB copies on disk. The `/metrics` port must stay internal (unauthenticated). Compose example: explicit `SCANNER_INSTANCE_ID` per replica, `stop_grace_period: 45s`, `dns:` with our DNS servers, healthcheck on `/probe/ready`, non-root user, memory limit from the measurements, secrets in a 0600 `.env` file (never in the image), robot `$` escaped as `$$`; MongoDB 7 with `nofile` 64000, a persistent volume and authentication. Sizing per replica: Trivy DB x3 (current, previous, in progress), Java DB x3 if enabled, v1's own DB copy, worker layer caches (fs); each install writes one full DB; upstream rebuilds about every 6 hours; memory per worker from the RSS measurement (start: about 2 GB per worker + 1 GB)
 - [ ] P11-5 Secrets review: no tokens or passwords in logs, argv or MongoDB
 - [ ] P11-6 List the upstream files touched, for future merges; run the component tests again
 - [ ] P11-7 (low priority) Get a working golangci-lint for Go 1.26 and run `make lint`
+- [ ] P11-8 Scan the whole git history (the GitHub fork is public) for internal hostnames, mirror URLs, IPs, tokens, passwords, .env files and real output naming internal systems; report with commit hashes; never rewrite history or push
+- [ ] P11-9 Per-scan temp directory inside `SCANNER_V2_CACHE_DIR` (Trivy's `TMPDIR` and the output), removed on success, failure, timeout and kill; leftovers removed at startup
+- [ ] P11-10 `SCANNER_V2_WORKER_CACHE_BACKEND=fs|memory` (Trivy 0.74.0 `--cache-backend memory`, verified first)
+- [ ] P11-11 `SCANNER_V2_WORKER_CACHE_MAX` (default 5GB per worker, fs only): clear the worker's own layer cache between scans when larger; test with a fake size function
+- [ ] P11-12 Measure DB sizes (fresh download, Trivy DB and Java DB) and, for both cache backends on a large real image: peak temp usage, peak Trivy RSS, scan time, second scan of an image sharing base layers; record in PROGRESS; README sizing from them
 
 ## Acceptance criteria (from DEMAND section 13)
 - [ ] AC1 New image: 202, then `queued`, `scanning`, `done`, with stored result and timings

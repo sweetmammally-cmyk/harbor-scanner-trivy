@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.19 (health, readiness, metrics, 2026-10-17)
+Status: DRAFT v0.20 (memory and disk, 2026-10-20)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -404,7 +404,9 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | `SCANNER_V2_API_ENABLED` | Feature flag for the new API |
 | `SCANNER_V2_AUTH_TOKEN` | Service token for the new API (secret). One token, compared in constant time, at least 32 characters; startup fails when v2 is enabled and it is missing or shorter |
 | `SCANNER_V2_MAX_INFLIGHT` | Most POSTs handled at once; beyond it 429. Default 32 |
-| `SCANNER_V2_CACHE_DIR` | Directory of the v2 DBs (version directories) and the per-worker Trivy caches, separate from the Harbor adapter's `SCANNER_TRIVY_CACHE_DIR`. Default `/home/scanner/.cache/scanner-v2` |
+| `SCANNER_V2_CACHE_DIR` | Directory of the v2 DBs (version directories), the per-worker Trivy layer caches and the per-scan temp directories, separate from the Harbor adapter's `SCANNER_TRIVY_CACHE_DIR`. Default `/home/scanner/.cache/scanner-v2`. A persistent local SSD volume, not network storage; no tmpfs anywhere (the OS page cache keeps the DB in RAM when memory is free). Each scan gets its own temp directory inside it (Trivy's `TMPDIR` and the output file), removed when the scan ends (success, failure, timeout or kill); leftovers are removed at startup. There is no separate temp-dir setting |
+| `SCANNER_V2_WORKER_CACHE_BACKEND` | Trivy layer cache of the workers: `fs` (default; a `fanal` cache per worker on disk, reused across scans) or `memory` (Trivy's in-memory cache: nothing of the layer cache is written to disk, and it lives for one scan only, since each scan is one Trivy process) |
+| `SCANNER_V2_WORKER_CACHE_MAX` | `fs` backend only: between scans, a worker whose layer cache is larger than this clears its own layer cache (never the DB). Default 5GB per worker |
 | `SCANNER_MONGO_URI`, `SCANNER_MONGO_DB` | MongoDB. Required, no defaults. If the v2 API is enabled and either is missing, startup fails with a clear error (config error). If MongoDB is only unreachable, the service does not exit: it keeps running with readiness false and the v2 API returning 503, the DB updater keeps running, and the driver reconnects automatically (no custom backoff loop). Write and read concern come from the connection string (no separate settings). The connection string is never logged or included in errors. No multi-document transactions are used. |
 | `SCANNER_INSTANCE_ID` | Id of this scanner instance for `db_state` and `db_checks`. Default: the hostname, with a WARN at startup when v2 is enabled (set it explicitly, for example in compose) |
 | `SCANNER_DB_STATE_RETENTION` | How long a `db_state` document lives after its last write (TTL index on `updated_at`, updated with `collMod`). Default 7d; startup fails if it is shorter than twice `SCANNER_DB_CHECK_INTERVAL` |
@@ -492,6 +494,7 @@ All defaults can be overridden by env. Existing Trivy variables keep their curre
 2. **Multi-architecture images**: an image index has several manifests with different digests, so the cache key depends on which one is scanned. To decide together with the digest store.
 3. **Queue priorities**: to be decided after R&D on Trivy's behaviour (CPU, memory, duration per image size). The `priority` field is reserved.
 4. **Retention**: later, delete tag documents not confirmed for N days, with their GridFS file.
+5. **Seed DB**: the seed setup stays as it is for now; the owner decides it separately.
 
 ### Open questions
 
