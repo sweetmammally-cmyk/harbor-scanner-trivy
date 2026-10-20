@@ -224,6 +224,33 @@ Touched by this plan:
 - Next: <next task ID>
 ```
 
+### 2026-10-20  P11-2  Acceptance criteria walk
+- Status: partial (all criteria have test evidence; AC7, AC9 and AC11 also need the compose run P11-1, the component tests and the real Harbor scan P11-3)
+- What changed: no code. Evidence per criterion (DEMAND section 13); "full stack" = `test/integration/apiv2/fullstack_test.go` (real `service.Start`, mongo:7, fake registry, fake trivy counting its runs):
+  1. 202, queued -> scanning -> done, stored result and timings: full stack `TestFullStack` first subtest (timings > 0). Done.
+  2. Same digest and DB -> 200 `cached: true`, no Trivy process: full stack (run counter unchanged), `TestCache` (apiv2). Done.
+  3. After a DB update the digest is scanned again: `TestCache` "misses ... newer installed DB" (202 and queued); `queue.TestServes` "a newer installed DB". Done.
+  4. `force` always scans: full stack (run counter + 1), `TestCache` "force". Done.
+  5. New tag, same digest -> copy hit: full stack (no Trivy run), `TestCache` copy subtests (own GridFS file, independent copies). Done.
+  6. Unknown `scan_id` -> 404 `not_found`: `TestGetScan` (apiv2), `TestGetScan_BeforeTheStore` (malformed ids). Done.
+  7. Blackholed mirror: pre-check fails within its stage timeout and the next source is tried: `pkg/v2/dbmgr` `TestPrecheckFailureClasses` ("tcp_timeout: blackholed proxy", "tls_timeout ... silent after the ClientHello", manifest timeouts), `TestUpdate` "failed pre-check falls back to the next source", "no source answered: degraded, one ERROR, old DB kept"; scans go on with the old DB while degraded and freshness is `stale`: full stack (unreachable source, scans done, health degraded), `TestDBBlock`, `TestHealth`. Tests done; the real mirror run is P11-1.
+  8. Pre-check logs show source, route, TLS and HTTP/2, no secrets: `pkg/v2/dbmgr/precheck_log_test.go`, `TestRequiredLogsAndNoSecrets` (proxy with credentials). Done.
+  9. Health reflects Mongo, DB age, queue and recent scans; not ready while Mongo is down: `TestHealth` (each rule), `TestReadyProbe`, `TestStartStop` (readiness 503 with MongoDB unreachable), full stack health after a success and a failure. Tests done; check again in the compose run (P11-1).
+  10. New platforms in the `platforms` collection: `pkg/v2/runner` `TestScan` (all image types recorded, also unrequested ones), `storetest.PlatformRepository`, `TestMongoRepositories` concurrent first sightings. Done.
+  11. Harbor adapter tests pass, output equals upstream except `vendor_attributes.Trivy`: `go test ./pkg/...` and `test/integration/api` pass (P0-6 onward, rerun in P10-5 and P11-7). Open: the v1 component tests (waiting for the owner) and one real Harbor scan (P11-3).
+  12. `platforms: ["npm"]` returns only npm findings, `has_more_platforms`, other types still recorded: `TestNewResultView`, `TestParseResult`, `TestScan`. Done.
+  13. A broader scope triggers a new scan: `TestCache` misses "broader severity" and "another platform", full stack (broader severity -> Trivy runs). Done.
+  14. Trivy never downloads a DB during a scan: `TestRunTrivy_Success` (`--skip-db-update --skip-java-db-update --skip-version-check`, DB symlinks into the worker cache), all DB downloads in `pkg/v2/dbmgr`. Done.
+  15. A hit renews `confirmed_at` without a new document: `TestCache` first subtest, full stack. Done.
+  16. A rescan overwrites the tag's result: `TestOneDocumentPerTag` (queue integration, GridFS file replaced). Done.
+  17. Uncovered request during a scan -> 409 `scan_in_progress`: `TestPostScan`, `TestEnqueue`, full stack. Done.
+  18. Scope widens to the union for the same digest: `TestEnqueue`, `TestOneDocumentPerTag`, `TestCache` "a broader severity rescans the union". Done.
+  19. A narrower request is served from a wider result, filtered: `TestCache` first subtest, `TestGetScan` view filters, full stack (critical-only hit). Done.
+- Files: `docs/direct-scan/PROGRESS.md`, `docs/direct-scan/CHECKLIST.md`
+- Tests run: the suites named above passed in their tasks; latest full runs: unit and all integration packages on 2026-10-19 (P10-4), unit again 2026-10-20 (P11-7).
+- Decisions / surprises: none.
+- Next: P11-1 and P11-3 (need the owner's mirror and a Harbor), component tests
+
 ### 2026-10-20  P11-4  Operator README, compose example, Dockerfile
 - Status: done
 - What changed:
