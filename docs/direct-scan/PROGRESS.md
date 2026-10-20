@@ -195,6 +195,7 @@ Merge summary (P11-6, checked against `git diff --name-only 2691434 HEAD` on 202
 | `Dockerfile` | `GOPROXY`/`GOSUMDB` (pre-plan), `/home/scanner/.cache/scanner-v2` owned by `scanner` | Trivy version stays the single `TRIVY_VERSION` pin (0.74.0); a Trivy upgrade must recheck the `memory` cache backend and the error texts the runner classifies |
 | `Dockerfile.dev` | `GOPROXY`/`GOSUMDB` (pre-plan) | |
 | `Makefile` | golangci-lint v2.15.0 in `make setup` | |
+| `pkg/http/api/server.go`, `pkg/http/api/server_test.go` | fixed inverted `ErrServerClosed` check that exited the process on every shutdown | an upstream bug; consider sending the fix upstream |
 | `go.mod`, `go.sum` | MongoDB driver v2.9.1 and the indirect bumps it needs | re-run `go mod tidy` after merging |
 | `pkg/trivy/model.go`, `pkg/trivy/wrapper.go`, `pkg/scan/transformer.go` | pre-plan: result Target/Type on vulnerabilities, `vendor_attributes.Trivy` (KEEP); debug INFO logs per result and vulnerability; FULL TRIVY REPORT log removed (P10-5) | v1 behaviour otherwise upstream's |
 | `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` | test expectations for `vendor_attributes.Trivy`; the no-FULL-REPORT check | test-only |
@@ -213,6 +214,7 @@ Touched by this plan:
 
 - `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` (P0-6): test expectations for `vendor_attributes.Trivy` (owner chose KEEP). Test-only. (Correction: missing from this list until P5-1.)
 - `Dockerfile` (P11-4): creates `/home/scanner/.cache/scanner-v2` owned by `scanner`, so a new named volume inherits the owner. No `VOLUME` instruction (it would give v1-only users an anonymous volume); the seed DB setup is unchanged (owner).
+- `pkg/http/api/server.go` (P11-1): the serve goroutine called `os.Exit(1)` when `ListenAndServe` returned `http.ErrServerClosed`, the normal result of `Shutdown` (inverted condition). It now exits only for other errors. Without the fix SIGTERM killed the process as soon as the HTTP server closed: no shutdown grace, no lease release (v2), no clean stop of the v1 Redis worker. `pkg/http/api/server_test.go` (empty upstream) has the regression test.
 - `Makefile` (P11-7): `make setup` installs golangci-lint v2.15.0 instead of v1.21.0 (which cannot load Go 1.26 code).
 - `pkg/trivy/wrapper.go` (P10-5): the "FULL TRIVY REPORT" debug log (added in `0c87038`) is removed; the other debug logs of that commit stay. `pkg/trivy/wrapper_test.go` (P10-5): `TestWrapper_Scan` checks that the line is not logged.
 - `cmd/scanner-trivy/main.go` (P10-2): uses `service.Routes(v1)` instead of building the mux itself.
@@ -232,6 +234,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-1  Fix: graceful shutdown never ran (upstream server exited on Shutdown)
+- Status: done (bug found in the P11-1 compose run)
+- What changed: in the compose run, stopping a replica during a scan took 1 s; the log showed `"msg":"Error","err":"http: Server closed"` and nothing else, and the other replica took the scan over only after the 60 s lease expired (reaper), not at once. Cause: upstream `pkg/http/api/server.go` exits the process with `os.Exit(1)` when `ListenAndServe` returns `http.ErrServerClosed`, which is what every `Shutdown` produces (the condition was inverted). Fixed to exit only on other errors. The in-process tests (P8-4, P9-8) never went through `api.Server`, so they could not see it.
+- Files: `pkg/http/api/server.go`, `pkg/http/api/server_test.go`
+- Tests run: `TestServer_ShutdownDoesNotExit` passes; against the old `server.go` the test binary exits with "http: Server closed" (FAIL), checked. `go test -short -race ./pkg/http/... ./pkg/v2/...` -> ok.
+- Decisions / surprises: an upstream bug that also affects v1-only deployments.
+- Next: P11-1 (repeat the shutdown check)
 
 ### 2026-10-20  P9-3  Fix: cache hits on the tag's own document never matched with a real DB
 - Status: done (bug found in the P11-1 compose run)

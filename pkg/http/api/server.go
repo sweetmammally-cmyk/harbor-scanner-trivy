@@ -72,7 +72,8 @@ func NewServer(config etc.API, handler http.Handler) (server *Server, err error)
 
 func (s *Server) ListenAndServe() {
 	go func() {
-		if err := s.listenAndServe(); errors.Is(err, http.ErrServerClosed) {
+		// ErrServerClosed is the normal end after Shutdown; only other errors are fatal.
+		if err := s.listenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("Error", slog.String("err", err.Error()))
 			os.Exit(1)
 		}
