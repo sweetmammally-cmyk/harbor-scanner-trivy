@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.21 (stream_reset, source order, 2026-10-20)
+Status: DRAFT v0.22 (seed DB build option, deferred resume, 2026-10-20)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -422,7 +422,7 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). The same repository and route listed twice is a startup error (also in `SCANNER_JAVA_DB_SOURCES`). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Recommended order for both DBs: our own mirror first, Docker Hub (`docker.io/aquasec/trivy-db:2`, `docker.io/aquasec/trivy-java-db:1`) as the fallback; ghcr.io is not used. Example: `mirror.local/aquasecurity/trivy-db:2\|direct,docker.io/aquasec/trivy-db:2\|direct` |
 | `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB. Empty means no Java DB at all: nothing is downloaded and the Java seed is not installed |
 | `SCANNER_PRECHECK_TIMEOUT_DNS`, `_CONNECT`, `_TLS`, `_HTTP`, `_MANIFEST`, `_TOTAL` | Pre-check timeouts per stage and overall. Defaults 5s, 5s, 5s, 10s, 10s, 30s |
-| `SCANNER_DB_SEED_DIR`, `SCANNER_JAVA_DB_SEED_DIR` | Seed DB baked into the image, installed when no DB exists yet (with no digest, so the first update downloads). Defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing directory means no seed; the service is then not ready until the first download succeeds |
+| `SCANNER_DB_SEED_DIR`, `SCANNER_JAVA_DB_SEED_DIR` | Seed DB in the image, installed when no DB exists yet (with no digest, so the first update downloads). Defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing directory means no seed; the service is then not ready until the first download succeeds. The default image has no seed; the Dockerfile build argument `WITH_SEED_DB=true` bakes the Trivy DB seed in for offline installs |
 | `SCANNER_DB_DOWNLOAD_STALL_TIMEOUT` | Abort a download when no bytes arrive for this long. Default 30s |
 | `SCANNER_DB_DOWNLOAD_TIMEOUT` | Overall cap per source per download of the Trivy DB (safety net). Default 15m |
 | `SCANNER_JAVA_DB_DOWNLOAD_TIMEOUT` | Same for the Java DB. Default 45m |
@@ -495,7 +495,7 @@ All defaults can be overridden by env. Existing Trivy variables keep their curre
 2. **Multi-architecture images**: an image index has several manifests with different digests, so the cache key depends on which one is scanned. To decide together with the digest store.
 3. **Queue priorities**: to be decided after R&D on Trivy's behaviour (CPU, memory, duration per image size). The `priority` field is reserved.
 4. **Retention**: later, delete tag documents not confirmed for N days, with their GridFS file.
-5. **Seed DB**: the seed setup stays as it is for now; the owner decides it separately.
+5. **Resume of DB downloads** (HTTP range requests after a reset): not now. Source fallback is the fix for transfers that get reset (`stream_reset`, section 7.4); the next run downloads again from the start.
 
 ### Open questions
 

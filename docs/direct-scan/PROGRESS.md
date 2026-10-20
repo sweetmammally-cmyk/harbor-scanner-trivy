@@ -46,6 +46,10 @@ Newest changelog entries go at the top of the Changelog.
   - `make test-component`: not run (needs a full image build; slow).
   - `make lint`: not run (golangci-lint not installed; pinned v1.21.0 is too old for Go 1.26).
 
+## Follow-ups (low priority)
+
+- Upstream PR for the shutdown fix: `pkg/http/api/server.go` exits the process with `os.Exit(1)` when `ListenAndServe` returns `http.ErrServerClosed` (every normal `Shutdown`). Prepare a separate PR based on upstream's main with the one-line fix and `TestServer_ShutdownDoesNotExit` (our commit `552f70b`). Not started (owner).
+
 ## Known issues
 
 - 2026-10-20: long transfers from ghcr.io on the dev network are reset after minutes (HTTP/2 `PROTOCOL_ERROR` received from the peer; seen twice on the 940 MiB Java DB layer, after 10m43s and 5m59s). The same layer from Docker Hub downloads in about 2 minutes. Source fallback handles it: the source fails with `stream_reset` and the next source is tried; there is no resume. ghcr.io is not used as a source (owner).
@@ -54,6 +58,12 @@ Newest changelog entries go at the top of the Changelog.
 
 Record decisions here with date and reason (package layout, Mongo test strategy, OCI client approach, DB swap mechanism, anything the user answered). If a decision changes the spec, also propose the edit to `DEMAND.md`.
 
+- 2026-10-20 (owner, open items after Phase 11; DEMAND v0.22):
+  1. Pushing: the owner pushes himself after reviewing `git log origin/main..main`. We never push.
+  2. Seed DB: no seed in the default image; a Dockerfile build argument `WITH_SEED_DB` (default false) bakes the seed in for offline installs; documented in the README.
+  3. Resume of DB downloads: not now; source fallback is the fix. Deferred idea in DEMAND section 14.
+  4. The upstream `os.Exit` shutdown fix: prepared later as a separate upstream PR on upstream's main; low-priority follow-up below; nothing now.
+  5. Phase 12 (staging and integration) is planned in PLAN and CHECKLIST; no work starts before the owner reviews the plan.
 - 2026-10-20 (owner, answers on Phase 11; DEMAND v0.21):
   - Cache backend: `fs` stays the default (much faster for images sharing base layers, less memory); `memory` stays an option. The measurement table is in the README; memory guidance stays about 2 GB per worker + 1 GB, with the measured peaks next to it.
   - ghcr.io stream resets: no resume for now. New failure class `stream_reset` for an HTTP/2 stream reset during a download (logs, db_checks, failure metric). Source order for both DBs: our own mirror first, Docker Hub second; ghcr.io is never used (the owner's note replaces "ghcr.io last"). The real mirror is a ghcr.io pull-through mirror; its address goes only into the git-ignored `.env`; PROGRESS and the README say "internal mirror".
