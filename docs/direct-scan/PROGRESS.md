@@ -6,7 +6,7 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-11
+- Last completed task: P11-5
 - In progress: P11-12 (measurements running)
 - Next task: P11-4 (README, compose) after the measurements
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
@@ -208,6 +208,20 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-5  Secrets review
+- Status: done
+- What changed: a review of every place a secret could leave the process, with the test that guards it. New: `TestRequiredLogsAndNoSecrets` now also dumps every collection of the database (scans, platforms, db_state, db_checks, schema_version, the GridFS `reports.*` collections) after a run with a proxied DB source with user and password, a registry password and the service token, and checks that none of them (nor "Bearer ") is stored, while the source itself is stored without credentials.
+  - Logs: `TestRequiredLogsAndNoSecrets` (whole stack), `pkg/v2/store/client_test.go` `TestRedaction` (MongoDB URI never in errors or logs), `pkg/v2/dbmgr` pre-check log tests with SOCKS5/HTTP proxy credentials and tokens, `pkg/v2/oci` token tests (`Authorization` dropped on redirects to another host), `pkg/v2/runner` (stderr tail redacted, "pulling as ... with password" removed), `pkg/v2/api` (request log without headers or bodies, token never logged).
+  - Trivy command line: `pkg/v2/runner/trivy_test.go` checks that the robot account is only in `TRIVY_USERNAME`/`TRIVY_PASSWORD` of the child environment (allowlist), never in its arguments.
+  - MongoDB: scan documents hold no credentials; DB sources are stored as `config.DBSource.String()` (proxy user info replaced by `xxxxx`); error details pass through the same redaction as the logs; the new dump test covers all collections.
+  - Responses and metrics: fixed error messages without paths or stderr; `failed` scans show a fixed message per class; the health, db, list and scan bodies and the `/metrics` scrape are checked in the same test; metric labels carry no customer ids, digests, repositories, tags or credentials (P10-4).
+  - Config errors: `SCANNER_V2_AUTH_TOKEN` errors never contain the token (config tests).
+  - Repository: no secret in any commit (P11-8); the compose example keeps secrets in a 0600 `.env` (`.env.example` has placeholders only).
+- Files: `test/integration/apiv2/logs_test.go`
+- Tests run: `go test -count=1 -race -tags=integration -run TestRequiredLogsAndNoSecrets ./test/integration/apiv2/` -> ok.
+- Decisions / surprises: the robot password is necessarily in the Trivy child's environment (readable only by the same user through `/proc/<pid>/environ`); that is the design (DEMAND 6.2).
+- Next: P11-12, P11-4
 
 ### 2026-10-20  P11-8  History scan of the public fork
 - Status: done (report only; nothing rewritten, nothing pushed by us)

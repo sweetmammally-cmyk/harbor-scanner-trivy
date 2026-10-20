@@ -3,6 +3,7 @@
 package apiv2
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/aquasecurity/harbor-scanner-trivy/pkg/v2/config"
 )
@@ -67,11 +69,38 @@ func TestRequiredLogsAndNoSecrets(t *testing.T) {
 	assert.Contains(t, text, `"customer_ids":["cust-1"]`, "structured logs carry the customer ids")
 	assert.Contains(t, text, `"digest":"sha256:1111"`)
 
+	// Everything stored in MongoDB, once the DB state and checks were written.
+	require.Eventually(t, func() bool { return len(dumpCollection(t, s, "db_checks")) > 0 }, 20*time.Second, 50*time.Millisecond)
+	ctx, cancel := s.check.OperationContext(context.Background())
+	names, err := s.check.Database().ListCollectionNames(ctx, bson.D{})
+	cancel()
+	require.NoError(t, err)
+	stored := ""
+	for _, name := range names {
+		stored += strings.Join(dumpCollection(t, s, name), "\n")
+	}
+	assert.Contains(t, stored, "127.0.0.1:1/aquasec/trivy-db:2", "the source is stored, without its credentials")
+
 	for _, secret := range []string{proxyUser, proxyPassword, registryPassword, token, "Bearer "} {
 		assert.NotContains(t, text, secret, "logs")
+		assert.NotContains(t, stored, secret, "MongoDB")
 		for i, body := range bodies {
 			assert.NotContains(t, body, secret, "response or metrics %d", i)
 		}
 	}
 	assert.NotContains(t, text, "CVE-", "findings are never logged")
+}
+
+// dumpCollection returns every document of a collection as extended JSON.
+func dumpCollection(t *testing.T, s *stack, name string) []string {
+	ctx, cancel := s.check.OperationContext(context.Background())
+	defer cancel()
+	cursor, err := s.check.Database().Collection(name).Find(ctx, bson.D{})
+	require.NoError(t, err)
+	var documents []string
+	for cursor.Next(ctx) {
+		documents = append(documents, cursor.Current.String())
+	}
+	require.NoError(t, cursor.Err())
+	return documents
 }
