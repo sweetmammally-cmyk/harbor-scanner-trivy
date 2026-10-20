@@ -235,6 +235,24 @@ Touched by this plan:
 - Next: <next task ID>
 ```
 
+### 2026-10-20  P11-8  History scan, second pass (after the live run)
+- Status: done (report only; nothing rewritten, nothing pushed)
+- What changed: no code. Scanned all 128 commits not in upstream `2691434` (`git log --all ^2691434 -p`, including the local branch `backup/pre-history-fix`), with extra attention to everything written since the first pass and during the live run (PROGRESS, README, `.env.example`, compose example, test fixtures).
+  - Remote: `origin/main` is still `59bdae0` (P10-5). The 16 commits from `51dc98e` (Phase 11 decisions) to `d897bd9` (P11-1 evidence) exist only locally.
+  - Not in any commit: the internal mirror's hostname or address, the generated E2E secrets (service token, MongoDB password; checked by searching for their literal values), the E2E `.env` (it lives outside the repository; `docs/direct-scan/compose/.gitignore` ignores `.env` there), any token, key or password other than obvious test fixtures.
+  - New since the first pass (local commits only):
+    1. `9e93a3e` (compose example): placeholder DNS addresses `10.0.0.53`, `10.0.1.53` and placeholder hosts `*.example.internal` (not real).
+    2. `d897bd9` (P11-1 evidence): describes the internal mirror without its address: "a ghcr.io pull-through mirror", "speaks only HTTP/1.1 (TLS 1.3, no h2)", "one build behind Docker Hub"; mentions the local run directory `~/scanner-e2e`.
+    3. `0e9a2f5`, `49c5047`, `8d3f509`: notes about "this network" (ghcr.io transfers reset; proxy.golang.org answers 403 for some modules).
+    4. `9b7d180` (first-pass report): repeats the commit author's email and the earlier findings.
+    5. `fb8ad05`, `e108604` and later: the local Harbor test install and its container rename.
+  - Unchanged from the first pass (already public): `0c87038` `GOPROXY=https://package-mirror.liara.ir/...` in both Dockerfiles (repeated in `d9a1ce9` and the P11-6 table `3c0df7c`); `a0df58d`/`dd3dc34` the dev machine's VPN/TUN or transparent-proxy timing note; `3d447af`/`8a9c8b7` the local Trivy version; author `sweetmammally@gmail.com` on all commits.
+  - Real test output in commits names only public images and registries (Docker Hub images, ghcr.io and Docker Hub DB repositories, public CVE references); the fixture `pkg/v2/runner/testdata/node-alpine.json` is real Trivy output for the public `node:22-alpine3.20`.
+- Files: `docs/direct-scan/PROGRESS.md`
+- Tests run: not applicable.
+- Decisions / surprises: none beyond the first pass; pushing is the owner's decision.
+- Next: component tests, P11-3
+
 ### 2026-10-20  P11-1  End-to-end compose run
 - Status: done
 - What changed: the compose example now also has a Redis service and `SCANNER_REDIS_URL` (the v1 adapter in the same process needs Redis for its job queue; it was missing), and a `.gitignore` next to it ignores `.env`. The run itself used a copy of the example outside the repository (`~/scanner-e2e`, `.env` mode 0600 with the internal mirror and random secrets; the mirror address is not recorded here): two replicas of the image built from this branch, `mongo:7 --auth` with `nofile` 64000, Redis, a local `registry:2` over plain http (so `--insecure` was used for real) with `node:22-alpine` (tags v1 and v2), `python:3.12-alpine`, `node:22-bookworm`, `node:20-bookworm` and `maven:3.9-eclipse-temurin-21`; DB sources: the internal mirror (a ghcr.io pull-through mirror) first, Docker Hub second, for both DBs; no ghcr.io.
