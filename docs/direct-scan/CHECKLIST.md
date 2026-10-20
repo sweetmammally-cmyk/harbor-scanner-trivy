@@ -113,17 +113,24 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P11-13 Failure class `stream_reset` for an HTTP/2 stream reset during a DB download (logs, db_checks, failure metric); recommended source order: our mirror first, Docker Hub as fallback, no ghcr.io
 
 ## Acceptance criteria (from DEMAND section 13)
-- [ ] AC1 New image: 202, then `queued`, `scanning`, `done`, with stored result and timings
-- [ ] AC2 Same digest and unchanged DB: 200 `cached: true`, no Trivy process started
-- [ ] AC3 After a DB update, the same digest is scanned again
-- [ ] AC4 `force: true` always scans
-- [ ] AC5 A new tag pointing to an already-scanned digest is a cache hit
-- [ ] AC6 Unknown `scan_id` returns `not_found` (404)
-- [ ] AC7 Blackholed mirror: pre-check fails within its timeout, fallback source tried, if all fail scan uses the old DB and responses say `stale`
-- [ ] AC8 Pre-check logs show source, route, TLS and HTTP/2 results, no secrets
-- [ ] AC9 `/api/v2/health` reflects Mongo, DB age, queue and scan stats; readiness false when Mongo is down
-- [ ] AC10 New platforms appear in the `platforms` collection on first discovery
-- [ ] AC11 Harbor adapter endpoints still pass their existing tests; output matches upstream except the documented `vendor_attributes.Trivy`
-- [ ] AC12 `platforms: ["npm"]` returns only npm findings, sets `has_more_platforms`, still records other types
-- [ ] AC13 A broader request than the cached scan triggers a new scan
-- [ ] AC14 Trivy never downloads a DB during a scan
+
+Evidence for each criterion: PROGRESS.md, entries P11-2 (tests), P11-1 (live compose run) and P11-3 (real Harbor scan).
+- [x] AC1 New image: 202, then `queued`, `scanning`, `done`, with stored result and timings
+- [x] AC2 Same digest and unchanged DB: 200 `cached: true`, no Trivy process started
+- [x] AC3 After a DB update, the same digest is scanned again
+- [x] AC4 `force: true` always scans
+- [x] AC5 A new tag pointing to an already-scanned digest is a cache hit
+- [x] AC6 Unknown `scan_id` returns `not_found` (404)
+- [x] AC7 Blackholed mirror: pre-check fails within its timeout, fallback source tried, if all fail scan uses the old DB and responses say `stale`
+- [x] AC8 Pre-check logs show source, route, TLS and HTTP/2 results, no secrets
+- [x] AC9 `/api/v2/health` reflects Mongo, DB age, queue and scan stats; readiness false when Mongo is down
+- [x] AC10 New platforms appear in the `platforms` collection on first discovery
+- [x] AC11 Harbor adapter endpoints still pass their existing tests; output matches upstream except the documented `vendor_attributes.Trivy`
+- [x] AC12 `platforms: ["npm"]` returns only npm findings, sets `has_more_platforms`, still records other types
+- [x] AC13 A broader request than the cached scan triggers a new scan
+- [x] AC14 Trivy never downloads a DB during a scan
+- [x] AC15 A cache hit renews `confirmed_at` without creating a document
+- [x] AC16 A rescan of the same tag overwrites its result (one document per tag)
+- [x] AC17 A request not covered by the tag's running scan returns 409 `scan_in_progress`
+- [x] AC18 For the same digest, the scope widens to the union of the stored and requested platforms and severities
+- [x] AC19 A narrower request is served from a wider stored result, filtered to the request
