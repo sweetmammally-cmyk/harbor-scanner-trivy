@@ -50,7 +50,7 @@ func TestManualScan(t *testing.T) {
 
 	trivy, err := exec.LookPath("trivy")
 	require.NoError(t, err)
-	r := NewRunner(cfg, trivy, cacheDir, t.TempDir(), store.NewMemoryPlatforms())
+	r := NewRunner(cfg, trivy, cacheDir, t.TempDir(), t.TempDir(), store.NewMemoryPlatforms())
 	require.NoError(t, r.CheckTrivy(context.Background()))
 
 	scan := store.Scan{ID: "manual", Image: store.Image{Repository: repository, Name: name, Tag: tag, Digest: resolved.Digest},

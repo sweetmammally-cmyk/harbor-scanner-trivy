@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -38,6 +39,9 @@ for a in "$@"; do
   esac
   prev="$a"
 done
+# Like real Trivy, leave a file in TMPDIR (the scan's temp directory).
+echo "layer" > "$TMPDIR/fake-layer.tmp"
+[ -n "$TRIVY_FAKE_TMPDIR_FILE" ] && printf '%s' "$TMPDIR" > "$TRIVY_FAKE_TMPDIR_FILE"
 [ -n "$TRIVY_FAKE_ARGS_FILE" ] && printf '%s\n' "$@" > "$TRIVY_FAKE_ARGS_FILE"
 [ -n "$TRIVY_FAKE_ENV_FILE" ] && env > "$TRIVY_FAKE_ENV_FILE"
 case "$TRIVY_FAKE_MODE" in
@@ -94,7 +98,7 @@ func newTestRunner(t *testing.T) (*Runner, string) {
 		ScanMaxOutput:    1 << 20,
 		ScanPlatform:     "linux/amd64",
 	}
-	return NewRunner(cfg, trivy, cacheDir, t.TempDir(), store.NewMemoryPlatforms()), cacheDir
+	return NewRunner(cfg, trivy, cacheDir, t.TempDir(), filepath.Join(t.TempDir(), "tmp"), store.NewMemoryPlatforms()), cacheDir
 }
 
 const reference = "harbor.local/project/app@sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -348,9 +352,13 @@ func assertClass(t *testing.T, err error, class string) {
 }
 
 // assertNoOutputLeft checks that no output file was left in any worker directory.
+// assertNoOutputLeft checks that no scan left a temp directory (with its
+// output and Trivy's temp files).
 func assertNoOutputLeft(t *testing.T, r *Runner) {
 	t.Helper()
-	files, err := filepath.Glob(filepath.Join(r.workDir, "*", "scan-*.json"))
-	require.NoError(t, err)
-	assert.Empty(t, files)
+	entries, err := os.ReadDir(r.tmpDir)
+	if !errors.Is(err, os.ErrNotExist) {
+		require.NoError(t, err)
+	}
+	assert.Empty(t, entries)
 }

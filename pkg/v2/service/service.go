@@ -68,7 +68,11 @@ func Start(cfg config.Config, trivyPath string) (*Service, error) {
 		updater.Run()
 	}()
 
-	scanner := runner.NewRunner(cfg, trivyPath, dbDir, filepath.Join(cfg.CacheDir, "workers"), store.NewMongoPlatforms(client))
+	scanner := runner.NewRunner(cfg, trivyPath, dbDir, filepath.Join(cfg.CacheDir, "workers"), filepath.Join(cfg.CacheDir, "tmp"),
+		store.NewMongoPlatforms(client))
+	if err = scanner.CleanTemp(); err != nil {
+		return nil, err
+	}
 	if err = scanner.CheckTrivy(context.Background()); err != nil {
 		slog.Error("Trivy is not usable; the v2 service is not ready", slog.String("error", err.Error()))
 	}

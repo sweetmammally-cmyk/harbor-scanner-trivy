@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ func (r *Runner) CheckTrivy(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, r.trivy, "--version")
-	cmd.Env = r.environment()
+	cmd.Env = r.environment("")
 	out, err := cmd.Output()
 	if err != nil {
 		r.setVersion("")
@@ -78,7 +79,8 @@ func (r *Runner) Scan(ctx context.Context, worker string, scan store.Scan, refer
 		logScanFailure(logger, err, start)
 		return scan, nil, err
 	}
-	defer os.Remove(outputPath)
+	// The output lives in the scan's temp directory: remove it all.
+	defer os.RemoveAll(filepath.Dir(outputPath))
 	trivyDone := time.Now()
 
 	output, err := os.Open(outputPath)

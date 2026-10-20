@@ -54,10 +54,12 @@ type DBInfo struct {
 // Runner runs Trivy. Each worker has its own Trivy cache directory below workDir;
 // the DBs are read from the updater's cacheDir.
 type Runner struct {
-	cfg       config.Config
-	trivy     string
-	cacheDir  string
-	workDir   string
+	cfg      config.Config
+	trivy    string
+	cacheDir string
+	workDir  string
+	// tmpDir holds one temporary directory per running scan.
+	tmpDir    string
 	plainHTTP bool
 	platforms store.PlatformRepository
 
@@ -68,12 +70,13 @@ type Runner struct {
 
 // NewRunner returns a runner for the Trivy binary at trivyPath that records the
 // platforms it finds in platforms. Call CheckTrivy before scanning.
-func NewRunner(cfg config.Config, trivyPath, cacheDir, workDir string, platforms store.PlatformRepository) *Runner {
+func NewRunner(cfg config.Config, trivyPath, cacheDir, workDir, tmpDir string, platforms store.PlatformRepository) *Runner {
 	return &Runner{
 		cfg:       cfg,
 		trivy:     trivyPath,
 		cacheDir:  cacheDir,
 		workDir:   workDir,
+		tmpDir:    tmpDir,
 		plainHTTP: strings.HasPrefix(cfg.RegistryURL, "http://"),
 		platforms: platforms,
 	}
@@ -120,15 +123,24 @@ func (r *Runner) runTrivy(ctx context.Context, logger *slog.Logger, worker, refe
 	db := DBInfo{UpdatedAt: metadata.UpdatedAt, ManifestDigest: dbmgr.InstalledDigest(cacheDir, "db")}
 	logger.Info("triggering scan", slog.Time("db_updated_at", db.UpdatedAt), slog.String("db_manifest_digest", db.ManifestDigest))
 
-	// os.CreateTemp creates the file with mode 0600.
-	output, err := os.CreateTemp(cacheDir, "scan-*.json")
+	// The scan's own temporary directory: Trivy's TMPDIR and the output file.
+	// The caller removes it with the output; on failure it is removed here.
+	if err = os.MkdirAll(r.tmpDir, 0o700); err != nil {
+		return "", DBInfo{}, fmt.Errorf("creating the temp directory: %w", err)
+	}
+	scanTmp, err := os.MkdirTemp(r.tmpDir, "scan-")
 	if err != nil {
+		return "", DBInfo{}, fmt.Errorf("creating the scan's temp directory: %w", err)
+	}
+	outputPath := filepath.Join(scanTmp, "output.json")
+	output, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		_ = os.RemoveAll(scanTmp)
 		return "", DBInfo{}, fmt.Errorf("creating the output file: %w", err)
 	}
-	outputPath := output.Name()
 	_ = output.Close()
 
-	scanErr := r.exec(ctx, cacheDir, outputPath, reference)
+	scanErr := r.exec(ctx, cacheDir, scanTmp, outputPath, reference)
 	if scanErr == nil {
 		var info os.FileInfo
 		info, err = os.Stat(outputPath)
@@ -141,7 +153,7 @@ func (r *Runner) runTrivy(ctx context.Context, logger *slog.Logger, worker, refe
 		}
 	}
 	if scanErr != nil {
-		_ = os.Remove(outputPath)
+		_ = os.RemoveAll(scanTmp)
 		return "", DBInfo{}, scanErr
 	}
 	return outputPath, db, nil
@@ -149,7 +161,7 @@ func (r *Runner) runTrivy(ctx context.Context, logger *slog.Logger, worker, refe
 
 // exec runs Trivy once. Trivy gets a --timeout slightly below
 // SCANNER_SCAN_TIMEOUT; at SCANNER_SCAN_TIMEOUT the whole process group is killed.
-func (r *Runner) exec(ctx context.Context, cacheDir, outputPath, reference string) error {
+func (r *Runner) exec(ctx context.Context, cacheDir, scanTmp, outputPath, reference string) error {
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.ScanTimeout)
 	defer cancel()
 
@@ -174,7 +186,7 @@ func (r *Runner) exec(ctx context.Context, cacheDir, outputPath, reference strin
 	args = append(args, reference)
 
 	cmd := exec.CommandContext(ctx, r.trivy, args...)
-	cmd.Env = r.environment()
+	cmd.Env = r.environment(scanTmp)
 	stderr := &tailBuffer{limit: stderrTail}
 	cmd.Stderr = stderr
 	// Trivy and its children get their own process group, killed as a whole.
@@ -219,23 +231,37 @@ func trivyTimeout(scanTimeout time.Duration) time.Duration {
 // environment is Trivy's environment: an allowlist of the scanner's environment
 // (never the full one, which holds service and MongoDB secrets) plus the robot
 // account in TRIVY_USERNAME / TRIVY_PASSWORD, never on the command line.
-func (r *Runner) environment() []string {
+func (r *Runner) environment(tmpDir string) []string {
 	var env []string
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
 		switch {
 		case name == "TRIVY_USERNAME" || name == "TRIVY_PASSWORD":
 			// Replaced below by the robot account.
+		case name == "TMPDIR" && tmpDir != "":
+			// Replaced below by the scan's own temp directory.
 		case name == "PATH" || name == "HOME" || name == "TMPDIR",
 			strings.HasPrefix(name, "TRIVY_"),
 			strings.EqualFold(name, "HTTP_PROXY"), strings.EqualFold(name, "HTTPS_PROXY"), strings.EqualFold(name, "NO_PROXY"):
 			env = append(env, entry)
 		}
 	}
+	if tmpDir != "" {
+		env = append(env, "TMPDIR="+tmpDir)
+	}
 	if r.cfg.RegistryUsername != "" {
 		env = append(env, "TRIVY_USERNAME="+r.cfg.RegistryUsername, "TRIVY_PASSWORD="+r.cfg.RegistryPassword)
 	}
 	return env
+}
+
+// CleanTemp removes what scans left in the temp directory (a crash or a kill
+// of this process). Call it at startup, before any scan.
+func (r *Runner) CleanTemp() error {
+	if err := os.RemoveAll(r.tmpDir); err != nil {
+		return fmt.Errorf("removing leftover scan files: %w", err)
+	}
+	return os.MkdirAll(r.tmpDir, 0o700)
 }
 
 // redact removes the robot account's password from text.

@@ -5,12 +5,12 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 10 done; Phase 9 complete except the v1 component test run
-- Last completed task: P10-5 (Phase 10 complete)
-- In progress: none
-- Next task: the v1 component test run (P9-1/P9-8) once the owner has renamed the local `redis` container; then Phase 11 (P11-1)
-- Blockers / questions for the user: the v1 component tests wait for the owner to rename the local Harbor container `redis` to `redis-harbor-local` (still named `redis` at the last check); P9-1 and P9-8 stay `[~]` until then.
-- Last updated: 2026-10-19
+- Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
+- Last completed task: P11-9
+- In progress: P11-12 (measurements running), P11-8 (history scan done, report to the owner)
+- Next task: P11-10, P11-11, then P11-4 (README, compose)
+- Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
+- Last updated: 2026-10-20
 
 ## Repo facts (filled in by Phase 0)
 
@@ -208,6 +208,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-9  Per-scan temp directory
+- Status: done
+- What changed: `runner.NewRunner` takes a temp root (`<SCANNER_V2_CACHE_DIR>/tmp` in the service). `runTrivy` creates `scan-*` (0700) in it for each scan: Trivy's `TMPDIR` (the host's `TMPDIR` is replaced in the child environment) and the output file `output.json` (0600). `Scan` removes the whole directory when it ends; `runTrivy` removes it itself on any error, after the process group is gone (also after a timeout or a kill). `Runner.CleanTemp` empties the root; `service.Start` calls it before the workers start (leftovers of a crash). `CheckTrivy` keeps the host environment without a scan directory.
+- Files: `pkg/v2/runner/{trivy,scan,trivy_test,tempdir_test,manual_test}.go`, `pkg/v2/service/service.go`
+- Tests run: `go test -short -race ./...` -> ok; apiv2 integration -> ok. The fake trivy now writes a file into its `TMPDIR` like real Trivy. Cases: `TMPDIR` is a `scan-*` directory inside the root; the root is empty after a successful scan, Trivy failing, Trivy timing out (hang, process group killed), output too large, unreadable output, and a scan killed through its context; leftovers are removed by `CleanTemp` and the root stays.
+- Decisions / surprises: none.
+- Next: P11-10
 
 ### 2026-10-19  P10-5  Remove the FULL TRIVY REPORT log
 - Status: done
