@@ -7,7 +7,7 @@ Newest changelog entries go at the top of the Changelog.
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
 - Last completed task: P11-11
-- In progress: P11-12 (measurements running), P11-8 (history scan done, report to the owner)
+- In progress: P11-12 (measurements running)
 - Next task: P11-4 (README, compose) after the measurements
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
 - Last updated: 2026-10-20
@@ -208,6 +208,22 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-8  History scan of the public fork
+- Status: done (report only; nothing rewritten, nothing pushed by us)
+- What changed: no code. Scanned all 112 commits that are not in upstream `2691434` (`git log --all ^2691434 -p`, which includes the local branch `backup/pre-history-fix`), plus commit messages and author/committer identities.
+  - State of the remote: `origin/main` equals local `main` (102 of our commits on top of upstream are already on the public fork; they were pushed outside this session). The 10 extra commits of `backup/pre-history-fix` exist only locally.
+  - Findings (already public):
+    1. `0c87038` ("some modifyins"): `Dockerfile` and `Dockerfile.dev` set `ENV GOPROXY=https://package-mirror.liara.ir/repository/go/` (and `GOSUMDB=off`). This names the hosting provider's package mirror; it is a public mirror, not an internal host. `d9a1ce9` repeats the name in PROGRESS.
+    2. `a0df58d` (PROGRESS, P2 manual pre-check): says the dev machine reaches GitHub and Docker Hub in about 0.3 ms at the TCP stage, "so something local (VPN/TUN or transparent proxy) accepts TCP". Describes the developer's network, no address.
+    3. `d234f21` and later PROGRESS entries: the dev machine has a local Harbor compose install (container `redis`, image `goharbor/redis-photon:v2.11.2`).
+    4. `3d447af`, `8a9c8b7`: "the local dev machine has trivy 0.71.2 on PATH".
+    5. Commit metadata: author and committer `Amir Movahed <sweetmammally@gmail.com>` on all 112 commits.
+  - Nothing else: no IP address but `140.82.121.34` (a GitHub address in a test fixture) and loopback; no internal hostnames (only `*.local` placeholders in tests and docs: `mirror.local`, `harbor.local`, `registry.local`, ...); no tokens, keys or passwords (searched for AWS/GitHub/GitLab/Slack/JWT formats, private keys and password/token/secret assignments; only test fixtures such as `s3cret` and `robot$scanner`); no `.env` file in any commit; the secret-looking files ever added (`helm/.../secret.yaml`, `charts/.../secret-tls.yaml`, `test/component/registry/certs/*.pem`) are upstream's own; real test output names only public systems (ghcr.io, Docker Hub images, public CVE references); DEMAND states the business context ("We run a PaaS platform").
+- Files: `docs/direct-scan/PROGRESS.md`, `docs/direct-scan/CHECKLIST.md`
+- Tests run: not applicable.
+- Decisions / surprises: the owner decides whether any of this matters for a public fork; rewriting history would change every commit hash from `0c87038` on.
+- Next: P11-12
 
 ### 2026-10-20  P11-11  Worker layer cache limit
 - Status: done

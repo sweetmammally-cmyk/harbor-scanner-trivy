@@ -105,7 +105,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [ ] P11-5 Secrets review: no tokens or passwords in logs, argv or MongoDB
 - [ ] P11-6 List the upstream files touched, for future merges; run the component tests again
 - [ ] P11-7 (low priority) Get a working golangci-lint for Go 1.26 and run `make lint`
-- [ ] P11-8 Scan the whole git history (the GitHub fork is public) for internal hostnames, mirror URLs, IPs, tokens, passwords, .env files and real output naming internal systems; report with commit hashes; never rewrite history or push
+- [x] P11-8 Scan the whole git history (the GitHub fork is public) for internal hostnames, mirror URLs, IPs, tokens, passwords, .env files and real output naming internal systems; report with commit hashes; never rewrite history or push
 - [x] P11-9 Per-scan temp directory inside `SCANNER_V2_CACHE_DIR` (Trivy's `TMPDIR` and the output), removed on success, failure, timeout and kill; leftovers removed at startup
 - [x] P11-10 `SCANNER_V2_WORKER_CACHE_BACKEND=fs|memory` (Trivy 0.74.0 `--cache-backend memory`, verified first)
 - [x] P11-11 `SCANNER_V2_WORKER_CACHE_MAX` (default 5GB per worker, fs only): clear the worker's own layer cache between scans when larger; test with a fake size function
