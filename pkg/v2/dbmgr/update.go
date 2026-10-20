@@ -50,7 +50,8 @@ type SourceResult struct {
 	Answered       bool   `json:"answered" bson:"answered"`
 	ManifestDigest string `json:"manifest_digest,omitempty" bson:"manifest_digest,omitempty"`
 	Installed      bool   `json:"installed" bson:"installed"`
-	// FailureClass is the pre-check class, or upstream_error, download_error or install_error.
+	// FailureClass is the pre-check class, or upstream_error, download_error,
+	// stream_reset (an HTTP/2 stream reset during the download) or install_error.
 	FailureClass string `json:"failure_class,omitempty" bson:"failure_class,omitempty"`
 	Error        string `json:"error,omitempty" bson:"error,omitempty"`
 }
@@ -174,9 +175,12 @@ func update(ctx context.Context, cfg config.Config, cacheDir string, kind dbKind
 		}
 		if err != nil {
 			_ = os.RemoveAll(versionDir)
-			if errors.Is(err, errLocalDisk) {
+			switch {
+			case errors.Is(err, errLocalDisk):
 				fail("install_error", err)
-			} else {
+			case isStreamReset(err):
+				fail("stream_reset", err)
+			default:
 				fail("download_error", err)
 			}
 			continue

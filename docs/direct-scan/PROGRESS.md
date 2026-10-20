@@ -6,7 +6,7 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-4
+- Last completed task: P11-13
 - In progress: none
 - Next task: P11-4 (README, compose) after the measurements
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
@@ -46,10 +46,19 @@ Newest changelog entries go at the top of the Changelog.
   - `make test-component`: not run (needs a full image build; slow).
   - `make lint`: not run (golangci-lint not installed; pinned v1.21.0 is too old for Go 1.26).
 
+## Known issues
+
+- 2026-10-20: long transfers from ghcr.io on the dev network are reset after minutes (HTTP/2 `PROTOCOL_ERROR` received from the peer; seen twice on the 940 MiB Java DB layer, after 10m43s and 5m59s). The same layer from Docker Hub downloads in about 2 minutes. Source fallback handles it: the source fails with `stream_reset` and the next source is tried; there is no resume. ghcr.io is not used as a source (owner).
+
 ## Decisions
 
 Record decisions here with date and reason (package layout, Mongo test strategy, OCI client approach, DB swap mechanism, anything the user answered). If a decision changes the spec, also propose the edit to `DEMAND.md`.
 
+- 2026-10-20 (owner, answers on Phase 11; DEMAND v0.21):
+  - Cache backend: `fs` stays the default (much faster for images sharing base layers, less memory); `memory` stays an option. The measurement table is in the README; memory guidance stays about 2 GB per worker + 1 GB, with the measured peaks next to it.
+  - ghcr.io stream resets: no resume for now. New failure class `stream_reset` for an HTTP/2 stream reset during a download (logs, db_checks, failure metric). Source order for both DBs: our own mirror first, Docker Hub second; ghcr.io is never used (the owner's note replaces "ghcr.io last"). The real mirror is a ghcr.io pull-through mirror; its address goes only into the git-ignored `.env`; PROGRESS and the README say "internal mirror".
+  - Order of the remaining runs: component tests when the owner has renamed the local `redis` container (and renames it back after); then P11-3 on the local Harbor test install (may be started; register the v2 build as an additional scanner, scan one image through the v1 adapter, restore the previous default scanner, stop Harbor again, delete no Harbor data or volumes).
+  - Seed DB: still undecided; unchanged.
 - 2026-10-20 (owner, Phase 11; DEMAND v0.20 sections 11 and 14): component tests once the owner says the local `redis` container is renamed (worktree at P0-6 on failure; `vendor_attributes.Trivy` fixes only in test expectations); scan the public fork's whole history and report (no rewrite, no push); Trivy DB on disk in `SCANNER_V2_CACHE_DIR`, no tmpfs; `SCANNER_V2_WORKER_CACHE_BACKEND=fs|memory` (default fs) after verifying Trivy 0.74.0 supports memory; `SCANNER_V2_WORKER_CACHE_MAX` 5GB per worker (fs only), cleared between scans; per-scan temp directory inside `SCANNER_V2_CACHE_DIR` removed on every ending, leftovers removed at startup, no temp-dir setting; measurements on a large real image for both backends and fresh DB sizes; README sizing and compose example (items of P11-4); acceptance P11-1 (real mirror and ghcr.io), P11-2, P11-3 (real Harbor scan via v1), P11-5, P11-6, P11-7; seed DB unchanged for now.
 - 2026-10-17 (owner, Phase 10 and follow-ups; DEMAND v0.19 sections 5.0, 5.5, 11, 12):
   - Component tests: the owner renames the local Harbor container `redis` to `redis-harbor-local` for the run and back afterwards; we never remove or modify it. On a failure, run the same tests in a separate worktree at the P0-6 commit to see whether it predates v2; `vendor_attributes.Trivy` (KEEP) failures are fixed in test expectations only. Tick P9-1/P9-8 when green or when a failure is proven older and documented.
@@ -223,6 +232,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-13  stream_reset failure class, source order
+- Status: done
+- What changed: in the update loop, a failed download whose error is an HTTP/2 stream reset ("stream error: stream ID ..." from Go's HTTP/2 client; the type is not exported by net/http, so `isStreamReset` matches the text) fails the source with `stream_reset` instead of `download_error`; it reaches the "DB source failed" log line, `SourceResult.FailureClass` (stored in `db_state.last_sources` and as a `db_checks` row) and `scanner_v2_db_precheck_failures_total{class="stream_reset"}` like every class. DEMAND 7.4 and 11, the README and `.env.example` recommend our mirror first and Docker Hub as the fallback, no ghcr.io; the compose example takes the source lists from `.env`. README: the measurement table and the measured peaks next to the memory guidance.
+- Files: `pkg/v2/dbmgr/{update,download,update_test,streamreset_test}.go`, `docs/direct-scan/{DEMAND,README}.md`, `docs/direct-scan/compose/{docker-compose.yaml,.env.example}`
+- Tests run: `go test -short -race ./pkg/v2/...` -> ok. New cases: the fake HTTP/2 registry sends half the layer and aborts the handler (a real `RST_STREAM`): the source fails with `stream_reset` and the next one installs the DB, nothing is left behind; through `Updater.UpdateNow` the class is in the stored state, the log line and the failure metric for the source host. `docker compose config` with the example `.env` -> ok.
+- Decisions / surprises: none.
+- Next: P11-1 (compose run with the internal mirror and Docker Hub)
 
 ### 2026-10-20  P11-2  Acceptance criteria walk
 - Status: partial (all criteria have test evidence; AC7, AC9 and AC11 also need the compose run P11-1, the component tests and the real Harbor scan P11-3)

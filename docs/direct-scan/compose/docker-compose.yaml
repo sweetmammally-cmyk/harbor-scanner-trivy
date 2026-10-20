@@ -19,9 +19,8 @@ x-scanner: &scanner
     SCANNER_QUEUE_WORKERS: "2"
     SCANNER_V2_WORKER_CACHE_BACKEND: fs
     SCANNER_DB_CHECK_INTERVAL: 3h
-    SCANNER_DB_SOURCES: "mirror.example.internal/aquasec/trivy-db:2|direct,ghcr.io/aquasecurity/trivy-db:2|direct"
-    SCANNER_JAVA_DB_SOURCES: "mirror.example.internal/aquasec/trivy-java-db:1|direct,ghcr.io/aquasecurity/trivy-java-db:1|direct"
     SCANNER_REGISTRY_URL: https://harbor.example.internal
+    # SCANNER_DB_SOURCES and SCANNER_JAVA_DB_SOURCES name our mirror: they are in .env.
   healthcheck:
     test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/probe/ready"]
     interval: 15s

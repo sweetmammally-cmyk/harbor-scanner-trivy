@@ -11,6 +11,8 @@ This fork adds a direct scan API (`/api/v2`) next to the Harbor adapter (`/api/v
 
 ## Network and credentials
 
+- DB sources (`SCANNER_DB_SOURCES`, `SCANNER_JAVA_DB_SOURCES`), tried in order: our own mirror first, Docker Hub (`docker.io/aquasec/trivy-db:2`, `docker.io/aquasec/trivy-java-db:1`) as the fallback. Do not use ghcr.io: on our network long transfers from it are reset after minutes (the source fails with `stream_reset` and the next one is tried). Keep the real mirror address in `.env` only.
+
 - DNS: set the DNS servers with Docker's `dns:` setting (or the host's `/etc/resolv.conf`). Go's resolver tries them in order; the scanner has no DNS pool of its own.
 - Harbor robot account names contain `$` (for example `robot$scanner`). Docker Compose interpolates `$` in `docker-compose.yaml` and in `env_file` values, so write `robot$$scanner`; an unescaped `robot$scanner` reaches the container as `robot` (checked with Compose 5.6). In a shell, quote it: `'robot$scanner'`.
 - Keep secrets (`SCANNER_V2_AUTH_TOKEN`, `SCANNER_REGISTRY_PASSWORD`, the MongoDB password in `SCANNER_MONGO_URI`) in a `.env` file with mode 0600, never in the image or the compose file. The scanner never logs them, never puts them on Trivy's command line (Trivy gets the robot account through `TRIVY_USERNAME`/`TRIVY_PASSWORD`), and never stores them in MongoDB.
@@ -50,9 +52,18 @@ Disk per replica (`SCANNER_V2_CACHE_DIR` on a persistent local SSD):
 
 Each DB install writes one full DB (1.53 GiB for the Trivy DB, 1.45 GiB for the Java DB). Upstream rebuilds the Trivy DB about every 6 hours, so with `SCANNER_DB_CHECK_INTERVAL=3h` expect up to about four installs a day.
 
-Memory: start with about 2 GB per worker plus 1 GB for the service (`mem_limit: 5g` for 2 workers). The measured peak was well below that (under 360 MiB of Trivy RSS per scan), but larger images, Java analysis and the scanner's own buffers add to it; lower the limit only after watching real scans. Free memory beyond the limit is still useful: the page cache keeps the DB files in RAM.
+Memory: about 2 GB per worker plus 1 GB for the service (`mem_limit: 5g` for 2 workers). Measured peaks next to that: 293-358 MiB of Trivy RSS per scan of a 392 MiB image (table below). Larger images, Java analysis and the scanner's own buffers add to it; lower the limit only after watching real scans. Free memory beyond the limit is still useful: the page cache keeps the DB files in RAM.
 
-Scan time for `node:22-bookworm` (392 MiB compressed) was about 50 s on an empty cache with either backend. A second image sharing its base layers (`python:3.12-bookworm`) took 8 s with `fs` and 54 s with `memory`, because the memory backend analyzes every layer again.
+Measured scans (empty worker cache for each backend; the second image shares 4 of its 7 layers with the first):
+
+| Backend | Image (compressed) | Time | Peak Trivy RSS | Peak temp dir | Layer cache after |
+|---|---|---|---|---|---|
+| fs | node:22-bookworm (392 MiB) | 53 s | 293 MiB | 118 MiB | 2 MiB |
+| fs | python:3.12-bookworm (365 MiB) | 8 s | 300 MiB | 0 | 2 MiB |
+| memory | node:22-bookworm | 47 s | 358 MiB | 116 MiB | none |
+| memory | python:3.12-bookworm | 54 s | 336 MiB | 0 | none |
+
+`fs` is the default: an image that shares base layers with one scanned before is much faster, and it used less memory. `memory` stays an option when nothing of the layer cache may be written to disk.
 
 ## Compose example
 

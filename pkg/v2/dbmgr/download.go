@@ -173,3 +173,11 @@ func (r *stallReader) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+// isStreamReset reports whether a download failed because the HTTP/2 stream was
+// reset (RST_STREAM, for example by a proxy or CDN after minutes of transfer).
+// Go's HTTP/2 stream error type is not exported by net/http, so its text
+// "stream error: stream ID <n>; <code>" is matched.
+func isStreamReset(err error) bool {
+	return strings.Contains(err.Error(), "stream error: stream ID")
+}

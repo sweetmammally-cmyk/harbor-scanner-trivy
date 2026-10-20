@@ -319,6 +319,7 @@ func TestUpdate_DownloadFailuresFallBack(t *testing.T) {
 	testCases := []struct {
 		name          string
 		blob          http.HandlerFunc
+		expectedClass string
 		expectedError string
 	}{
 		{
@@ -326,6 +327,18 @@ func TestUpdate_DownloadFailuresFallBack(t *testing.T) {
 			name:          "different content",
 			blob:          func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(dbLayer(t, "other", now)) },
 			expectedError: "",
+		},
+		{
+			// The fake registry speaks HTTP/2: aborting the handler resets the stream
+			// (RST_STREAM), as a proxy or CDN may do after minutes of transfer.
+			name: "stream reset mid-download",
+			blob: func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write(layer[:len(layer)/2])
+				w.(http.Flusher).Flush()
+				panic(http.ErrAbortHandler)
+			},
+			expectedClass: "stream_reset",
+			expectedError: "stream error: stream ID",
 		},
 		{
 			name:          "truncated",
@@ -364,7 +377,11 @@ func TestUpdate_DownloadFailuresFallBack(t *testing.T) {
 			assert.Less(t, time.Since(start), 3*time.Second)
 			assert.Equal(t, ModeNormal, result.Mode)
 			assert.True(t, result.Installed)
-			assert.Equal(t, []string{"download_error", ""}, sourceClasses(result))
+			expectedClass := tc.expectedClass
+			if expectedClass == "" {
+				expectedClass = "download_error"
+			}
+			assert.Equal(t, []string{expectedClass, ""}, sourceClasses(result))
 			assert.Contains(t, result.Sources[0].Error, tc.expectedError)
 			assert.Equal(t, good.source(t, "direct").String(), result.ActiveSource)
 			assert.Equal(t, "good db", readDB(t, cacheDir))

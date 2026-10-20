@@ -1,6 +1,6 @@
 # DEMAND: Direct Scan API, Scan Cache and DB Lifecycle for harbor-scanner-trivy
 
-Status: DRAFT v0.20 (memory and disk, 2026-10-20)
+Status: DRAFT v0.21 (stream_reset, source order, 2026-10-20)
 Repo: fork of `goharbor/harbor-scanner-trivy`
 
 ---
@@ -297,6 +297,7 @@ If a stage fails: log the failure with the stage and timings, store it, move to 
   - `last_upstream_check_at`: set whenever any source answered. Diagnostic only.
   - `last_confirmed_current_at`: set only when the installed DB's digest equals the answering source's digest, or when a new DB was just installed.
 - `newer_available`: set when a source offered a different digest and no download could be installed. Cleared by the next successful install or confirmed-current check. A run where no source answered leaves it unchanged.
+- A download that fails because the HTTP/2 stream was reset (`RST_STREAM`, for example by a proxy or CDN after minutes of transfer) fails that source with class `stream_reset` (in the logs, `db_checks` and the failure metric); other download failures are `download_error`. There is no resume: the next source is tried, and the next run starts the download again.
 - A write error on our own disk during install (for example a full disk) fails that source with class `install_error`, leaves no partial directory and keeps the old DB; when no other source installs, the result is `degraded` with `newer_available`. There is no free-space check before downloading.
 - No source answered: log ERROR once, set mode `degraded`, keep scanning with the existing DB, keep retrying until fixed.
 - A newer DB was offered but none could be installed: set mode `degraded` and `newer_available`, log ONE ERROR "newer DB available but could not be installed" with each source's failure class, keep scanning with the existing DB. Responses say `stale`.
@@ -418,7 +419,7 @@ Large reports: summary plus report inline; the full report moves to GridFS when 
 | `SCANNER_REGISTRY_TIMEOUT` | Timeout of each registry request. Default 15s |
 | `SCANNER_REGISTRY_USERNAME`, `SCANNER_REGISTRY_PASSWORD` | Robot account (secret). Harbor robot names contain `$`, which needs escaping in compose files and shells |
 | `SCANNER_DB_CHECK_INTERVAL` | `1h`, `3h`, `1d`... fallback `3h` |
-| `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). The same repository and route listed twice is a startup error (also in `SCANNER_JAVA_DB_SOURCES`). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Example: `mirror.local/aquasec/trivy-db:2\|direct\|allow-http1,ghcr.io/aquasecurity/trivy-db:2\|socks5://proxy:1080` |
+| `SCANNER_DB_SOURCES` | Required when the v2 API is enabled (startup fails if empty). The same repository and route listed twice is a startup error (also in `SCANNER_JAVA_DB_SOURCES`). Ordered pool of sources: `repo\|route[\|options],...`, route is `direct`, `http://host:port` or `socks5://host:port`; options is an optional `;`-separated list, today only `allow-http1` (pass the pre-check over HTTP/1.1). Recommended order for both DBs: our own mirror first, Docker Hub (`docker.io/aquasec/trivy-db:2`, `docker.io/aquasec/trivy-java-db:1`) as the fallback; ghcr.io is not used. Example: `mirror.local/aquasecurity/trivy-db:2\|direct,docker.io/aquasec/trivy-db:2\|direct` |
 | `SCANNER_JAVA_DB_SOURCES` | Optional, same format, for the Java DB. Empty means no Java DB at all: nothing is downloaded and the Java seed is not installed |
 | `SCANNER_PRECHECK_TIMEOUT_DNS`, `_CONNECT`, `_TLS`, `_HTTP`, `_MANIFEST`, `_TOTAL` | Pre-check timeouts per stage and overall. Defaults 5s, 5s, 5s, 10s, 10s, 30s |
 | `SCANNER_DB_SEED_DIR`, `SCANNER_JAVA_DB_SEED_DIR` | Seed DB baked into the image, installed when no DB exists yet (with no digest, so the first update downloads). Defaults `/home/scanner/seed/db` and `/home/scanner/seed/java-db`. A missing directory means no seed; the service is then not ready until the first download succeeds |
