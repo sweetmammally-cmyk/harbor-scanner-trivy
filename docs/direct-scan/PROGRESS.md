@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 11 done; every checklist task is ticked
-- Last completed task: P11-3 (and P11-2 complete)
-- In progress: none
-- Next task: none planned; open decisions for the owner: pushing the local commits (history scans in P11-8), the seed DB, resume support for downloads, sending the upstream server fix upstream
-- Blockers / questions for the user: none
+- Phase: 11 done; Phase 12 (staging and integration) planned in PLAN and CHECKLIST, waiting for the owner's review
+- Last completed task: P11-3; open-item decisions recorded (DEMAND v0.22)
+- In progress: P11-14 (`WITH_SEED_DB` build argument)
+- Next task: P12-1 after the owner approves the Phase 12 plan
+- Blockers / questions for the user: the Phase 12 plan review (questions in the P12 checklist items); the owner pushes after reviewing `git log origin/main..main`
 - Last updated: 2026-10-20
 
 ## Repo facts (filled in by Phase 0)

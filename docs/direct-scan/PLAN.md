@@ -72,6 +72,10 @@ Exit: health reflects Mongo down, DB missing and degraded mode.
 End-to-end in docker compose (scanner, Mongo, a mirror or fake mirror), walk acceptance criteria AC1 to AC14 with evidence, Harbor adapter regression, Dockerfile with seed DB and volume, config README, secrets review, list of upstream files touched.
 Exit: all checklist items and acceptance criteria ticked.
 
+### Phase 12: Staging and integration (planned 2026-10-20; nothing starts before the owner's review)
+Staging deployment from the README and compose example (2 replicas, MongoDB, Redis, internal mirror first), Prometheus alert rules, an integration guide for the backend's Temporal activity, a real Harbor regression through the Harbor UI, and CI for the fork on every push.
+Exit: staging runs from the documented setup with alerts loaded; the backend team has the guide; a scan from the Harbor UI of a non-production Harbor uses this scanner; CI is green on the fork for every push.
+
 ## Risks to watch
 
 - Trivy CLI flags and output format differ by version: pin the version and record it in PROGRESS.
