@@ -5,11 +5,11 @@ Newest changelog entries go at the top of the Changelog.
 
 ## Current state
 
-- Phase: 11 done; Phase 12 (staging and integration) planned in PLAN and CHECKLIST, waiting for the owner's review
-- Last completed task: P11-14; open-item decisions recorded (DEMAND v0.22)
-- In progress: none
-- Next task: P12-1 after the owner approves the Phase 12 plan
-- Blockers / questions for the user: the Phase 12 plan review (questions in the P12 checklist items); the owner pushes after reviewing `git log origin/main..main`
+- Phase: 12 (staging and integration)
+- Last completed task: P11-14
+- In progress: P12-5
+- Next task: P12-3, P12-2, P12-6, P12-1, P12-4 (report after each)
+- Blockers / questions for the user: none
 - Last updated: 2026-10-20
 
 ## Repo facts (filled in by Phase 0)
@@ -58,6 +58,7 @@ Newest changelog entries go at the top of the Changelog.
 
 Record decisions here with date and reason (package layout, Mongo test strategy, OCI client approach, DB swap mechanism, anything the user answered). If a decision changes the spec, also propose the edit to `DEMAND.md`.
 
+- 2026-10-20 (owner, Phase 12 changes): P12-1 is a self-contained compose stack (`docs/direct-scan/compose/compose.yaml` + `.env.example`, the one example; no staging host; everything configurable from `.env`; no internal hostnames committed); new P12-6 startup settings log (every `SCANNER_*` setting with value and source, secrets hidden, URLs with credentials reduced to scheme and host, WARN for unknown `SCANNER_*` variables, a no-secret test); P12-4 on a throwaway local Harbor v2.11.2 (own directory, data inside it, removed completely afterwards, never left running: its `redis`/`registry` names clash with the component tests); P12-3 example in Go (Temporal Go SDK); order P12-5, P12-3, P12-2, P12-1, P12-4, report after each. Our choices: P12-5 lints only what the fork changed (the owner did not pick a CI option; this was the recommendation); P12-6 is done before P12-1 so the compose run can use it.
 - 2026-10-20 (owner, open items after Phase 11; DEMAND v0.22):
   1. Pushing: the owner pushes himself after reviewing `git log origin/main..main`. We never push.
   2. Seed DB: no seed in the default image; a Dockerfile build argument `WITH_SEED_DB` (default false) bakes the seed in for offline installs; documented in the README.

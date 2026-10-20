@@ -72,9 +72,9 @@ Exit: health reflects Mongo down, DB missing and degraded mode.
 End-to-end in docker compose (scanner, Mongo, a mirror or fake mirror), walk acceptance criteria AC1 to AC14 with evidence, Harbor adapter regression, Dockerfile with seed DB and volume, config README, secrets review, list of upstream files touched.
 Exit: all checklist items and acceptance criteria ticked.
 
-### Phase 12: Staging and integration (planned 2026-10-20; nothing starts before the owner's review)
-Staging deployment from the README and compose example (2 replicas, MongoDB, Redis, internal mirror first), Prometheus alert rules, an integration guide for the backend's Temporal activity, a real Harbor regression through the Harbor UI, and CI for the fork on every push.
-Exit: staging runs from the documented setup with alerts loaded; the backend team has the guide; a scan from the Harbor UI of a non-production Harbor uses this scanner; CI is green on the fork for every push.
+### Phase 12: Staging and integration (owner's changes of 2026-10-20)
+CI for the fork on every push, an integration guide for the backend's Temporal activity (Go), Prometheus alert rules with promtool tests, a startup log of every setting (secrets hidden, unknown `SCANNER_*` variables warned), one self-contained compose stack that works from `cp .env.example .env` (no staging host), and a real Harbor regression on a throwaway local Harbor that is removed afterwards.
+Exit: CI green on every push; the guide and the alert rules are in `docs/direct-scan/`; the compose stack comes up from the example with both replicas ready, a scan and a hit; a scan from the local Harbor UI used this scanner and the local Harbor is gone again.
 
 ## Risks to watch
 
