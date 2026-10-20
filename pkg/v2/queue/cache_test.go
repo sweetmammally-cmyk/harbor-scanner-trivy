@@ -22,6 +22,12 @@ func TestServes(t *testing.T) {
 	}
 
 	assert.True(t, Serves(stored, want()), "a narrower request with the same DB")
+	// metadata.json has nanoseconds; MongoDB gives the stored time back in milliseconds.
+	nanos := want()
+	nanos.DBUpdatedAt = dbTime.Add(36595599 * time.Nanosecond)
+	fromMongo := stored
+	fromMongo.DB = &store.ScanDB{UpdatedAt: nanos.DBUpdatedAt.Truncate(time.Millisecond)}
+	assert.True(t, Serves(fromMongo, nanos), "the same DB, stored in milliseconds, installed in nanoseconds")
 	older := want()
 	older.DBUpdatedAt = dbTime.Add(-time.Hour)
 	assert.True(t, Serves(stored, older), "the result's DB is newer than the installed one")

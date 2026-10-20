@@ -233,6 +233,14 @@ Touched by this plan:
 - Next: <next task ID>
 ```
 
+### 2026-10-20  P9-3  Fix: cache hits on the tag's own document never matched with a real DB
+- Status: done (bug found in the P11-1 compose run)
+- What changed: `queue.Serves` compared the stored result's DB `UpdatedAt` (read back from MongoDB, milliseconds) with the installed DB's `UpdatedAt` (from `metadata.json`, nanoseconds, for example `01:16:59.036595599Z`): the stored time always looked older, so a request was never served from the tag's own result and the tag was queued again (202). Hits still happened by accident through the copy lookup, whose MongoDB query compares in milliseconds. `Serves` now truncates the installed time to milliseconds, like the query. The tests had not caught it because their DB times were whole milliseconds or seconds; the apiv2 environment and the full-stack seed DB now use nanosecond times, and with the old `Serves` four tests fail (`TestCache` two subtests, `TestDBBlock`, `TestFullStack`).
+- Files: `pkg/v2/queue/{cache,cache_test}.go`, `test/integration/apiv2/{main_test,fullstack_test}.go`
+- Tests run: `go test -short -race ./pkg/v2/queue/` -> ok (new case: same DB stored in ms, installed in ns); `go test -count=1 -race -tags=integration ./test/integration/apiv2/` -> fails without the fix, ok with it.
+- Decisions / surprises: a real bug; the compose image must be rebuilt for the rest of P11-1.
+- Next: P11-1
+
 ### 2026-10-20  P11-13  stream_reset failure class, source order
 - Status: done
 - What changed: in the update loop, a failed download whose error is an HTTP/2 stream reset ("stream error: stream ID ..." from Go's HTTP/2 client; the type is not exported by net/http, so `isStreamReset` matches the text) fails the source with `stream_reset` instead of `download_error`; it reaches the "DB source failed" log line, `SourceResult.FailureClass` (stored in `db_state.last_sources` and as a `db_checks` row) and `scanner_v2_db_precheck_failures_total{class="stream_reset"}` like every class. DEMAND 7.4 and 11, the README and `.env.example` recommend our mirror first and Docker Hub as the fallback, no ghcr.io; the compose example takes the source lists from `.env`. README: the measurement table and the measured peaks next to the memory guidance.

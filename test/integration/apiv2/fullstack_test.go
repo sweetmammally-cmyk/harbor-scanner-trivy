@@ -85,7 +85,7 @@ func startStack(t *testing.T, change func(cfg *config.Config)) *stack {
 	seed := filepath.Join(s.dir, "seed")
 	require.NoError(t, os.MkdirAll(seed, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(seed, "trivy.db"), []byte("seed"), 0o644))
-	updated := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	updated := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339Nano) // nanoseconds, like real DBs
 	require.NoError(t, os.WriteFile(filepath.Join(seed, "metadata.json"),
 		[]byte(`{"Version":2,"UpdatedAt":"`+updated+`","NextUpdate":"`+updated+`","DownloadedAt":"`+updated+`"}`), 0o644))
 

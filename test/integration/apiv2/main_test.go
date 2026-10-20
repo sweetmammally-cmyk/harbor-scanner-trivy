@@ -112,7 +112,8 @@ func newReplica(t *testing.T, cfg config.Config, client *store.Client) *env {
 	e := &env{client: client, cfg: cfg, registry: &fakeRegistry{digests: map[string]string{}}, dbState: dbmgr.NewMemoryStateStore()}
 	e.queue = queue.New(client, cfg)
 	e.reports = store.NewMongoReports(client, reportLimit)
-	installed := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
+	// Nanoseconds, like a real metadata.json; MongoDB keeps milliseconds.
+	installed := time.Now().Add(-time.Hour).UTC()
 	require.NoError(t, e.dbState.Save(context.Background(), "db", dbmgr.DBState{
 		Mode: dbmgr.ModeNormal, LastUpstreamCheckAt: installed, LastConfirmedCurrentAt: installed,
 		Metadata: dbmgr.Metadata{Version: 2, UpdatedAt: installed.Add(-time.Hour)},

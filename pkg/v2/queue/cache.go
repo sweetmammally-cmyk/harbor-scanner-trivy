@@ -33,11 +33,14 @@ func Serves(scan store.Scan, want Want) bool {
 	if result == nil || scan.DB == nil || want.DBUpdatedAt.IsZero() {
 		return false
 	}
+	// MongoDB keeps times in milliseconds, the installed DB's UpdatedAt has
+	// nanoseconds: compare at MongoDB's precision, as FindCopySource does.
+	installed := want.DBUpdatedAt.Truncate(time.Millisecond)
 	return result.Digest == want.Digest &&
 		result.ScannedPlatform == want.ScannedPlatform &&
 		result.TrivyVersion == want.TrivyVersion &&
 		Covers(store.ScanOptions{Platforms: result.Platforms, Severity: result.Severity}, want.Options) &&
-		!scan.DB.UpdatedAt.Before(want.DBUpdatedAt)
+		!scan.DB.UpdatedAt.Before(installed)
 }
 
 // requestFields are the fields a request overwrites on a hit or a copy.
