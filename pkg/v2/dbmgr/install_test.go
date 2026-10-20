@@ -80,7 +80,7 @@ func TestInstallDB(t *testing.T) {
 
 		inFlight, err := os.Open(filepath.Join(cacheDir, "db", "trivy.db"))
 		require.NoError(t, err)
-		defer inFlight.Close()
+		defer func() { _ = inFlight.Close() }()
 
 		// Two swaps: the first keeps v1 as previous, the second deletes it.
 		require.NoError(t, InstallDB(cacheDir, "db", downloadedVersion(t, cacheDir, "db v2"), "sha256:v2"))

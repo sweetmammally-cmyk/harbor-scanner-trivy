@@ -199,7 +199,7 @@ func TestRegistryClient_GetBlob(t *testing.T) {
 		require.NoError(t, err)
 		body, err := client.getBlob(testContext(t), manifest.Layers[0].Digest)
 		require.NoError(t, err)
-		defer body.Close()
+		defer func() { _ = body.Close() }()
 		got, err := io.ReadAll(body)
 		require.NoError(t, err)
 
@@ -216,7 +216,7 @@ func TestRegistryClient_GetBlob(t *testing.T) {
 
 		body, err := client.getBlob(testContext(t), f.layerDigest)
 		require.NoError(t, err)
-		defer body.Close()
+		defer func() { _ = body.Close() }()
 		got, err := io.ReadAll(body)
 		require.NoError(t, err)
 

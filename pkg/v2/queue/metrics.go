@@ -145,7 +145,7 @@ func (q *Queue) Stats(ctx context.Context) (Stats, error) {
 	if err != nil {
 		return Stats{}, fmt.Errorf("reading queue depth: %w", err)
 	}
-	defer cursor.Close(ctx)
+	defer func() { _ = cursor.Close(ctx) }()
 	if !cursor.Next(ctx) {
 		if err := cursor.Err(); err != nil {
 			return Stats{}, fmt.Errorf("reading queue depth: %w", err)

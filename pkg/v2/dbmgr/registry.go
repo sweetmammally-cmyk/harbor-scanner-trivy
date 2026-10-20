@@ -140,7 +140,7 @@ func (c *registryClient) getManifest(ctx context.Context) (ociManifest, string, 
 	if err != nil {
 		return ociManifest{}, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return ociManifest{}, "", fmt.Errorf("GET manifest %s:%s returned status %d", c.ref.Path, c.ref.Tag, resp.StatusCode)

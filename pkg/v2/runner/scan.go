@@ -82,7 +82,7 @@ func (r *Runner) Scan(ctx context.Context, worker string, scan store.Scan, refer
 		return scan, nil, err
 	}
 	// The output lives in the scan's temp directory: remove it all.
-	defer os.RemoveAll(filepath.Dir(outputPath))
+	defer func() { _ = os.RemoveAll(filepath.Dir(outputPath)) }()
 	trivyDone := time.Now()
 
 	output, err := os.Open(outputPath)

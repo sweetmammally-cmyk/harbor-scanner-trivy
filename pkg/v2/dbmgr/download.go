@@ -53,7 +53,7 @@ func downloadDB(ctx context.Context, client *registryClient, layer ociDescriptor
 	if err != nil {
 		return downloadError(ctx, err)
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	// Read one byte more than expected, so a too large layer is noticed.
 	hasher := sha256.New()

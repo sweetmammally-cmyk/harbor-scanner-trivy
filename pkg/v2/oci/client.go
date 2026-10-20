@@ -184,7 +184,7 @@ func (c *Client) fetchToken(ctx context.Context, params map[string]string, reque
 	}
 	// Credentials may only travel unencrypted when the registry itself is plain http.
 	request, _ := url.Parse(requestURL)
-	if realm.Scheme != "https" && !(realm.Scheme == "http" && request != nil && request.Scheme == "http") {
+	if realm.Scheme != "https" && (realm.Scheme != "http" || request == nil || request.Scheme != "http") {
 		return "", 0, errors.New("token: invalid realm in registry challenge")
 	}
 	query := realm.Query()
@@ -207,7 +207,7 @@ func (c *Client) fetchToken(ctx context.Context, params map[string]string, reque
 	if err != nil {
 		return "", 0, fmt.Errorf("token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return "", 0, fmt.Errorf("%w (%s returned status %d)", ErrTokenDenied, realm.Host, resp.StatusCode)

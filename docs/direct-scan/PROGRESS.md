@@ -6,7 +6,7 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-5
+- Last completed task: P11-7
 - In progress: P11-12 (measurements running)
 - Next task: P11-4 (README, compose) after the measurements
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
@@ -190,6 +190,7 @@ Touched before this plan started (commits `0c87038` "some modifyins" and `f917cc
 Touched by this plan:
 
 - `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` (P0-6): test expectations for `vendor_attributes.Trivy` (owner chose KEEP). Test-only. (Correction: missing from this list until P5-1.)
+- `Makefile` (P11-7): `make setup` installs golangci-lint v2.15.0 instead of v1.21.0 (which cannot load Go 1.26 code).
 - `pkg/trivy/wrapper.go` (P10-5): the "FULL TRIVY REPORT" debug log (added in `0c87038`) is removed; the other debug logs of that commit stay. `pkg/trivy/wrapper_test.go` (P10-5): `TestWrapper_Scan` checks that the line is not logged.
 - `cmd/scanner-trivy/main.go` (P10-2): uses `service.Routes(v1)` instead of building the mux itself.
 - `cmd/scanner-trivy/main.go` (P9-1): reads the v2 config; when `SCANNER_V2_API_ENABLED` is true, starts `pkg/v2/service`, routes `/api/v2/` to its handler in front of the v1 router (an `http.ServeMux`), and at shutdown calls `StopAccepting` before and `Stop` after the HTTP server's `Shutdown`. With v2 disabled the v1 handler is served exactly as before.
@@ -208,6 +209,16 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-7  golangci-lint for Go 1.26
+- Status: done
+- What changed: golangci-lint v2.15.0 (the newest; its module needs Go 1.26.0). Building it with `go install` failed here: `@latest` asked for the go1.26.10 toolchain and proxy.golang.org answered 403 for that toolchain and for one linter dependency (`github.com/MirrexOne/unqueryvet`). The prebuilt release binary (`golangci-lint-2.15.0-linux-amd64.tar.gz`, sha256 checked against the release checksums) works with Go 1.26 code: `./bin/golangci-lint` (git-ignored). `make setup` now installs v2.15.0. No `.golangci.yml`: default linters (errcheck, govet, ineffassign, staticcheck, unused).
+  - v2 code is clean: `golangci-lint --build-tags component,integration,manual run --max-same-issues 0 --max-issues-per-linter 0 ./pkg/v2/... ./test/integration/{apiv2,queue,store,mongotest}/...` -> 0 issues, after 20 fixes: unchecked `Close`/`RemoveAll` errors in deferred calls became `defer func() { _ = x.Close() }()` (17 in dbmgr, oci, queue, registry, runner) and one De Morgan rewrite in `oci/client.go`.
+  - `make lint` on the whole repo still reports 13 issues, all in upstream files we have not otherwise changed (`pkg/harbor/model.go` Yoda condition, `pkg/http/api/server.go` deprecated `golang.org/x/net/context` and an inline hint, `pkg/redisx/pool_test.go`, `pkg/trivy/target.go` two unchecked `Close`, `test/component/component_test.go` three deprecated testcontainers calls, `test/integration/api/rest_api_test.go` three unchecked `Close` and three embedded-field selectors). Left as they are (upstream code); fixing them is the owner's call.
+- Files: `Makefile`, `pkg/v2/dbmgr/{dial_test,download,install,install_test,registry,registry_test}.go`, `pkg/v2/oci/client.go`, `pkg/v2/queue/metrics.go`, `pkg/v2/registry/registry.go`, `pkg/v2/runner/{result_test,scan}.go`
+- Tests run: `go vet ./...` -> ok; `go test -short -race ./pkg/v2/...` -> ok; lint as above.
+- Decisions / surprises: proxy.golang.org returns 403 from this network for some modules and toolchains; the project's Dockerfile uses another Go proxy for the same reason.
+- Next: P11-12, P11-4
 
 ### 2026-10-20  P11-5  Secrets review
 - Status: done

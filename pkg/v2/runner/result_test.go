@@ -20,7 +20,7 @@ func parseFixture(t *testing.T, platforms, severities []string, maxFindings int)
 	t.Helper()
 	file, err := os.Open(fixture)
 	require.NoError(t, err)
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	result, err := parseResult(file, platforms, severities, maxFindings)
 	require.NoError(t, err)
 	return result

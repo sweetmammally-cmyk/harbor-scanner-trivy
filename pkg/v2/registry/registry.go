@@ -192,7 +192,7 @@ func (c *Client) fetchOnce(ctx context.Context, method, requestURL string) (int,
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return 0, nil, nil, err

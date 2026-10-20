@@ -28,7 +28,7 @@ func TestDial_Direct(t *testing.T) {
 
 	conn, err := Dial(ctx, config.DBSource{Repository: "r"}, target)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	assertEcho(t, conn)
 }
 
@@ -42,7 +42,7 @@ func TestDial_HTTPProxy(t *testing.T) {
 
 		conn, err := Dial(ctx, source(t, "http://"+proxy.addr), target)
 		require.NoError(t, err)
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		assertEcho(t, conn)
 		assert.Equal(t, []string{target}, proxy.targets())
 	})
@@ -54,7 +54,7 @@ func TestDial_HTTPProxy(t *testing.T) {
 
 		conn, err := Dial(ctx, source(t, "http://user:s3cret@"+proxy.addr), target)
 		require.NoError(t, err)
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		assertEcho(t, conn)
 	})
 
@@ -80,7 +80,7 @@ func TestDial_SOCKS5(t *testing.T) {
 
 		conn, err := Dial(ctx, source(t, "socks5://"+proxy.addr), target)
 		require.NoError(t, err)
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		assertEcho(t, conn)
 		assert.Equal(t, []string{target}, proxy.targets())
 	})
@@ -92,7 +92,7 @@ func TestDial_SOCKS5(t *testing.T) {
 
 		conn, err := Dial(ctx, source(t, "socks5://user:s3cret@"+proxy.addr), target)
 		require.NoError(t, err)
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		assertEcho(t, conn)
 	})
 
@@ -185,7 +185,7 @@ func listen(t *testing.T, handle func(conn net.Conn)) string {
 				return
 			}
 			go func() {
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
 				handle(conn)
 			}()
 		}
@@ -232,7 +232,7 @@ func pipe(client net.Conn, target string) {
 	if err != nil {
 		return
 	}
-	defer upstream.Close()
+	defer func() { _ = upstream.Close() }()
 	go func() { _, _ = io.Copy(upstream, client) }()
 	_, _ = io.Copy(client, upstream)
 }
