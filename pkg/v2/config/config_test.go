@@ -28,6 +28,7 @@ func setEnabled(t *testing.T) {
 
 // defaultConfig is the config with no env vars set.
 var defaultConfig = Config{
+	WorkerCacheBackend:          "fs",
 	HealthQueueStuckAfter:       10 * time.Minute,
 	MaxInflight:                 32,
 	CacheDir:                    "/home/scanner/.cache/scanner-v2",
@@ -192,6 +193,13 @@ func TestGetConfig(t *testing.T) {
 			expectedError: "parsing SCANNER_DB_SOURCES: source 1: route must be direct, http://host:port or socks5://host:port",
 		},
 		{
+			name: "Should return error when the worker cache backend is unknown",
+			envs: Envs{
+				"SCANNER_V2_WORKER_CACHE_BACKEND": "redis",
+			},
+			expectedError: `SCANNER_V2_WORKER_CACHE_BACKEND must be "fs" or "memory"`,
+		},
+		{
 			name: "Should return error when SCANNER_JAVA_DB_SOURCES is invalid",
 			envs: Envs{
 				"SCANNER_JAVA_DB_SOURCES": "ghcr.io/aquasecurity/trivy-java-db:1",
@@ -205,6 +213,7 @@ func TestGetConfig(t *testing.T) {
 				"SCANNER_V2_AUTH_TOKEN":                  testToken,
 				"SCANNER_V2_MAX_INFLIGHT":                "8",
 				"SCANNER_V2_CACHE_DIR":                   "/data/v2",
+				"SCANNER_V2_WORKER_CACHE_BACKEND":        "memory",
 				"SCANNER_MONGO_URI":                      "mongodb://mongo:27017",
 				"SCANNER_INSTANCE_ID":                    "scanner-1",
 				"SCANNER_MONGO_DB":                       "scanner",
@@ -253,6 +262,7 @@ func TestGetConfig(t *testing.T) {
 				AuthToken:                   testToken,
 				MaxInflight:                 8,
 				CacheDir:                    "/data/v2",
+				WorkerCacheBackend:          "memory",
 				MongoURI:                    "mongodb://mongo:27017",
 				InstanceID:                  "scanner-1",
 				MongoDB:                     "scanner",

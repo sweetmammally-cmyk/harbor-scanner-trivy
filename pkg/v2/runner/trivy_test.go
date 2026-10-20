@@ -131,6 +131,29 @@ func TestRunTrivy_Success(t *testing.T) {
 	}, strings.Split(strings.TrimSpace(string(args)), "\n"), "no --severity, scan by digest")
 }
 
+func TestRunTrivy_MemoryCacheBackend(t *testing.T) {
+	r, _ := newTestRunner(t)
+	r.cfg.WorkerCacheBackend = config.CacheBackendMemory
+	t.Setenv("TRIVY_FAKE_MODE", "ok")
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("TRIVY_FAKE_ARGS_FILE", argsFile)
+
+	_, _, err := r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
+
+	require.NoError(t, err)
+	args, err := os.ReadFile(argsFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(args), "--cache-backend\nmemory\n")
+	assert.Contains(t, string(args), "--cache-dir\n"+filepath.Join(r.workDir, "worker-1")+"\n", "the DBs are still read from the worker directory")
+
+	r.cfg.WorkerCacheBackend = config.CacheBackendFS
+	_, _, err = r.runTrivy(context.Background(), slog.Default(), "worker-1", reference)
+	require.NoError(t, err)
+	args, err = os.ReadFile(argsFile)
+	require.NoError(t, err)
+	assert.NotContains(t, string(args), "--cache-backend", "fs is Trivy's default")
+}
+
 func TestRunTrivy_PlainHTTPRegistry(t *testing.T) {
 	r, _ := newTestRunner(t)
 	r.plainHTTP = true

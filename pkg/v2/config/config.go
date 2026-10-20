@@ -24,6 +24,9 @@ type Config struct {
 	// CacheDir holds the v2 DBs and the per-worker Trivy caches, apart from the
 	// Harbor adapter's SCANNER_TRIVY_CACHE_DIR.
 	CacheDir string `env:"SCANNER_V2_CACHE_DIR" envDefault:"/home/scanner/.cache/scanner-v2"`
+	// WorkerCacheBackend is Trivy's layer cache of the workers: "fs" (on disk,
+	// reused across scans) or "memory" (one scan only, nothing written to disk).
+	WorkerCacheBackend string `env:"SCANNER_V2_WORKER_CACHE_BACKEND" envDefault:"fs"`
 
 	// MongoURI may hold a password: never log it or put it in errors.
 	MongoURI string `env:"SCANNER_MONGO_URI"`
@@ -106,6 +109,12 @@ var scanPlatformPattern = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9_]+(/[a-z0-9]+)?
 // FallbackDBCheckInterval is used when SCANNER_DB_CHECK_INTERVAL is unset or invalid.
 const FallbackDBCheckInterval = 3 * time.Hour
 
+// The worker cache backends (Trivy --cache-backend).
+const (
+	CacheBackendFS     = "fs"
+	CacheBackendMemory = "memory"
+)
+
 // MinAuthTokenLength is the shortest SCANNER_V2_AUTH_TOKEN accepted.
 const MinAuthTokenLength = 32
 
@@ -176,6 +185,10 @@ func GetConfig() (Config, error) {
 	if cfg.DBStateRetention < 2*cfg.DBCheckInterval {
 		return cfg, fmt.Errorf("SCANNER_DB_STATE_RETENTION (%s) must be at least twice SCANNER_DB_CHECK_INTERVAL (%s)",
 			cfg.DBStateRetention, cfg.DBCheckInterval)
+	}
+
+	if cfg.WorkerCacheBackend != CacheBackendFS && cfg.WorkerCacheBackend != CacheBackendMemory {
+		return cfg, fmt.Errorf("SCANNER_V2_WORKER_CACHE_BACKEND must be %q or %q", CacheBackendFS, CacheBackendMemory)
 	}
 
 	if !scanPlatformPattern.MatchString(cfg.ScanPlatform) {

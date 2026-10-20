@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 (hardening and acceptance); Phases 9 and 10 done except the v1 component test run
-- Last completed task: P11-9
+- Last completed task: P11-10
 - In progress: P11-12 (measurements running), P11-8 (history scan done, report to the owner)
-- Next task: P11-10, P11-11, then P11-4 (README, compose)
+- Next task: P11-11, then P11-4 (README, compose)
 - Blockers / questions for the user: the v1 component tests wait for the owner to say the local `redis` container is renamed. Push decisions after the history scan are the owner's.
 - Last updated: 2026-10-20
 
@@ -208,6 +208,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-10  Worker cache backend fs|memory
+- Status: done
+- What changed: verified first with the Trivy 0.74.0 binary from `aquasec/trivy:0.74.0`: `trivy image --help` documents `--cache-backend` only with `fs` (default) and `redis://...`, but `--cache-backend memory` is accepted (the binary has a `memory` cache type; an unknown value such as `bogus` fails with "unable to initialize cache: unknown cache type"). A real scan of `alpine:3.20` with `memory` succeeded and wrote nothing under the cache directory but the DB symlink, while `fs` wrote `fanal/fanal.db`. Then `SCANNER_V2_WORKER_CACHE_BACKEND` (`fs` default, `memory`; anything else fails at startup) and `--cache-backend memory` in the Trivy arguments for `memory`; `--cache-dir` stays the worker directory, which holds the DB symlinks.
+- Files: `pkg/v2/config/{config,config_test}.go`, `pkg/v2/runner/{trivy,trivy_test}.go`
+- Tests run: `go test -short -race ./...` -> ok. Cases: the env value is read, an unknown backend fails; the arguments contain `--cache-backend memory` for memory and no `--cache-backend` for fs.
+- Decisions / surprises: the memory backend is undocumented in `--help` (labelled experimental for redis); it may change in a later Trivy version, so a Trivy upgrade must recheck it.
+- Next: P11-11
 
 ### 2026-10-20  P11-9  Per-scan temp directory
 - Status: done

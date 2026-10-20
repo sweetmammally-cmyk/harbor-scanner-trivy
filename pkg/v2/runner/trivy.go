@@ -183,6 +183,11 @@ func (r *Runner) exec(ctx context.Context, cacheDir, scanTmp, outputPath, refere
 	if r.plainHTTP {
 		args = append(args, "--insecure")
 	}
+	// Trivy's in-memory layer cache lives for this one process: nothing of it
+	// is written to disk. The DBs are still read from the cache directory.
+	if r.cfg.WorkerCacheBackend == config.CacheBackendMemory {
+		args = append(args, "--cache-backend", config.CacheBackendMemory)
+	}
 	args = append(args, reference)
 
 	cmd := exec.CommandContext(ctx, r.trivy, args...)
