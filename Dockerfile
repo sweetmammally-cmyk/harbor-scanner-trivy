@@ -34,6 +34,19 @@ RUN adduser -u 10000 -D -g '' scanner scanner
 # exists with the right owner so a new named volume inherits it.
 RUN mkdir -p /home/scanner/.cache/scanner-v2 && chown -R scanner:scanner /home/scanner/.cache
 
+# Seed DB for offline installs (v2, SCANNER_DB_SEED_DIR): the default image has
+# none. Build with --build-arg WITH_SEED_DB=true to bake the Trivy DB in;
+# SEED_DB_REPOSITORY picks where it is downloaded from (for example our mirror).
+ARG WITH_SEED_DB=false
+ARG SEED_DB_REPOSITORY=docker.io/aquasec/trivy-db:2
+RUN if [ "$WITH_SEED_DB" = "true" ]; then \
+      trivy image --download-db-only --no-progress --db-repository "$SEED_DB_REPOSITORY" --cache-dir /tmp/seed-cache && \
+      mkdir -p /home/scanner/seed/db && \
+      cp /tmp/seed-cache/db/trivy.db /tmp/seed-cache/db/metadata.json /home/scanner/seed/db/ && \
+      rm -rf /tmp/seed-cache && \
+      chown -R scanner:scanner /home/scanner/seed; \
+    fi
+
 COPY --from=builder /go/src/github.com/aquasecurity/harbor-scanner-trivy/scanner-trivy /home/scanner/bin/scanner-trivy
 
 ENV TRIVY_VERSION=${TRIVY_VERSION}

@@ -6,8 +6,8 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 11 done; Phase 12 (staging and integration) planned in PLAN and CHECKLIST, waiting for the owner's review
-- Last completed task: P11-3; open-item decisions recorded (DEMAND v0.22)
-- In progress: P11-14 (`WITH_SEED_DB` build argument)
+- Last completed task: P11-14; open-item decisions recorded (DEMAND v0.22)
+- In progress: none
 - Next task: P12-1 after the owner approves the Phase 12 plan
 - Blockers / questions for the user: the Phase 12 plan review (questions in the P12 checklist items); the owner pushes after reviewing `git log origin/main..main`
 - Last updated: 2026-10-20
@@ -225,6 +225,7 @@ Touched by this plan:
 - `pkg/trivy/wrapper_test.go`, `pkg/scan/transformer_test.go`, `test/integration/api/rest_api_test.go` (P0-6): test expectations for `vendor_attributes.Trivy` (owner chose KEEP). Test-only. (Correction: missing from this list until P5-1.)
 - `Dockerfile` (P11-4): creates `/home/scanner/.cache/scanner-v2` owned by `scanner`, so a new named volume inherits the owner. No `VOLUME` instruction (it would give v1-only users an anonymous volume); the seed DB setup is unchanged (owner).
 - `pkg/http/api/server.go` (P11-1): the serve goroutine called `os.Exit(1)` when `ListenAndServe` returned `http.ErrServerClosed`, the normal result of `Shutdown` (inverted condition). It now exits only for other errors. Without the fix SIGTERM killed the process as soon as the HTTP server closed: no shutdown grace, no lease release (v2), no clean stop of the v1 Redis worker. `pkg/http/api/server_test.go` (empty upstream) has the regression test.
+- `Dockerfile` (P11-14): build arguments `WITH_SEED_DB` (default false) and `SEED_DB_REPOSITORY` (default `docker.io/aquasec/trivy-db:2`); with `WITH_SEED_DB=true` the build downloads the Trivy DB with the image's Trivy into `/home/scanner/seed/db`.
 - `Makefile` (P11-7): `make setup` installs golangci-lint v2.15.0 instead of v1.21.0 (which cannot load Go 1.26 code).
 - `pkg/trivy/wrapper.go` (P10-5): the "FULL TRIVY REPORT" debug log (added in `0c87038`) is removed; the other debug logs of that commit stay. `pkg/trivy/wrapper_test.go` (P10-5): `TestWrapper_Scan` checks that the line is not logged.
 - `cmd/scanner-trivy/main.go` (P10-2): uses `service.Routes(v1)` instead of building the mux itself.
@@ -244,6 +245,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P11-14  Seed DB build option
+- Status: done
+- What changed: `Dockerfile`: `ARG WITH_SEED_DB=false`, `ARG SEED_DB_REPOSITORY=docker.io/aquasec/trivy-db:2`; with `WITH_SEED_DB=true` a build step runs `trivy image --download-db-only --db-repository "$SEED_DB_REPOSITORY"` into a temporary cache, copies `trivy.db` and `metadata.json` to `/home/scanner/seed/db` (the default `SCANNER_DB_SEED_DIR`), owned by `scanner`. The default image has no seed (owner). The Java DB is not baked in (one argument, as decided; it can be added the same way if needed). README section "Offline installs: seed DB" (the mirror address is passed at build time, never committed).
+- Files: `Dockerfile`, `docs/direct-scan/README.md`
+- Tests run: both builds -> ok. Default image: no `/home/scanner/seed`, 298 MB. Seeded image (DB from Docker Hub): `trivy.db` 1,637,724,160 bytes + `metadata.json`, owned by `scanner`, 2.07 GB. Offline check: the seeded image with v2 enabled and every source unreachable logged "installed seed DB", then "all DB sources failed, scanning with existing DB" with `db_present: true`; the DB in `SCANNER_V2_CACHE_DIR` is the seed.
+- Decisions / surprises: none.
+- Next: Phase 12 after the owner's review
 
 ### 2026-10-20  P11-3  One real Harbor scan through the v1 adapter
 - Status: done

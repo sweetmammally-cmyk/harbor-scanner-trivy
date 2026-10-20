@@ -111,6 +111,7 @@ Update this file after every task. Details: `PLAN.md`. Spec: `DEMAND.md`.
 - [x] P11-11 `SCANNER_V2_WORKER_CACHE_MAX` (default 5GB per worker, fs only): clear the worker's own layer cache between scans when larger; test with a fake size function
 - [x] P11-12 Measure DB sizes (fresh download, Trivy DB and Java DB) and, for both cache backends on a large real image: peak temp usage, peak Trivy RSS, scan time, second scan of an image sharing base layers; record in PROGRESS; README sizing from them
 - [x] P11-13 Failure class `stream_reset` for an HTTP/2 stream reset during a DB download (logs, db_checks, failure metric); recommended source order: our mirror first, Docker Hub as fallback, no ghcr.io
+- [x] P11-14 Dockerfile build argument `WITH_SEED_DB` (default false) bakes the Trivy DB seed in for offline installs; README
 
 ## Phase 12: Staging and integration (planning only; waits for the owner's review)
 - [ ] P12-1 Staging compose deployment from the README: 2 replicas with explicit `SCANNER_INSTANCE_ID`, MongoDB 7 with auth, `nofile` 64000 and a persistent volume, Redis, `SCANNER_V2_CACHE_DIR` on a local SSD volume, internal mirror first (`allow-http1`) and Docker Hub as fallback, `dns:`, 0600 `.env` on the host, healthchecks and `stop_grace_period`; check readiness, both DB installs, a scan, a hit, health and the metrics scrape; record the steps that differ from the README and fix the README

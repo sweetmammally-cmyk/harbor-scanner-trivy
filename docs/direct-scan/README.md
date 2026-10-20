@@ -19,6 +19,16 @@ This fork adds a direct scan API (`/api/v2`) next to the Harbor adapter (`/api/v
 - MongoDB write and read concern are set in `SCANNER_MONGO_URI` (for example `w=majority&readConcernLevel=majority`). The scanner uses no multi-document transactions. MongoDB 4.2 or newer is required; the examples use 7. Give MongoDB a high open-file limit (`nofile` 64000), a persistent volume and authentication.
 - `/metrics` (Prometheus) is served on the same port without authentication. Keep that port internal.
 
+## Offline installs: seed DB
+
+The default image has no seed DB: a new replica is not ready until its first DB download succeeds. For an install that cannot reach any DB source at first start, build the image with the Trivy DB baked in:
+
+```
+docker build --build-arg WITH_SEED_DB=true --build-arg SEED_DB_REPOSITORY=<our mirror>/aquasecurity/trivy-db:2 -t harbor-scanner-trivy:v2-seed .
+```
+
+`SEED_DB_REPOSITORY` defaults to `docker.io/aquasec/trivy-db:2`. The build downloads the DB with the image's own Trivy into `/home/scanner/seed/db` (`SCANNER_DB_SEED_DIR`); the image grows by about 1.5 GiB (2.07 GB instead of 298 MB). At startup, when no DB is installed yet, the service installs the seed and is ready; the first update from a source then replaces it, since the seed has no manifest digest. The seed is only as fresh as the image build. The Java DB is not baked in.
+
 ## Memory and disk
 
 - `SCANNER_V2_CACHE_DIR` (default `/home/scanner/.cache/scanner-v2`) holds the v2 Trivy DB and Java DB (version directories), the workers' Trivy layer caches and one temp directory per running scan. Put it on a persistent local SSD volume, not on network storage. Do not use tmpfs: the DB stays on disk, and the operating system's page cache keeps it in RAM whenever the machine has free memory, so extra RAM speeds scans up without any setting.
