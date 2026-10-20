@@ -24,8 +24,12 @@ $(BINARY): $(SOURCES)
 docker-build: build
 	docker build --no-cache -t $(IMAGE) .
 
+# LINT_BASE is the upstream commit this fork is based on: lint reports only
+# issues on lines changed since then (upstream's own findings stay upstream's).
+LINT_BASE ?= 2691434
+
 lint:
-	./bin/golangci-lint --build-tags component,integration run -v
+	./bin/golangci-lint --build-tags component,integration run -v --new-from-rev=$(LINT_BASE)
 
 setup:
 	curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s v2.15.0

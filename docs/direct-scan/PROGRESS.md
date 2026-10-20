@@ -6,9 +6,9 @@ Newest changelog entries go at the top of the Changelog.
 ## Current state
 
 - Phase: 12 (staging and integration)
-- Last completed task: P11-14
-- In progress: P12-5
-- Next task: P12-3, P12-2, P12-6, P12-1, P12-4 (report after each)
+- Last completed task: P12-5
+- In progress: none
+- Next task: P12-3, then P12-2, P12-6, P12-1, P12-4 (report after each)
 - Blockers / questions for the user: none
 - Last updated: 2026-10-20
 
@@ -205,7 +205,8 @@ Merge summary (P11-6, checked against `git diff --name-only 2691434 HEAD` on 202
 | `cmd/scanner-trivy/main.go` | reads the v2 config; when enabled, starts `pkg/v2/service`, wraps the v1 handler with `service.Routes`, stops it around the HTTP server's shutdown | about 20 lines; keep the v1 path unchanged |
 | `Dockerfile` | `GOPROXY`/`GOSUMDB` (pre-plan), `/home/scanner/.cache/scanner-v2` owned by `scanner` | Trivy version stays the single `TRIVY_VERSION` pin (0.74.0); a Trivy upgrade must recheck the `memory` cache backend and the error texts the runner classifies |
 | `Dockerfile.dev` | `GOPROXY`/`GOSUMDB` (pre-plan) | |
-| `Makefile` | golangci-lint v2.15.0 in `make setup` | |
+| `Makefile` | golangci-lint v2.15.0 in `make setup`; `make lint --new-from-rev=$(LINT_BASE)` | after a merge, move `LINT_BASE` to the new upstream commit |
+| `.github/workflows/build.yml` | every push, full history | |
 | `pkg/http/api/server.go`, `pkg/http/api/server_test.go` | fixed inverted `ErrServerClosed` check that exited the process on every shutdown | an upstream bug; consider sending the fix upstream |
 | `go.mod`, `go.sum` | MongoDB driver v2.9.1 and the indirect bumps it needs | re-run `go mod tidy` after merging |
 | `pkg/trivy/model.go`, `pkg/trivy/wrapper.go`, `pkg/scan/transformer.go` | pre-plan: result Target/Type on vulnerabilities, `vendor_attributes.Trivy` (KEEP); debug INFO logs per result and vulnerability; FULL TRIVY REPORT log removed (P10-5) | v1 behaviour otherwise upstream's |
@@ -227,6 +228,7 @@ Touched by this plan:
 - `Dockerfile` (P11-4): creates `/home/scanner/.cache/scanner-v2` owned by `scanner`, so a new named volume inherits the owner. No `VOLUME` instruction (it would give v1-only users an anonymous volume); the seed DB setup is unchanged (owner).
 - `pkg/http/api/server.go` (P11-1): the serve goroutine called `os.Exit(1)` when `ListenAndServe` returned `http.ErrServerClosed`, the normal result of `Shutdown` (inverted condition). It now exits only for other errors. Without the fix SIGTERM killed the process as soon as the HTTP server closed: no shutdown grace, no lease release (v2), no clean stop of the v1 Redis worker. `pkg/http/api/server_test.go` (empty upstream) has the regression test.
 - `Dockerfile` (P11-14): build arguments `WITH_SEED_DB` (default false) and `SEED_DB_REPOSITORY` (default `docker.io/aquasec/trivy-db:2`); with `WITH_SEED_DB=true` the build downloads the Trivy DB with the image's Trivy into `/home/scanner/seed/db`.
+- `.github/workflows/build.yml` (P12-5): runs on pushes to every branch (was main only) and checks out the full history (`fetch-depth: 0`) for the lint comparison; all steps unchanged. `Makefile` (P12-5): `make lint` reports only issues on lines changed since `LINT_BASE` (default `2691434`, the upstream base).
 - `Makefile` (P11-7): `make setup` installs golangci-lint v2.15.0 instead of v1.21.0 (which cannot load Go 1.26 code).
 - `pkg/trivy/wrapper.go` (P10-5): the "FULL TRIVY REPORT" debug log (added in `0c87038`) is removed; the other debug logs of that commit stay. `pkg/trivy/wrapper_test.go` (P10-5): `TestWrapper_Scan` checks that the line is not logged.
 - `cmd/scanner-trivy/main.go` (P10-2): uses `service.Routes(v1)` instead of building the mux itself.
@@ -246,6 +248,14 @@ Touched by this plan:
 - Decisions / surprises: ...
 - Next: <next task ID>
 ```
+
+### 2026-10-20  P12-5  CI for the fork
+- Status: done (verified locally; the first run on GitHub happens with the owner's next push)
+- What changed: the upstream workflow `.github/workflows/build.yml` already runs yaml-lint, `make setup`, `make lint`, `make test` (unit, `-race`), `make test-integration`, `make test-component` and a goreleaser snapshot. It now runs on every push to any branch (and pull requests, as before) and checks out the full history. `make lint` uses `--new-from-rev=$(LINT_BASE)` with `LINT_BASE ?= 2691434`: the whole repository is linted, but only issues on lines this fork changed are reported, so upstream's 13 old findings stay upstream's and anything new fails the build.
+- Files: `.github/workflows/build.yml`, `Makefile`
+- Tests run: `actionlint` 1.7.7 (release binary, checksum checked) on the workflow -> ok; `yamllint .` -> ok (warnings only: `skaffold.yaml` upstream, the compose example's missing `---`, fixed in P12-1); `make lint` -> 0 issues; `make test` -> ok; `make test-integration` -> ok (api, apiv2, persistence/redis, queue, store).
+- Decisions / surprises: lint scope is the owner-approved recommendation (lines changed since the upstream base). Not verifiable before a push: GitHub runners reaching the Dockerfile's `GOPROXY` (a regional package mirror) during `make test-component`, and the old goreleaser v1.9.2 snapshot step with Go 1.26; if either fails on GitHub, the unit and integration steps before them still run and show their result.
+- Next: P12-3
 
 ### 2026-10-20  P11-14  Seed DB build option
 - Status: done
